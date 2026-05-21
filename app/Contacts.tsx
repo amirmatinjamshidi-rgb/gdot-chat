@@ -1,9 +1,11 @@
 import React from "react";
-import { StyleSheet, FlatList, Pressable, View } from "react-native";
-import { Stack } from "expo-router";
+import { StyleSheet, FlatList, View } from "react-native";
+import { Stack, useRouter } from "expo-router";
+import Animated, { FadeInLeft } from "react-native-reanimated";
 
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
+import { ScalePressable } from "@/components/ui/scale-pressable";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 
 const MOCK_CONTACTS = [
@@ -16,25 +18,36 @@ const MOCK_CONTACTS = [
 export default function ContactsScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const isDark = colorScheme === 'dark';
+  const router = useRouter();
 
   return (
     <ThemedView style={styles.container}>
       <Stack.Screen options={{ title: 'Contacts' }} />
       <FlatList
+        style={styles.list}
         data={MOCK_CONTACTS}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <Pressable style={styles.contactItem}>
-            <View style={[styles.avatar, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]}>
-              <ThemedText>{item.name[0]}</ThemedText>
-            </View>
-            <View>
-              <ThemedText type="defaultSemiBold">{item.name}</ThemedText>
-              <ThemedText style={[styles.statusText, { color: item.status === 'Online' ? '#10B981' : '#6B7280' }]}>
-                {item.status}
-              </ThemedText>
-            </View>
-          </Pressable>
+        renderItem={({ item, index }) => (
+          <Animated.View entering={FadeInLeft.delay(Math.min(index, 10) * 40).springify()}>
+            <ScalePressable
+              style={styles.contactItem}
+              onPress={() =>
+                router.push({
+                  pathname: '/ChatRoom',
+                  params: { id: item.id, name: item.name },
+                })
+              }>
+              <View style={[styles.avatar, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]}>
+                <ThemedText>{item.name[0]}</ThemedText>
+              </View>
+              <View>
+                <ThemedText type="defaultSemiBold">{item.name}</ThemedText>
+                <ThemedText style={[styles.statusText, { color: item.status === 'Online' ? '#10B981' : '#6B7280' }]}>
+                  {item.status}
+                </ThemedText>
+              </View>
+            </ScalePressable>
+          </Animated.View>
         )}
         ItemSeparatorComponent={() => (
           <View style={[styles.separator, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]} />
@@ -46,6 +59,9 @@ export default function ContactsScreen() {
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+  },
+  list: {
     flex: 1,
   },
   contactItem: {
