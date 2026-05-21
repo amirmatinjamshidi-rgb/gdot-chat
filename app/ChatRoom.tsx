@@ -1,3 +1,4 @@
+import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { Audio, ResizeMode, Video } from "expo-av";
 import * as Haptics from "expo-haptics";
 import { Stack, useLocalSearchParams } from "expo-router";
@@ -12,21 +13,25 @@ import {
   FlatList,
   KeyboardAvoidingView,
   LayoutChangeEvent,
+  Modal,
+  PanResponder,
   Platform,
   Pressable,
   StyleSheet,
+  Text,
   TextInput,
   View,
 } from "react-native";
 import Animated, {
   cancelAnimation,
+  FadeInUp,
   interpolate,
   useAnimatedStyle,
   useSharedValue,
-  withRepeat,
   withSequence,
   withSpring,
   withTiming,
+  ZoomIn,
 } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -44,6 +49,7 @@ const LIME = "#C4F542";
 const MIN_RECORD_MS = 1000;
 const HOLD_MS = 320;
 const TAP_MAX_MS = 260;
+const SWIPE_LOCK_PX = 56;
 
 type ComposerMode = "send" | "voice" | "video";
 
@@ -179,11 +185,16 @@ export default function ChatRoomScreen() {
   const [composerMode, setComposerMode] = useState<ComposerMode>("send");
   const [composerError, setComposerError] = useState<string | null>(null);
   const [videoSessionActive, setVideoSessionActive] = useState(false);
+  const [voicePanelOpen, setVoicePanelOpen] = useState(false);
+  const [voiceLocked, setVoiceLocked] = useState(false);
+  const [videoLocked, setVideoLocked] = useState(false);
+  const [videoRecordingActive, setVideoRecordingActive] = useState(false);
   const [inputFocused, setInputFocused] = useState(false);
   const listRef = useRef<FlatList<MessageRow>>(null);
   const inputRef = useRef<TextInput>(null);
   const shellW = useSharedValue(260);
   const sweep = useSharedValue(0);
+  const neonVisible = useSharedValue(0);
 
   const colorScheme = useColorScheme() ?? "light";
   const isDark = colorScheme === "dark";
@@ -197,13 +208,28 @@ export default function ChatRoomScreen() {
   }, []);
 
   useEffect(() => {
-    if (inputFocused) {
-      sweep.value = withRepeat(withTiming(1, { duration: 1500 }), -1, false);
-    } else {
+    if (!inputFocused) {
       cancelAnimation(sweep);
+      cancelAnimation(neonVisible);
       sweep.value = 0;
+      neonVisible.value = 0;
+      return;
     }
-  }, [inputFocused, sweep]);
+    // Show the bar, then do two fast passes and fade it out completely.
+    neonVisible.value = 1;
+    sweep.value = 0;
+    sweep.value = withSequence(
+      withTiming(1, { duration: 525 }),
+      withTiming(0, { duration: 0 }),
+      withTiming(1, { duration: 350 }),
+      withTiming(0, { duration: 50 }, (finished) => {
+        "worklet";
+        if (finished) {
+          neonVisible.value = withTiming(0, { duration: 180 });
+        }
+      }),
+    );
+  }, [inputFocused, sweep, neonVisible]);
 
   const neonBarStyle = useAnimatedStyle(() => {
     const barW = Math.max(28, shellW.value * 0.34);
@@ -214,6 +240,7 @@ export default function ChatRoomScreen() {
       height: 3,
       width: barW,
       borderRadius: 2,
+      opacity: neonVisible.value,
       backgroundColor: "#5cf9e8",
       shadowColor: "#39f6ff",
       shadowOpacity: 0.9,
@@ -225,18 +252,37 @@ export default function ChatRoomScreen() {
           translateX: interpolate(
             sweep.value,
             [0, 1],
-            [-barW * 0.25, Math.max(0, shellW.value - barW * 0.75)],
+            [-barW, Math.max(0, shellW.value)],
           ),
         },
       ],
     };
   });
 
-  const onInputShellLayout = useCallback((e: LayoutChangeEvent) => {
-    shellW.value = e.nativeEvent.layout.width;
-  }, [shellW]);
+  const onInputShellLayout = useCallback(
+    (e: LayoutChangeEvent) => {
+      shellW.value = e.nativeEvent.layout.width;
+    },
+    [shellW],
+  );
 
   const videoRef = useRef<VideoMessageHandle>(null);
+  const videoRecordingActiveRef = useRef(false);
+  const voiceLockedRef = useRef(false);
+
+  useEffect(() => {
+    videoRecordingActiveRef.current = videoRecordingActive;
+  }, [videoRecordingActive]);
+
+  useEffect(() => {
+    voiceLockedRef.current = voiceLocked;
+  }, [voiceLocked]);
+
+  const videoLockedRef = useRef(false);
+  useEffect(() => {
+    videoLockedRef.current = videoLocked;
+  }, [videoLocked]);
+
   const recordingRef = useRef<Audio.Recording | null>(null);
   const voiceRecordStartedAt = useRef(0);
   const videoRecordStartedAt = useRef(0);
@@ -323,8 +369,8 @@ export default function ChatRoomScreen() {
   const finishVoiceCapture = useCallback(async () => {
     const rec = recordingRef.current;
     recordingRef.current = null;
-    if (!rec) return;
     try {
+      if (!rec) return;
       await rec.stopAndUnloadAsync();
       const uri = rec.getURI();
       const st = await rec.getStatusAsync();
@@ -350,8 +396,25 @@ export default function ChatRoomScreen() {
       }
     } catch {
       setComposerError("Could not save the voice message.");
+    } finally {
+      setVoicePanelOpen(false);
+      setVoiceLocked(false);
     }
   }, [appendMessage]);
+
+  const discardVoiceRecording = useCallback(async () => {
+    const rec = recordingRef.current;
+    recordingRef.current = null;
+    if (rec) {
+      try {
+        await rec.stopAndUnloadAsync();
+      } catch {
+        /* noop */
+      }
+    }
+    setVoicePanelOpen(false);
+    setVoiceLocked(false);
+  }, []);
 
   const startVoiceRecording = useCallback(async () => {
     if (Platform.OS === "web") {
@@ -374,10 +437,15 @@ export default function ChatRoomScreen() {
     await recording.startAsync();
     recordingRef.current = recording;
     voiceRecordStartedAt.current = Date.now();
+    setVoiceLocked(false);
+    setVoicePanelOpen(true);
   }, []);
 
   const finishVideoCapture = useCallback(async () => {
     setVideoSessionActive(false);
+    setVideoLocked(false);
+    setVideoRecordingActive(false);
+    videoRecordingActiveRef.current = false;
     try {
       const file = await videoRef.current?.stopRecording();
       const dur = Date.now() - videoRecordStartedAt.current;
@@ -398,12 +466,25 @@ export default function ChatRoomScreen() {
     }
   }, [appendMessage]);
 
-  const startVideoRecording = useCallback(async () => {
+  const discardVideoRecording = useCallback(async () => {
+    try {
+      await videoRef.current?.stopRecording();
+    } catch {
+      /* noop */
+    }
+    setVideoSessionActive(false);
+    setVideoLocked(false);
+    setVideoRecordingActive(false);
+    videoRecordingActiveRef.current = false;
+  }, []);
+
+  const startVideoRecording = useCallback(async (): Promise<boolean> => {
     if (Platform.OS === "web") {
       setComposerError("Video messages are not available on web.");
-      return;
+      return false;
     }
     setVideoSessionActive(true);
+    setVideoLocked(false);
     await new Promise((r) => setTimeout(r, 160));
     try {
       const ok = await videoRef.current?.ensurePermissions();
@@ -412,15 +493,54 @@ export default function ChatRoomScreen() {
         setComposerError(
           "Camera and microphone permission are required for video messages.",
         );
-        return;
+        return false;
       }
       await videoRef.current?.startRecording();
       videoRecordStartedAt.current = Date.now();
+      return true;
     } catch {
       setVideoSessionActive(false);
       setComposerError("Could not start the camera.");
+      return false;
     }
   }, []);
+
+  const [voiceHudTick, setVoiceHudTick] = useState(0);
+
+  useEffect(() => {
+    if (!voicePanelOpen) return;
+    const id = setInterval(() => setVoiceHudTick((n) => n + 1), 220);
+    return () => clearInterval(id);
+  }, [voicePanelOpen]);
+
+  const lockVoiceFromSwipe = useCallback(() => {
+    setVoiceLocked((cur) => {
+      if (cur) return cur;
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      return true;
+    });
+  }, []);
+
+  const onVideoSwipeLock = useCallback(() => {
+    setVideoLocked((cur) => {
+      if (cur) return cur;
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      return true;
+    });
+  }, []);
+
+  const voicePanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderMove: (_, g) => {
+          if (g.dy < -SWIPE_LOCK_PX) {
+            lockVoiceFromSwipe();
+          }
+        },
+      }),
+    [lockVoiceFromSwipe],
+  );
 
   const onComposerPressIn = useCallback(() => {
     if (Platform.OS === "web") return;
@@ -437,8 +557,12 @@ export default function ChatRoomScreen() {
           await startVoiceRecording();
           recordingLiveRef.current = true;
         } else if (mode === "video") {
-          await startVideoRecording();
-          recordingLiveRef.current = true;
+          const ok = await startVideoRecording();
+          if (ok) {
+            recordingLiveRef.current = true;
+            setVideoRecordingActive(true);
+            videoRecordingActiveRef.current = true;
+          }
         }
       } catch {
         holdArmedRef.current = false;
@@ -451,18 +575,32 @@ export default function ChatRoomScreen() {
 
   const onComposerPressOut = useCallback(async () => {
     clearHoldTimer();
-    const down = pressDownAt.current;
-    const elapsed = Date.now() - down;
+    const elapsed = Date.now() - pressDownAt.current;
     const mode = composerModeRef.current;
 
-    if (recordingLiveRef.current) {
-      recordingLiveRef.current = false;
-      holdArmedRef.current = false;
-      if (mode === "voice") {
-        await finishVoiceCapture();
-      } else if (mode === "video") {
-        await finishVideoCapture();
+    if (mode === "voice" && recordingRef.current) {
+      if (voiceLockedRef.current) {
+        holdArmedRef.current = false;
+        return;
       }
+      holdArmedRef.current = false;
+      recordingLiveRef.current = false;
+      await finishVoiceCapture();
+      return;
+    }
+
+    if (
+      mode === "video" &&
+      videoSessionActive &&
+      videoRecordingActiveRef.current
+    ) {
+      if (videoLockedRef.current) {
+        holdArmedRef.current = false;
+        return;
+      }
+      holdArmedRef.current = false;
+      recordingLiveRef.current = false;
+      await finishVideoCapture();
       return;
     }
 
@@ -493,7 +631,12 @@ export default function ChatRoomScreen() {
         setComposerMode("send");
       }
     }
-  }, [clearHoldTimer, finishVoiceCapture, finishVideoCapture]);
+  }, [
+    clearHoldTimer,
+    finishVoiceCapture,
+    finishVideoCapture,
+    videoSessionActive,
+  ]);
 
   const isSendOnly = message.trim().length > 0;
 
@@ -505,7 +648,90 @@ export default function ChatRoomScreen() {
         />
 
         {Platform.OS !== "web" ? (
-          <VideoMessage ref={videoRef} active={videoSessionActive} />
+          <VideoMessage
+            ref={videoRef}
+            active={videoSessionActive}
+            locked={videoLocked}
+            onSwipeToLock={onVideoSwipeLock}
+            onCancel={() => void discardVideoRecording()}
+            onSend={() => void finishVideoCapture()}
+          />
+        ) : null}
+
+        {Platform.OS !== "web" && voicePanelOpen ? (
+          <Modal visible transparent animationType="fade">
+            {!voiceLocked ? (
+              <View
+                style={styles.voiceHudRoot}
+                {...voicePanResponder.panHandlers}
+              >
+                <Animated.View
+                  entering={FadeInUp.springify()}
+                  style={styles.voiceHudPanel}
+                >
+                  <Pressable
+                    style={styles.voiceRoundDest}
+                    onPress={() => void discardVoiceRecording()}
+                    accessibilityLabel="Cancel voice recording"
+                  >
+                    <MaterialIcons name="delete" size={26} color="#fff" />
+                  </Pressable>
+                  <View style={styles.voiceCenter}>
+                    <Text style={styles.voiceTimer}>
+                      {formatDuration(
+                        Date.now() -
+                          voiceRecordStartedAt.current +
+                          voiceHudTick * 0,
+                      )}
+                    </Text>
+                    <View style={styles.voiceHintRow}>
+                      <MaterialIcons name="north" size={16} color="#6ee7b7" />
+                      <Text style={styles.voiceHint}>Swipe up to lock</Text>
+                    </View>
+                  </View>
+                  <View style={styles.voiceRoundPlaceholder} />
+                </Animated.View>
+              </View>
+            ) : (
+              <View style={styles.voiceHudRoot}>
+                <Animated.View
+                  entering={FadeInUp.springify()}
+                  style={styles.voiceHudPanel}
+                >
+                  <Pressable
+                    style={styles.voiceRoundDest}
+                    onPress={() => void discardVoiceRecording()}
+                    accessibilityLabel="Cancel voice recording"
+                  >
+                    <MaterialIcons name="delete" size={26} color="#fff" />
+                  </Pressable>
+                  <View style={styles.voiceCenter}>
+                    <Text style={styles.voiceTimer}>
+                      {formatDuration(
+                        Date.now() -
+                          voiceRecordStartedAt.current +
+                          voiceHudTick * 0,
+                      )}
+                    </Text>
+                    <Animated.View
+                      entering={ZoomIn.springify()}
+                      style={styles.voiceLockedRow}
+                    >
+                      <MaterialIcons name="lock" size={20} color="#c4f542" />
+                      <Text style={styles.voiceLockedLabel}>Locked</Text>
+                    </Animated.View>
+                  </View>
+                  <Pressable
+                    style={styles.voiceRoundSend}
+                    onPress={() => void finishVoiceCapture()}
+                    accessibilityLabel="Send voice message"
+                  >
+                    <MaterialIcons name="send" size={24} color="#0f172a" />
+                  </Pressable>
+                </Animated.View>
+              </View>
+            )}
+          </Modal>
         ) : null}
 
         <FlatList
@@ -533,14 +759,13 @@ export default function ChatRoomScreen() {
                 : isDark
                   ? "white"
                   : "black";
-            const timeColor =
-              isMyVideo
-                ? isDark
-                  ? "rgba(148,163,184,0.95)"
-                  : "rgba(71,85,105,0.9)"
-                : item.sender === "me"
-                  ? "rgba(255,255,255,0.7)"
-                  : "rgba(0,0,0,0.5)";
+            const timeColor = isMyVideo
+              ? isDark
+                ? "rgba(148,163,184,0.95)"
+                : "rgba(71,85,105,0.9)"
+              : item.sender === "me"
+                ? "rgba(255,255,255,0.7)"
+                : "rgba(0,0,0,0.5)";
 
             return (
               <View
@@ -566,7 +791,9 @@ export default function ChatRoomScreen() {
                   </View>
                 ) : null}
                 {item.kind !== "video" ? (
-                  <ThemedText style={{ color: primaryColor }}>{item.text}</ThemedText>
+                  <ThemedText style={{ color: primaryColor }}>
+                    {item.text}
+                  </ThemedText>
                 ) : (
                   <ThemedText style={[styles.videoLabel, { color: timeColor }]}>
                     Video message
@@ -605,10 +832,7 @@ export default function ChatRoomScreen() {
                 onLayout={onInputShellLayout}
               >
                 {inputFocused ? (
-                  <View
-                    pointerEvents="none"
-                    style={styles.neonClip}
-                  >
+                  <View pointerEvents="auto" style={styles.neonClip}>
                     <Animated.View style={neonBarStyle} />
                   </View>
                 ) : null}
@@ -726,6 +950,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     overflow: "hidden",
     zIndex: 1,
+    pointerEvents: "box-none",
   },
   input: {
     borderRadius: 20,
@@ -740,6 +965,76 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: 0,
     bottom: 2,
+  },
+  voiceHudRoot: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0,0,0,0.38)",
+  },
+  voiceHudPanel: {
+    marginHorizontal: 12,
+    marginBottom: 24,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderRadius: 28,
+    backgroundColor: "rgba(15,23,42,0.92)",
+    borderWidth: 1,
+    borderColor: "rgba(196,245,66,0.25)",
+  },
+  voiceRoundDest: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "rgba(239,68,68,0.92)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  voiceRoundSend: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "#c4f542",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  voiceRoundPlaceholder: {
+    width: 52,
+    height: 52,
+  },
+  voiceCenter: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+  },
+  voiceTimer: {
+    color: "#f1f5f9",
+    fontSize: 20,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "700",
+  },
+  voiceHintRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  voiceHint: {
+    color: "#a7f3d0",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  voiceLockedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  voiceLockedLabel: {
+    color: "#c4f542",
+    fontSize: 13,
+    fontWeight: "700",
   },
   actionFab: {
     backgroundColor: LIME,

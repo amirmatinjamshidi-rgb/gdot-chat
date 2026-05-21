@@ -6,8 +6,16 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { ActivityIndicator, Modal, StyleSheet } from "react-native";
-import Animated, { FadeIn, ZoomIn } from "react-native-reanimated";
+import {
+  ActivityIndicator,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+} from "react-native";
+import MaterialIcons from "@expo/vector-icons/MaterialIcons";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Animated, { FadeIn, FadeInUp, ZoomIn, runOnJS } from "react-native-reanimated";
 import {
   CameraView,
   useCameraPermissions,
@@ -15,29 +23,30 @@ import {
 } from "expo-camera";
 
 const CIRCLE = 220;
+const SWIPE_LOCK_PX = 56;
 
 export type VideoMessageHandle = {
-  /** Requests camera + microphone once; returns whether both are granted. */
   ensurePermissions: () => Promise<boolean>;
-  /** Starts a circular video-note recording (call after camera is active). */
   startRecording: () => Promise<void>;
-  /** Stops recording and resolves when the file is ready. */
   stopRecording: () => Promise<{ uri: string } | null>;
 };
 
 type VideoMessageProps = {
-  /** When true, shows the Telegram-style circular preview while recording. */
   active: boolean;
+  /** After swipe-up, show send / delete like Telegram. */
+  locked: boolean;
+  onSwipeToLock: () => void;
+  onCancel: () => void;
+  onSend: () => void;
 };
 
 type CameraViewRef = InstanceType<typeof CameraView>;
 
-/**
- * Circular (video note) camera session using expo-camera.
- * Permissions are requested the first time {@link VideoMessageHandle.ensurePermissions} runs.
- */
 export const VideoMessage = forwardRef<VideoMessageHandle, VideoMessageProps>(
-  function VideoMessage({ active }, ref) {
+  function VideoMessage(
+    { active, locked, onSwipeToLock, onCancel, onSend },
+    ref,
+  ) {
     const cameraRef = useRef<CameraViewRef>(null);
     const [cameraPermission, requestCameraPermission] = useCameraPermissions();
     const [micPermission, requestMicPermission] = useMicrophonePermissions();
@@ -45,14 +54,20 @@ export const VideoMessage = forwardRef<VideoMessageHandle, VideoMessageProps>(
     const [cameraReady, setCameraReady] = useState(false);
     const recordingPromiseRef = useRef<Promise<{ uri: string } | undefined> | null>(null);
     const readyResolverRef = useRef<(() => void) | null>(null);
+    const lockTriggeredRef = useRef(false);
 
     useEffect(() => {
       if (!active) {
         setCameraReady(false);
         readyResolverRef.current?.();
         readyResolverRef.current = null;
+        lockTriggeredRef.current = false;
       }
     }, [active]);
+
+    useEffect(() => {
+      if (!locked) lockTriggeredRef.current = false;
+    }, [locked]);
 
     const waitForCameraReady = useCallback(() => {
       if (cameraReady) return Promise.resolve();
@@ -116,24 +131,77 @@ export const VideoMessage = forwardRef<VideoMessageHandle, VideoMessageProps>(
       readyResolverRef.current?.();
     }, []);
 
+    const tryLock = useCallback(() => {
+      if (lockTriggeredRef.current) return;
+      lockTriggeredRef.current = true;
+      onSwipeToLock();
+    }, [onSwipeToLock]);
+
+    const panGesture = Gesture.Pan()
+      .enabled(active && !locked)
+      .onUpdate((e) => {
+        "worklet";
+        if (e.translationY < -SWIPE_LOCK_PX) {
+          runOnJS(tryLock)();
+        }
+      });
+
     return (
       <Modal visible={active} transparent animationType="none">
         {active ? (
-          <Animated.View entering={FadeIn.duration(200)} style={styles.backdrop}>
-            <Animated.View entering={ZoomIn.springify()} style={styles.ring}>
-              {!cameraReady ? (
-                <ActivityIndicator color="#fff" style={StyleSheet.absoluteFill} />
+          <GestureDetector gesture={panGesture}>
+            <Animated.View
+              entering={FadeIn.duration(200)}
+              style={styles.backdrop}
+            >
+              <Animated.View entering={ZoomIn.springify()} style={styles.ring}>
+                {!cameraReady ? (
+                  <ActivityIndicator color="#fff" style={StyleSheet.absoluteFill} />
+                ) : null}
+                <CameraView
+                  ref={cameraRef}
+                  style={styles.camera}
+                  facing="front"
+                  mode="video"
+                  mirror
+                  onCameraReady={onCameraReady}
+                />
+              </Animated.View>
+
+              {!locked ? (
+                <Animated.View
+                  entering={FadeInUp.delay(80).springify()}
+                  style={styles.hintPill}
+                >
+                  <MaterialIcons name="north" size={18} color="#a7f3d0" />
+                  <Text style={styles.hintText}>Swipe up to lock</Text>
+                </Animated.View>
               ) : null}
-              <CameraView
-                ref={cameraRef}
-                style={styles.camera}
-                facing="front"
-                mode="video"
-                mirror
-                onCameraReady={onCameraReady}
-              />
+
+              {locked ? (
+                <Animated.View
+                  entering={FadeInUp.springify()}
+                  style={styles.lockedBar}
+                >
+                  <Pressable
+                    style={styles.roundBtn}
+                    onPress={onCancel}
+                    accessibilityLabel="Delete video message"
+                  >
+                    <MaterialIcons name="delete" size={26} color="#fff" />
+                  </Pressable>
+                  <MaterialIcons name="lock" size={22} color="#c4f542" />
+                  <Pressable
+                    style={[styles.roundBtn, styles.sendBtn]}
+                    onPress={onSend}
+                    accessibilityLabel="Send video message"
+                  >
+                    <MaterialIcons name="send" size={24} color="#0f172a" />
+                  </Pressable>
+                </Animated.View>
+              ) : null}
             </Animated.View>
-          </Animated.View>
+          </GestureDetector>
         ) : null}
       </Modal>
     );
@@ -159,5 +227,47 @@ const styles = StyleSheet.create({
   camera: {
     width: CIRCLE,
     height: CIRCLE,
+  },
+  hintPill: {
+    position: "absolute",
+    bottom: "22%",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: "rgba(15,23,42,0.72)",
+  },
+  hintText: {
+    color: "#ecfdf5",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  lockedBar: {
+    position: "absolute",
+    bottom: 48,
+    left: 24,
+    right: 24,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 28,
+    backgroundColor: "rgba(15,23,42,0.88)",
+    borderWidth: 1,
+    borderColor: "rgba(196,245,66,0.35)",
+  },
+  roundBtn: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "rgba(239,68,68,0.9)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sendBtn: {
+    backgroundColor: "#c4f542",
   },
 });
