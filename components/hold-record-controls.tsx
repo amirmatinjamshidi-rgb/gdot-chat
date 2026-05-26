@@ -10,7 +10,7 @@ import {
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
-  withSpring,
+  withTiming,
 } from "react-native-reanimated";
 
 import { IconSymbol } from "@/components/ui/icon-symbol";
@@ -19,6 +19,7 @@ const FAB = 44;
 const LOCK_SIZE = 40;
 const LOCK_LIFT = 72;
 const LOCK_DRAG_PX = 56;
+const DELETE_SIZE = 38;
 
 type HoldRecordControlsProps = {
   mode: "voice" | "video";
@@ -61,10 +62,9 @@ export function HoldRecordControls({
   const fabLift = useSharedValue(0);
 
   useEffect(() => {
-    fabLift.value = withSpring(locked ? 0 : Math.min(0, dragY * 0.35), {
-      damping: 18,
-      stiffness: 280,
-    });
+    const target = locked ? 0 : Math.min(0, dragY * 0.35);
+    const duration = locked || dragY === 0 ? 120 : 16;
+    fabLift.value = withTiming(target, { duration });
   }, [dragY, fabLift, locked]);
 
   const fabAnim = useAnimatedStyle(() => ({
@@ -78,6 +78,16 @@ export function HoldRecordControls({
           <View style={styles.recDot} />
           <Text style={styles.timerText}>{formatDuration(elapsedMs)}</Text>
         </View>
+      ) : null}
+
+      {locked ? (
+        <Pressable
+          style={styles.cancelBtn}
+          onPress={onCancelLocked}
+          accessibilityLabel="Cancel recording"
+        >
+          <MaterialIcons name="delete" size={20} color="#fff" />
+        </Pressable>
       ) : null}
 
       {lockVisible || locked ? (
@@ -95,16 +105,6 @@ export function HoldRecordControls({
             color={lockReached ? "#fff" : "#94a3b8"}
           />
         </View>
-      ) : null}
-
-      {locked ? (
-        <Pressable
-          style={styles.cancelBtn}
-          onPress={onCancelLocked}
-          accessibilityLabel="Cancel recording"
-        >
-          <MaterialIcons name="delete" size={22} color="#fff" />
-        </Pressable>
       ) : null}
 
       <View style={styles.fabWrap} {...panHandlers}>
@@ -140,7 +140,7 @@ export function HoldRecordControls({
 const styles = StyleSheet.create({
   root: {
     width: FAB,
-    height: FAB + LOCK_LIFT + 8,
+    height: FAB + LOCK_LIFT + DELETE_SIZE + 12,
     alignItems: "center",
     justifyContent: "flex-end",
   },
@@ -168,6 +168,16 @@ const styles = StyleSheet.create({
     fontVariant: ["tabular-nums"],
     fontWeight: "700",
   },
+  cancelBtn: {
+    position: "absolute",
+    bottom: FAB + 18 + LOCK_SIZE + 10,
+    width: DELETE_SIZE,
+    height: DELETE_SIZE,
+    borderRadius: DELETE_SIZE / 2,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(239,68,68,0.92)",
+  },
   lockTarget: {
     position: "absolute",
     bottom: FAB + 18,
@@ -183,17 +193,6 @@ const styles = StyleSheet.create({
   lockTargetActive: {
     backgroundColor: "#3B82F6",
     borderColor: "#60a5fa",
-  },
-  cancelBtn: {
-    position: "absolute",
-    right: FAB + 10,
-    bottom: 2,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(239,68,68,0.92)",
   },
   fabWrap: {
     width: FAB,

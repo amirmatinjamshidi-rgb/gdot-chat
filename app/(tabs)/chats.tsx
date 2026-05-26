@@ -1,76 +1,168 @@
-import React from "react";
-import { StyleSheet, FlatList, View } from "react-native";
+import React, { useMemo, useState } from "react";
+import { FlatList, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import Animated, { FadeInRight } from "react-native-reanimated";
+import Animated, { FadeIn } from "react-native-reanimated";
 
+import { ChatSearchBar } from "@/components/chat-search-bar";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { ScalePressable } from "@/components/ui/scale-pressable";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 
+const ROW_HEIGHT = 56;
+const AVATAR = 46;
+
 const MOCK_CHATS = [
-  { id: '1', name: 'Alice', lastMessage: 'Hey, how are you?', time: '10:30 AM', unread: 2 },
-  { id: '2', name: 'Bob', lastMessage: 'Did you see the latest update?', time: 'Yesterday', unread: 0 },
-  { id: '3', name: 'Charlie', lastMessage: 'Meeting at 5?', time: 'Yesterday', unread: 1 },
+  {
+    id: "1",
+    name: "Alice",
+    lastMessage: "Hey, how are you?",
+    time: "10:30 AM",
+    unread: 2,
+  },
+  {
+    id: "2",
+    name: "Bob",
+    lastMessage: "Did you see the latest update?",
+    time: "Yesterday",
+    unread: 0,
+  },
+  {
+    id: "3",
+    name: "Charlie",
+    lastMessage: "Meeting at 5?",
+    time: "Yesterday",
+    unread: 1,
+  },
+  {
+    id: "4",
+    name: "Diana",
+    lastMessage: "Sent the files.",
+    time: "Mon",
+    unread: 0,
+  },
+  {
+    id: "5",
+    name: "Eve",
+    lastMessage: "Call me when free.",
+    time: "Sun",
+    unread: 3,
+  },
 ];
 
 export default function ChatsScreen() {
   const colorScheme = useColorScheme() ?? "light";
   const isDark = colorScheme === "dark";
   const router = useRouter();
+  const [query, setQuery] = useState("");
+  const [searchVisible, setSearchVisible] = useState(false);
+
+  const filteredChats = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return MOCK_CHATS;
+    return MOCK_CHATS.filter(
+      (c) =>
+        c.name.toLowerCase().includes(q) ||
+        c.lastMessage.toLowerCase().includes(q),
+    );
+  }, [query]);
 
   return (
-    <SafeAreaView style={styles.container}>
-        <Animated.View entering={FadeInRight.springify()}>
-          <ThemedView style={styles.header}>
-            <ThemedText type="title">Chats</ThemedText>
-            <ScalePressable style={styles.iconButton} onPress={() => router.push('/Contacts')}>
-              <IconSymbol name="person.badge.plus" size={24} color={isDark ? "#FFFFFF" : "#000000"} />
-            </ScalePressable>
-          </ThemedView>
-        </Animated.View>
+    <SafeAreaView style={styles.container} edges={["top"]}>
+      <ThemedView style={styles.header}>
+        <ThemedText type="title" style={styles.title}>
+          Chats
+        </ThemedText>
+        <ScalePressable
+          style={styles.iconButton}
+          onPress={() => router.push("/Contacts")}
+        >
+          <IconSymbol
+            name="person.badge.plus"
+            size={22}
+            color={isDark ? "#FFFFFF" : "#000000"}
+          />
+        </ScalePressable>
+      </ThemedView>
+
+      <ChatSearchBar
+        value={query}
+        onChangeText={setQuery}
+        visible={searchVisible}
+        isDark={isDark}
+      />
 
       <FlatList
         style={styles.list}
-        data={MOCK_CHATS}
+        data={filteredChats}
         keyExtractor={(item) => item.id}
-        renderItem={({ item, index }) => (
-          <Animated.View entering={FadeInRight.delay(Math.min(index, 8) * 45).springify()}>
-            <ScalePressable
-              style={styles.chatItem}
-              onPress={() =>
-                router.push({
-                  pathname: '/ChatRoom',
-                  params: { id: item.id, name: item.name },
-                })
-              }>
-              <View style={[styles.avatar, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]}>
-                <ThemedText>{item.name[0]}</ThemedText>
+        keyboardShouldPersistTaps="handled"
+        onScroll={(e) => {
+          const y = e.nativeEvent.contentOffset.y;
+          const next = y > 28;
+          if (next !== searchVisible) setSearchVisible(next);
+        }}
+        scrollEventThrottle={16}
+        renderItem={({ item }) => (
+          <ScalePressable
+            style={styles.chatRow}
+            onPress={() =>
+              router.push({
+                pathname: "/ChatRoom",
+                params: { id: item.id, name: item.name },
+              })
+            }
+          >
+            <View
+              style={[
+                styles.avatar,
+                { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
+              ]}
+            >
+              <ThemedText style={styles.avatarText}>{item.name[0]}</ThemedText>
+            </View>
+
+            <View style={styles.chatBody}>
+              <View style={styles.topLine}>
+                <ThemedText
+                  type="defaultSemiBold"
+                  numberOfLines={1}
+                  style={styles.name}
+                >
+                  {item.name}
+                </ThemedText>
+                <ThemedText style={styles.timeText}>{item.time}</ThemedText>
               </View>
-              <View style={styles.chatInfo}>
-                <View style={styles.chatHeader}>
-                  <ThemedText type="defaultSemiBold">{item.name}</ThemedText>
-                  <ThemedText style={styles.timeText}>{item.time}</ThemedText>
-                </View>
-                <View style={styles.chatFooter}>
-                  <ThemedText numberOfLines={1} style={styles.lastMessage}>
-                    {item.lastMessage}
-                  </ThemedText>
-                  {item.unread > 0 && (
-                    <View style={styles.unreadBadge}>
-                      <ThemedText style={styles.unreadText}>{item.unread}</ThemedText>
-                    </View>
-                  )}
-                </View>
+              <View style={styles.bottomLine}>
+                <ThemedText numberOfLines={1} style={styles.lastMessage}>
+                  {item.lastMessage}
+                </ThemedText>
+                {item.unread > 0 ? (
+                  <View style={styles.unreadBadge}>
+                    <ThemedText style={styles.unreadText}>
+                      {item.unread}
+                    </ThemedText>
+                  </View>
+                ) : null}
               </View>
-            </ScalePressable>
-          </Animated.View>
+            </View>
+          </ScalePressable>
         )}
         ItemSeparatorComponent={() => (
-          <View style={[styles.separator, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]} />
+          <View
+            style={[
+              styles.separator,
+              { backgroundColor: isDark ? "#334155" : "#E2E8F0" },
+            ]}
+          />
         )}
+        ListEmptyComponent={
+          <Animated.View entering={FadeIn.duration(180)} style={styles.empty}>
+            <ThemedText style={styles.emptyText}>No chats found</ThemedText>
+          </Animated.View>
+        }
       />
     </SafeAreaView>
   );
@@ -80,70 +172,97 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  header: {
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 6,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  title: {
+    fontSize: 28,
+  },
+  iconButton: {
+    padding: 6,
+  },
   list: {
     flex: 1,
   },
-  header: {
-    padding: 20,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  iconButton: {
-    padding: 8,
-  },
-  chatItem: {
-    flexDirection: 'row',
-    padding: 16,
-    alignItems: 'center',
-    gap: 12,
+  chatRow: {
+    minHeight: ROW_HEIGHT,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    gap: 10,
   },
   avatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    justifyContent: 'center',
-    alignItems: 'center',
+    width: AVATAR,
+    height: AVATAR,
+    borderRadius: AVATAR / 2,
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 2,
   },
-  chatInfo: {
+  avatarText: {
+    fontSize: 17,
+    fontWeight: "700",
+  },
+  chatBody: {
     flex: 1,
-    gap: 4,
+    justifyContent: "center",
+    gap: 2,
+    minHeight: AVATAR,
   },
-  chatHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  topLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  bottomLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  name: {
+    flex: 1,
+    fontSize: 15,
   },
   timeText: {
-    fontSize: 12,
+    fontSize: 11,
     opacity: 0.5,
   },
-  chatFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
   lastMessage: {
-    fontSize: 14,
-    opacity: 0.7,
     flex: 1,
+    fontSize: 13,
+    opacity: 0.62,
   },
   unreadBadge: {
-    backgroundColor: '#3B82F6',
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 6,
+    backgroundColor: "#3B82F6",
+    borderRadius: 9,
+    minWidth: 18,
+    height: 18,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 5,
   },
   unreadText: {
-    color: 'white',
+    color: "white",
     fontSize: 10,
-    fontWeight: 'bold',
+    fontWeight: "700",
   },
   separator: {
-    height: 1,
-    marginLeft: 78,
+    height: StyleSheet.hairlineWidth,
+    marginLeft: 14 + AVATAR + 10,
+  },
+  empty: {
+    paddingTop: 40,
+    alignItems: "center",
+  },
+  emptyText: {
+    opacity: 0.55,
   },
 });
