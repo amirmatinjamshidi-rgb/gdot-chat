@@ -49,6 +49,7 @@ import {
   VIDEO_RECORD_MAX_MS,
   type VideoMessageHandle,
 } from "@/components/video-message";
+import { VoiceMessageBubble } from "@/components/voice-message-bubble";
 import { VideoMessageBubble } from "@/components/video-message-bubble";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 
@@ -173,6 +174,7 @@ export default function ChatRoomScreen() {
   const [dragY, setDragY] = useState(0);
   const [recordHudTick, setRecordHudTick] = useState(0);
   const [playingVideoId, setPlayingVideoId] = useState<string | null>(null);
+  const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
   const [inputFocused, setInputFocused] = useState(false);
   const listRef = useRef<FlatList<MessageRow>>(null);
   const inputRef = useRef<TextInput>(null);
@@ -723,7 +725,9 @@ export default function ChatRoomScreen() {
           removeClippedSubviews={Platform.OS === "android"}
           renderItem={({ item }) => {
             const isMyVideo = item.kind === "video" && item.sender === "me";
-            const bubbleBg = isMyVideo
+            const isMyVoice = item.kind === "voice" && item.sender === "me";
+            const isMediaBubble = item.kind === "video" || item.kind === "voice";
+            const bubbleBg = isMediaBubble
               ? "transparent"
               : item.sender === "me"
                 ? "#3B82F6"
@@ -731,7 +735,7 @@ export default function ChatRoomScreen() {
                   ? "#374151"
                   : "#E5E7EB";
             const primaryColor =
-              item.sender === "me" && !isMyVideo
+              item.sender === "me" && !isMediaBubble
                 ? "white"
                 : isDark
                   ? "white"
@@ -740,6 +744,8 @@ export default function ChatRoomScreen() {
               ? isDark
                 ? "rgba(148,163,184,0.95)"
                 : "rgba(71,85,105,0.9)"
+              : isMyVoice
+                ? "rgba(203,213,225,0.75)"
               : item.sender === "me"
                 ? "rgba(255,255,255,0.7)"
                 : "rgba(0,0,0,0.5)";
@@ -751,9 +757,28 @@ export default function ChatRoomScreen() {
                   item.sender === "me" ? styles.myMessage : styles.theirMessage,
                   isMyVideo && styles.myVideoBubble,
                   item.kind === "video" && styles.videoMessageBubble,
+                  isMyVoice && styles.myVoiceBubble,
                   { backgroundColor: bubbleBg },
                 ]}
               >
+                {item.kind === "voice" && item.mediaUri ? (
+                  <VoiceMessageBubble
+                    uri={item.mediaUri}
+                    seed={item.id}
+                    durationMs={item.durationMs}
+                    isMine={item.sender === "me"}
+                    isActive={playingVoiceId === item.id}
+                    onActivate={() => {
+                      setPlayingVoiceId(item.id);
+                      if (playingVideoId) setPlayingVideoId(null);
+                    }}
+                    onDeactivate={() =>
+                      setPlayingVoiceId((cur) =>
+                        cur === item.id ? null : cur,
+                      )
+                    }
+                  />
+                ) : null}
                 {item.kind === "video" && item.mediaUri ? (
                   <View
                     style={[
@@ -766,7 +791,10 @@ export default function ChatRoomScreen() {
                       isMine={item.sender === "me"}
                       durationMs={item.durationMs}
                       isActive={playingVideoId === item.id}
-                      onActivate={() => setPlayingVideoId(item.id)}
+                      onActivate={() => {
+                        setPlayingVideoId(item.id);
+                        if (playingVoiceId) setPlayingVoiceId(null);
+                      }}
                       onDeactivate={() =>
                         setPlayingVideoId((cur) =>
                           cur === item.id ? null : cur,
@@ -775,15 +803,15 @@ export default function ChatRoomScreen() {
                     />
                   </View>
                 ) : null}
-                {item.kind !== "video" ? (
+                {item.kind === "text" ? (
                   <ThemedText style={{ color: primaryColor }}>
                     {item.text}
                   </ThemedText>
-                ) : (
+                ) : item.kind === "video" ? (
                   <ThemedText style={[styles.videoLabel, { color: timeColor }]}>
                     Video message
                   </ThemedText>
-                )}
+                ) : null}
                 <ThemedText style={[styles.timeText, { color: timeColor }]}>
                   {item.time}
                 </ThemedText>
@@ -902,6 +930,13 @@ const styles = StyleSheet.create({
     overflow: "visible",
   },
   videoMessageBubble: {
+    overflow: "visible",
+  },
+  myVoiceBubble: {
+    paddingHorizontal: 2,
+    paddingTop: 2,
+    paddingBottom: 4,
+    backgroundColor: "transparent",
     overflow: "visible",
   },
   videoLabel: {
