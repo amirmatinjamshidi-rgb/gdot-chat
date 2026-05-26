@@ -1,4 +1,10 @@
-import { Audio } from "expo-av";
+import {
+  RecordingPresets,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+  useAudioRecorder,
+  type AudioRecorder,
+} from "expo-audio";
 import * as Haptics from "expo-haptics";
 import { Stack, useLocalSearchParams } from "expo-router";
 import React, {
@@ -261,7 +267,10 @@ export default function ChatRoomScreen() {
     videoLockedRef.current = videoLocked;
   }, [videoLocked]);
 
-  const recordingRef = useRef<Audio.Recording | null>(null);
+  const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const audioRecorderRef = useRef<AudioRecorder>(audioRecorder);
+  audioRecorderRef.current = audioRecorder;
+  const voiceRecordingLiveRef = useRef(false);
   const voiceRecordStartedAt = useRef(0);
   const videoRecordStartedAt = useRef(0);
   const videoStartGenRef = useRef(0);
@@ -286,6 +295,7 @@ export default function ChatRoomScreen() {
     videoRecordingActiveRef.current = false;
     holdArmedRef.current = false;
     recordingLiveRef.current = false;
+    voiceRecordingLiveRef.current = false;
   }, []);
 
   const clearHoldTimer = useCallback(() => {
@@ -302,14 +312,13 @@ export default function ChatRoomScreen() {
     return () => {
       clearHoldTimer();
       void (async () => {
-        const r = recordingRef.current;
-        if (r) {
+        const recorder = audioRecorderRef.current;
+        if (recorder?.isRecording) {
           try {
-            await r.stopAndUnloadAsync();
+            await recorder.stop();
           } catch {
             /* noop */
           }
-          recordingRef.current = null;
         }
         if (videoSessionActiveRef.current) {
           // Imperative ref at unmount; latest handle is required here.
@@ -358,15 +367,17 @@ export default function ChatRoomScreen() {
   }, [appendMessage, message]);
 
   const finishVoiceCapture = useCallback(async () => {
-    const rec = recordingRef.current;
-    recordingRef.current = null;
+    if (!voiceRecordingLiveRef.current) return;
+    voiceRecordingLiveRef.current = false;
+    const recorder = audioRecorderRef.current;
     try {
-      if (!rec) return;
-      await rec.stopAndUnloadAsync();
-      const uri = rec.getURI();
-      const st = await rec.getStatusAsync();
+      if (recorder.isRecording) {
+        await recorder.stop();
+      }
+      const uri = recorder.uri;
+      const st = recorder.getStatus();
       const dur =
-        typeof st.durationMillis === "number"
+        st.durationMillis > 0
           ? st.durationMillis
           : Date.now() - voiceRecordStartedAt.current;
       if (dur < MIN_RECORD_MS) {
@@ -395,11 +406,11 @@ export default function ChatRoomScreen() {
   }, [appendMessage, resetComposerAfterSend]);
 
   const discardVoiceRecording = useCallback(async () => {
-    const rec = recordingRef.current;
-    recordingRef.current = null;
-    if (rec) {
+    voiceRecordingLiveRef.current = false;
+    const recorder = audioRecorderRef.current;
+    if (recorder.isRecording) {
       try {
-        await rec.stopAndUnloadAsync();
+        await recorder.stop();
       } catch {
         /* noop */
       }
@@ -413,21 +424,19 @@ export default function ChatRoomScreen() {
       setComposerError("Voice messages are not available on web.");
       return;
     }
-    const { status } = await Audio.requestPermissionsAsync();
-    if (status !== "granted") {
+    const { granted } = await requestRecordingPermissionsAsync();
+    if (!granted) {
       setComposerError("Microphone permission is required for voice messages.");
       return;
     }
-    await Audio.setAudioModeAsync({
-      allowsRecordingIOS: true,
-      playsInSilentModeIOS: true,
+    await setAudioModeAsync({
+      allowsRecording: true,
+      playsInSilentMode: true,
     });
-    const recording = new Audio.Recording();
-    await recording.prepareToRecordAsync(
-      Audio.RecordingOptionsPresets.HIGH_QUALITY,
-    );
-    await recording.startAsync();
-    recordingRef.current = recording;
+    const recorder = audioRecorderRef.current;
+    await recorder.prepareToRecordAsync();
+    recorder.record();
+    voiceRecordingLiveRef.current = true;
     voiceRecordStartedAt.current = Date.now();
     setVoiceLocked(false);
     setVoiceRecordingActive(true);
@@ -548,7 +557,7 @@ export default function ChatRoomScreen() {
     const elapsed = Date.now() - pressDownAt.current;
     const mode = composerModeRef.current;
 
-    if (mode === "voice" && recordingRef.current) {
+    if (mode === "voice" && voiceRecordingLiveRef.current) {
       if (voiceLockedRef.current) {
         holdArmedRef.current = false;
         return;
@@ -583,11 +592,11 @@ export default function ChatRoomScreen() {
       } catch {
         /* noop */
       }
-      const rec = recordingRef.current;
-      recordingRef.current = null;
-      if (rec) {
+      const recorder = audioRecorderRef.current;
+      if (recorder.isRecording) {
+        voiceRecordingLiveRef.current = false;
         try {
-          await rec.stopAndUnloadAsync();
+          await recorder.stop();
         } catch {
           /* noop */
         }

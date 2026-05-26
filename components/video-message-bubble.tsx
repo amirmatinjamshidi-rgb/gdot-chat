@@ -1,6 +1,7 @@
-import { AVPlaybackStatus, ResizeMode, Video } from "expo-av";
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { useEventListener } from "expo";
+import { useVideoPlayer, VideoView } from "expo-video";
+import React, { useCallback, useEffect, useState } from "react";
+import { Platform, Pressable, StyleSheet, View } from "react-native";
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -31,56 +32,52 @@ export function VideoMessageBubble({
   onActivate,
   onDeactivate,
 }: VideoMessageBubbleProps) {
-  const videoRef = useRef<Video>(null);
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const scale = useSharedValue(1);
   const translateX = useSharedValue(0);
   const playShift = isMine ? -PLAY_SHIFT : PLAY_SHIFT;
 
-  const resetPlayback = useCallback(async () => {
+  const player = useVideoPlayer(uri, (p) => {
+    p.loop = false;
+    p.timeUpdateEventInterval = 0.2;
+  });
+
+  const resetPlayback = useCallback(() => {
     scale.value = withTiming(1, { duration: PLAY_MS });
     translateX.value = withTiming(0, { duration: PLAY_MS });
     setPlaying(false);
     setProgress(0);
-    try {
-      await videoRef.current?.pauseAsync();
-      await videoRef.current?.setPositionAsync(0);
-    } catch {
-      /* noop */
-    }
-  }, [scale, translateX]);
+    player.pause();
+    player.currentTime = 0;
+  }, [player, scale, translateX]);
 
   useEffect(() => {
     if (!isActive && playing) {
-      void resetPlayback();
+      resetPlayback();
     }
   }, [isActive, playing, resetPlayback]);
 
-  const onPlaybackStatusUpdate = useCallback(
-    (status: AVPlaybackStatus) => {
-      if (!status.isLoaded) return;
-      const duration =
-        status.durationMillis ??
-        durationMs ??
-        (status.positionMillis > 0 ? status.positionMillis : 1);
-      const position = status.positionMillis ?? 0;
-      setProgress(Math.min(1, position / Math.max(duration, 1)));
+  useEventListener(player, "timeUpdate", () => {
+    const durationSec =
+      player.duration > 0
+        ? player.duration
+        : durationMs
+          ? durationMs / 1000
+          : 1;
+    setProgress(
+      Math.min(1, player.currentTime / Math.max(durationSec, 0.001)),
+    );
+  });
 
-      if (status.didJustFinish) {
-        void resetPlayback();
-        onDeactivate();
-      }
-    },
-    [durationMs, onDeactivate, resetPlayback],
-  );
+  useEventListener(player, "playToEnd", () => {
+    resetPlayback();
+    onDeactivate();
+  });
 
-  const togglePlayback = useCallback(async () => {
-    const player = videoRef.current;
-    if (!player) return;
-
+  const togglePlayback = useCallback(() => {
     if (playing) {
-      await player.pauseAsync();
+      player.pause();
       scale.value = withTiming(1, { duration: PLAY_MS });
       translateX.value = withTiming(0, { duration: PLAY_MS });
       setPlaying(false);
@@ -89,26 +86,30 @@ export function VideoMessageBubble({
     }
 
     onActivate();
-    await player.playAsync();
+    player.play();
     scale.value = withTiming(PLAY_SCALE, { duration: PLAY_MS });
     translateX.value = withTiming(playShift, { duration: PLAY_MS });
     setPlaying(true);
-  }, [onActivate, onDeactivate, playShift, playing, scale, translateX]);
+  }, [
+    onActivate,
+    onDeactivate,
+    playShift,
+    player,
+    playing,
+    scale,
+    translateX,
+  ]);
 
   const animStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: translateX.value },
-      { scale: scale.value },
-    ],
+    transform: [{ translateX: translateX.value }, { scale: scale.value }],
     zIndex: scale.value > 1.05 ? 20 : 1,
   }));
 
   const ringSize = VIDEO_BUBBLE_SIZE + 10;
-  const strokeWidth = 1.5;
 
   return (
     <Pressable
-      onPress={() => void togglePlayback()}
+      onPress={togglePlayback}
       accessibilityRole="button"
       accessibilityLabel={
         playing ? "Pause video message" : "Play video message"
@@ -132,15 +133,12 @@ export function VideoMessageBubble({
             playing && styles.videoRingPlaying,
           ]}
         >
-          <Video
-            ref={videoRef}
-            source={{ uri }}
+          <VideoView
+            player={player}
             style={styles.video}
-            resizeMode={ResizeMode.COVER}
-            isLooping={false}
-            shouldPlay={false}
-            useNativeControls={false}
-            onPlaybackStatusUpdate={onPlaybackStatusUpdate}
+            contentFit="cover"
+            nativeControls={false}
+            surfaceType={Platform.OS === "android" ? "textureView" : undefined}
           />
         </View>
       </Animated.View>

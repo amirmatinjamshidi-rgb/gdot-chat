@@ -46,11 +46,15 @@
           "microphonePermission": "Allow GDOT chat to use the microphone for voice and video messages.",
           "recordAudioAndroid": true
         }
-      ]
+      ],
+      "expo-video",
+      "expo-audio"
     ],
     "experiments": {
       "typedRoutes": true,
-      "reactCompiler": true
+      "reactCompiler": true,
+      "turbomoduleEnabled": true,
+      "supportsBackgroundPlayback": true
     }
   }
 }
