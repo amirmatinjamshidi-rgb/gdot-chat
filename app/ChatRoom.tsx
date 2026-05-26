@@ -1,4 +1,4 @@
-import { Audio, ResizeMode, Video } from "expo-av";
+import { Audio } from "expo-av";
 import * as Haptics from "expo-haptics";
 import { Stack, useLocalSearchParams } from "expo-router";
 import React, {
@@ -40,8 +40,10 @@ import { ThemedView } from "@/components/themed-view";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import {
   VideoMessage,
+  VIDEO_RECORD_MAX_MS,
   type VideoMessageHandle,
 } from "@/components/video-message";
+import { VideoMessageBubble } from "@/components/video-message-bubble";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 
 const LIME = "#C4F542";
@@ -164,6 +166,7 @@ export default function ChatRoomScreen() {
   const [videoRecordingActive, setVideoRecordingActive] = useState(false);
   const [dragY, setDragY] = useState(0);
   const [recordHudTick, setRecordHudTick] = useState(0);
+  const [playingVideoId, setPlayingVideoId] = useState<string | null>(null);
   const [inputFocused, setInputFocused] = useState(false);
   const listRef = useRef<FlatList<MessageRow>>(null);
   const inputRef = useRef<TextInput>(null);
@@ -273,6 +276,18 @@ export default function ChatRoomScreen() {
 
   const dismissError = useCallback(() => setComposerError(null), []);
 
+  const resetComposerAfterSend = useCallback(() => {
+    setComposerMode("send");
+    setDragY(0);
+    setVoiceLocked(false);
+    setVideoLocked(false);
+    setVoiceRecordingActive(false);
+    setVideoRecordingActive(false);
+    videoRecordingActiveRef.current = false;
+    holdArmedRef.current = false;
+    recordingLiveRef.current = false;
+  }, []);
+
   const clearHoldTimer = useCallback(() => {
     if (holdTimerRef.current) {
       clearTimeout(holdTimerRef.current);
@@ -369,6 +384,7 @@ export default function ChatRoomScreen() {
         void Haptics.notificationAsync(
           Haptics.NotificationFeedbackType.Success,
         );
+        resetComposerAfterSend();
       }
     } catch {
       setComposerError("Could not save the voice message.");
@@ -376,7 +392,7 @@ export default function ChatRoomScreen() {
       setVoiceRecordingActive(false);
       setVoiceLocked(false);
     }
-  }, [appendMessage]);
+  }, [appendMessage, resetComposerAfterSend]);
 
   const discardVoiceRecording = useCallback(async () => {
     const rec = recordingRef.current;
@@ -438,10 +454,11 @@ export default function ChatRoomScreen() {
         text: "Video message",
       });
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      resetComposerAfterSend();
     } catch {
       setComposerError("Could not save the video message.");
     }
-  }, [appendMessage]);
+  }, [appendMessage, resetComposerAfterSend]);
 
   const discardVideoRecording = useCallback(async () => {
     videoStartGenRef.current += 1;
@@ -503,6 +520,16 @@ export default function ChatRoomScreen() {
     const id = setInterval(() => setRecordHudTick((n) => n + 1), 200);
     return () => clearInterval(id);
   }, [recordingLive]);
+
+  useEffect(() => {
+    if (!videoRecordingActive) return;
+    const id = setTimeout(() => {
+      if (videoRecordingActiveRef.current) {
+        void finishVideoCapture();
+      }
+    }, VIDEO_RECORD_MAX_MS);
+    return () => clearTimeout(id);
+  }, [videoRecordingActive, finishVideoCapture]);
 
   const lockFromDrag = useCallback((dy: number) => {
     if (dy >= -LOCK_DRAG_PX || !recordingLiveRef.current) return;
@@ -667,6 +694,14 @@ export default function ChatRoomScreen() {
           options={{ title: contactName, headerBackTitle: "Chats" }}
         />
 
+        {Platform.OS !== "web" && videoSessionActive ? (
+          <VideoMessage
+            ref={videoRef}
+            active={videoSessionActive}
+            elapsedMs={recordElapsedMs}
+          />
+        ) : null}
+
         <FlatList
           ref={listRef}
           data={messages}
@@ -706,20 +741,28 @@ export default function ChatRoomScreen() {
                   styles.messageBubble,
                   item.sender === "me" ? styles.myMessage : styles.theirMessage,
                   isMyVideo && styles.myVideoBubble,
+                  item.kind === "video" && styles.videoMessageBubble,
                   { backgroundColor: bubbleBg },
                 ]}
               >
                 {item.kind === "video" && item.mediaUri ? (
-                  <View style={styles.videoBubbleWrap}>
-                    <Video
-                      source={{ uri: item.mediaUri }}
-                      style={[
-                        styles.videoCircle,
-                        isMyVideo && styles.videoCircleMine,
-                      ]}
-                      useNativeControls
-                      resizeMode={ResizeMode.COVER}
-                      isLooping
+                  <View
+                    style={[
+                      styles.videoBubbleWrap,
+                      playingVideoId === item.id && styles.videoBubbleWrapPlaying,
+                    ]}
+                  >
+                    <VideoMessageBubble
+                      uri={item.mediaUri}
+                      isMine={item.sender === "me"}
+                      durationMs={item.durationMs}
+                      isActive={playingVideoId === item.id}
+                      onActivate={() => setPlayingVideoId(item.id)}
+                      onDeactivate={() =>
+                        setPlayingVideoId((cur) =>
+                          cur === item.id ? null : cur,
+                        )
+                      }
                     />
                   </View>
                 ) : null}
@@ -754,11 +797,6 @@ export default function ChatRoomScreen() {
               message={composerError}
               onDismiss={dismissError}
             />
-            {Platform.OS !== "web" && videoSessionActive ? (
-              <View style={styles.videoPreviewRow}>
-                <VideoMessage ref={videoRef} active={videoSessionActive} />
-              </View>
-            ) : null}
             <View style={styles.inputRow}>
               <View
                 style={[
@@ -852,6 +890,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     paddingTop: 4,
     paddingBottom: 6,
+    overflow: "visible",
+  },
+  videoMessageBubble: {
+    overflow: "visible",
   },
   videoLabel: {
     fontSize: 12,
@@ -879,22 +921,20 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     alignItems: "center",
     backgroundColor: "transparent",
+    overflow: "visible",
+    minHeight: 170,
   },
-  videoCircle: {
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    backgroundColor: "transparent",
-  },
-  videoCircleMine: {
-    borderWidth: 2,
-    borderColor: "rgba(92,249,232,0.85)",
+  videoBubbleWrapPlaying: {
+    minHeight: 260,
+    marginVertical: 16,
   },
   composerShell: {
     borderTopWidth: 1,
     paddingHorizontal: 12,
     paddingTop: 8,
     paddingBottom: 10,
+    zIndex: 14,
+    elevation: 14,
   },
   inputRow: {
     flexDirection: "row",
@@ -932,12 +972,8 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: 0,
     bottom: 0,
-    zIndex: 12,
-  },
-  videoPreviewRow: {
-    alignItems: "flex-end",
-    paddingRight: 4,
-    marginBottom: 4,
+    zIndex: 16,
+    elevation: 16,
   },
   actionFab: {
     backgroundColor: LIME,
