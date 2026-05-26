@@ -7,6 +7,7 @@ import {
 } from "expo-audio";
 import * as Haptics from "expo-haptics";
 import { Stack, useLocalSearchParams } from "expo-router";
+import { useFocusEffect } from "@react-navigation/native";
 import React, {
   useCallback,
   useEffect,
@@ -272,10 +273,13 @@ export default function ChatRoomScreen() {
   const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const audioRecorderRef = useRef<AudioRecorder>(audioRecorder);
   audioRecorderRef.current = audioRecorder;
+
   const voiceRecordingLiveRef = useRef(false);
   const voiceRecordStartedAt = useRef(0);
   const videoRecordStartedAt = useRef(0);
   const videoStartGenRef = useRef(0);
+  const voiceStartGenRef = useRef(0);
+  const voiceRecorderStoppedRef = useRef(false);
   const pressDownAt = useRef(0);
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** True after the hold threshold fired (user held long enough to attempt capture). */
@@ -307,28 +311,49 @@ export default function ChatRoomScreen() {
     }
   }, []);
 
+  const safeStopVoiceRecording = useCallback(async () => {
+    if (voiceRecorderStoppedRef.current) return;
+    const recorder = audioRecorderRef.current;
+    try {
+      let recording = false;
+      try {
+        recording = recorder.isRecording;
+      } catch {
+        voiceRecorderStoppedRef.current = true;
+        return;
+      }
+      if (recording) {
+        await recorder.stop();
+      }
+      voiceRecorderStoppedRef.current = true;
+    } catch {
+      voiceRecorderStoppedRef.current = true;
+    }
+  }, []);
+
   const videoSessionActiveRef = useRef(false);
   videoSessionActiveRef.current = videoSessionActive;
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        voiceStartGenRef.current += 1;
+        clearHoldTimer();
+        if (voiceRecordingLiveRef.current) {
+          voiceRecordingLiveRef.current = false;
+          void safeStopVoiceRecording();
+        }
+      };
+    }, [clearHoldTimer, safeStopVoiceRecording]),
+  );
 
   useEffect(() => {
     return () => {
       clearHoldTimer();
-      void (async () => {
-        const recorder = audioRecorderRef.current;
-        if (recorder?.isRecording) {
-          try {
-            await recorder.stop();
-          } catch {
-            /* noop */
-          }
-        }
-        if (videoSessionActiveRef.current) {
-          // Imperative ref at unmount; latest handle is required here.
-          // eslint-disable-next-line react-hooks/exhaustive-deps -- ref read intentionally at cleanup time
-          const videoApi = videoRef.current;
-          void videoApi?.stopRecording();
-        }
-      })();
+      voiceStartGenRef.current += 1;
+      if (videoSessionActiveRef.current) {
+        void Promise.resolve(videoRef.current?.stopRecording()).catch(() => {});
+      }
     };
   }, [clearHoldTimer]);
 
@@ -373,9 +398,7 @@ export default function ChatRoomScreen() {
     voiceRecordingLiveRef.current = false;
     const recorder = audioRecorderRef.current;
     try {
-      if (recorder.isRecording) {
-        await recorder.stop();
-      }
+      await safeStopVoiceRecording();
       const uri = recorder.uri;
       const st = recorder.getStatus();
       const dur =
@@ -405,28 +428,23 @@ export default function ChatRoomScreen() {
       setVoiceRecordingActive(false);
       setVoiceLocked(false);
     }
-  }, [appendMessage, resetComposerAfterSend]);
+  }, [appendMessage, resetComposerAfterSend, safeStopVoiceRecording]);
 
   const discardVoiceRecording = useCallback(async () => {
     voiceRecordingLiveRef.current = false;
-    const recorder = audioRecorderRef.current;
-    if (recorder.isRecording) {
-      try {
-        await recorder.stop();
-      } catch {
-        /* noop */
-      }
-    }
+    await safeStopVoiceRecording();
     setVoiceRecordingActive(false);
     setVoiceLocked(false);
-  }, []);
+  }, [safeStopVoiceRecording]);
 
   const startVoiceRecording = useCallback(async () => {
+    const gen = ++voiceStartGenRef.current;
     if (Platform.OS === "web") {
       setComposerError("Voice messages are not available on web.");
       return;
     }
     const { granted } = await requestRecordingPermissionsAsync();
+    if (gen !== voiceStartGenRef.current) return;
     if (!granted) {
       setComposerError("Microphone permission is required for voice messages.");
       return;
@@ -435,14 +453,25 @@ export default function ChatRoomScreen() {
       allowsRecording: true,
       playsInSilentMode: true,
     });
+    if (gen !== voiceStartGenRef.current) return;
     const recorder = audioRecorderRef.current;
+    voiceRecorderStoppedRef.current = false;
     await recorder.prepareToRecordAsync();
-    recorder.record();
+    if (gen !== voiceStartGenRef.current) {
+      await safeStopVoiceRecording();
+      return;
+    }
+    await recorder.record();
+    if (gen !== voiceStartGenRef.current) {
+      voiceRecordingLiveRef.current = false;
+      await safeStopVoiceRecording();
+      return;
+    }
     voiceRecordingLiveRef.current = true;
     voiceRecordStartedAt.current = Date.now();
     setVoiceLocked(false);
     setVoiceRecordingActive(true);
-  }, []);
+  }, [safeStopVoiceRecording]);
 
   const finishVideoCapture = useCallback(async () => {
     videoStartGenRef.current += 1;
@@ -587,6 +616,7 @@ export default function ChatRoomScreen() {
 
     if (holdArmedRef.current && !recordingLiveRef.current) {
       holdArmedRef.current = false;
+      voiceStartGenRef.current += 1;
       videoStartGenRef.current += 1;
       setVideoSessionActive(false);
       try {
@@ -594,15 +624,8 @@ export default function ChatRoomScreen() {
       } catch {
         /* noop */
       }
-      const recorder = audioRecorderRef.current;
-      if (recorder.isRecording) {
-        voiceRecordingLiveRef.current = false;
-        try {
-          await recorder.stop();
-        } catch {
-          /* noop */
-        }
-      }
+      voiceRecordingLiveRef.current = false;
+      await safeStopVoiceRecording();
       return;
     }
 
@@ -617,6 +640,7 @@ export default function ChatRoomScreen() {
     clearHoldTimer,
     finishVoiceCapture,
     finishVideoCapture,
+    safeStopVoiceRecording,
     videoSessionActive,
   ]);
 

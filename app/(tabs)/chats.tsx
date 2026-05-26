@@ -57,7 +57,6 @@ export default function ChatsScreen() {
   const isDark = colorScheme === "dark";
   const router = useRouter();
   const [query, setQuery] = useState("");
-  const [searchVisible, setSearchVisible] = useState(false);
 
   const filteredChats = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -90,7 +89,7 @@ export default function ChatsScreen() {
       <ChatSearchBar
         value={query}
         onChangeText={setQuery}
-        visible={searchVisible}
+        visible
         isDark={isDark}
       />
 
@@ -99,12 +98,6 @@ export default function ChatsScreen() {
         data={filteredChats}
         keyExtractor={(item) => item.id}
         keyboardShouldPersistTaps="handled"
-        onScroll={(e) => {
-          const y = e.nativeEvent.contentOffset.y;
-          const next = y > 28;
-          if (next !== searchVisible) setSearchVisible(next);
-        }}
-        scrollEventThrottle={16}
         renderItem={({ item }) => (
           <ScalePressable
             style={styles.chatRow}

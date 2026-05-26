@@ -25,7 +25,7 @@ export default function RootLayout() {
           fullScreenGestureEnabled: true,
         }}
       >
-        <Stack.Screen name="(tabs)" options={{ headerShown: true }} />
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="ChatRoom" options={{ title: "Chat" }} />
         <Stack.Screen name="Contacts" options={{ title: "Contacts" }} />
         <Stack.Screen name="CreateGroup" options={{ title: "Create Group" }} />
