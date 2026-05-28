@@ -18,10 +18,12 @@ import {
   type SettingsSection as SettingsSectionType
 } from "@/constants/profile-data";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import { useAuth } from "@/providers/auth-provider";
 
 export default function ProfileScreen() {
   const colorScheme = useColorScheme() ?? "light";
   const isDark = colorScheme === "dark";
+  const { signOut } = useAuth();
   const [toggleState, setToggleState] = useState(
     Object.fromEntries(
       settingsSections.flatMap((section) =>
@@ -45,6 +47,26 @@ export default function ProfileScreen() {
 
   const handleToggle = (id: string, enabled: boolean) => {
     setToggleState((current) => ({ ...current, [id]: enabled }));
+  };
+
+  const handleLogoutPress = () => {
+    Alert.alert(
+      "Log out",
+      "You are about to log out. Are you sure?",
+      [
+        {
+          text: "Cancel",
+          style: "cancel",
+        },
+        {
+          text: "Logout",
+          style: "destructive",
+          onPress: () => {
+            void signOut();
+          },
+        },
+      ],
+    );
   };
 
   return (
@@ -177,6 +199,30 @@ export default function ProfileScreen() {
             <SettingsSection section={section} onToggle={handleToggle} />
           </Animated.View>
         ))}
+
+        <Animated.View entering={FadeInDown.delay(520).springify()}>
+          <ScalePressable
+            accessibilityRole="button"
+            accessibilityLabel="Log out"
+            onPress={handleLogoutPress}
+            style={[
+              styles.logoutRow,
+              {
+                backgroundColor: isDark
+                  ? "rgba(239,68,68,0.12)"
+                  : "rgba(239,68,68,0.08)",
+                borderColor: isDark
+                  ? "rgba(248,113,113,0.35)"
+                  : "rgba(239,68,68,0.22)",
+              },
+            ]}
+          >
+            <MaterialIcons name="logout" size={20} color="#EF4444" />
+            <ThemedText style={styles.logoutText} lightColor="#DC2626" darkColor="#F87171">
+              Log out
+            </ThemedText>
+          </ScalePressable>
+        </Animated.View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -261,5 +307,20 @@ const styles = StyleSheet.create({
   actionCell: {
     flex: 1,
     minWidth: 0,
+  },
+  logoutRow: {
+    marginTop: 4,
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  logoutText: {
+    fontSize: 16,
+    fontWeight: "700",
   },
 });
