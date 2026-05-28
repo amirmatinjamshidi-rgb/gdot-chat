@@ -1,3 +1,4 @@
+import { useFocusEffect } from "@react-navigation/native";
 import {
   RecordingPresets,
   requestRecordingPermissionsAsync,
@@ -7,7 +8,6 @@ import {
 } from "expo-audio";
 import * as Haptics from "expo-haptics";
 import { Stack, useLocalSearchParams } from "expo-router";
-import { useFocusEffect } from "@react-navigation/native";
 import React, {
   useCallback,
   useEffect,
@@ -46,18 +46,19 @@ import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import {
-  VideoMessage,
   VIDEO_RECORD_MAX_MS,
+  VideoMessage,
   type VideoMessageHandle,
 } from "@/components/video-message";
-import { VoiceMessageBubble } from "@/components/voice-message-bubble";
 import { VideoMessageBubble } from "@/components/video-message-bubble";
+import { VoiceMessageBubble } from "@/components/voice-message-bubble";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 
 const LIME = "#C4F542";
 const MIN_RECORD_MS = 1000;
 const HOLD_MS = 320;
 const TAP_MAX_MS = 260;
+const KEYBOARD_EXTRA_OFFSET = 100;
 
 type ComposerMode = "send" | "voice" | "video";
 
@@ -649,9 +650,7 @@ export default function ChatRoomScreen() {
       PanResponder.create({
         onStartShouldSetPanResponder: () => {
           const mode = composerModeRef.current;
-          return (
-            mode === "voice" || mode === "video"
-          );
+          return mode === "voice" || mode === "video";
         },
         onMoveShouldSetPanResponder: () =>
           recordingLiveRef.current || holdArmedRef.current,
@@ -724,130 +723,139 @@ export default function ChatRoomScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["bottom"]}>
-      <ThemedView style={styles.container}>
-        <Stack.Screen
-          options={{ title: contactName, headerBackTitle: "Chats" }}
-        />
-
-        {Platform.OS !== "web" && videoSessionActive ? (
-          <VideoMessage
-            ref={videoRef}
-            active={videoSessionActive}
-            elapsedMs={recordElapsedMs}
+      <KeyboardAvoidingView
+        style={styles.keyboardRoot}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={
+          Platform.OS === "ios" ? 100 : KEYBOARD_EXTRA_OFFSET
+        }
+      >
+        <ThemedView style={styles.container}>
+          <Stack.Screen
+            options={{ title: contactName, headerBackTitle: "Chats" }}
           />
-        ) : null}
 
-        <FlatList
-          ref={listRef}
-          data={messages}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.messageList}
-          keyboardShouldPersistTaps="handled"
-          windowSize={9}
-          maxToRenderPerBatch={12}
-          initialNumToRender={14}
-          removeClippedSubviews={Platform.OS === "android"}
-          renderItem={({ item }) => {
-            const isMyVideo = item.kind === "video" && item.sender === "me";
-            const isMyVoice = item.kind === "voice" && item.sender === "me";
-            const isMediaBubble = item.kind === "video" || item.kind === "voice";
-            const bubbleBg = isMediaBubble
-              ? "transparent"
-              : item.sender === "me"
-                ? "#3B82F6"
-                : isDark
-                  ? "#374151"
-                  : "#E5E7EB";
-            const primaryColor =
-              item.sender === "me" && !isMediaBubble
-                ? "white"
-                : isDark
+          {Platform.OS !== "web" && videoSessionActive ? (
+            <VideoMessage
+              ref={videoRef}
+              active={videoSessionActive}
+              elapsedMs={recordElapsedMs}
+            />
+          ) : null}
+
+          <FlatList
+            ref={listRef}
+            data={messages}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.messageList}
+            keyboardShouldPersistTaps="handled"
+            windowSize={9}
+            maxToRenderPerBatch={12}
+            initialNumToRender={14}
+            removeClippedSubviews={Platform.OS === "android"}
+            renderItem={({ item }) => {
+              const isMyVideo = item.kind === "video" && item.sender === "me";
+              const isMyVoice = item.kind === "voice" && item.sender === "me";
+              const isMediaBubble =
+                item.kind === "video" || item.kind === "voice";
+              const bubbleBg = isMediaBubble
+                ? "transparent"
+                : item.sender === "me"
+                  ? "#3B82F6"
+                  : isDark
+                    ? "#374151"
+                    : "#E5E7EB";
+              const primaryColor =
+                item.sender === "me" && !isMediaBubble
                   ? "white"
-                  : "black";
-            const timeColor = isMyVideo
-              ? isDark
-                ? "rgba(148,163,184,0.95)"
-                : "rgba(71,85,105,0.9)"
-              : isMyVoice
-                ? "rgba(203,213,225,0.75)"
-              : item.sender === "me"
-                ? "rgba(255,255,255,0.7)"
-                : "rgba(0,0,0,0.5)";
+                  : isDark
+                    ? "white"
+                    : "black";
+              const timeColor = isMyVideo
+                ? isDark
+                  ? "rgba(148,163,184,0.95)"
+                  : "rgba(71,85,105,0.9)"
+                : isMyVoice
+                  ? "rgba(203,213,225,0.75)"
+                  : item.sender === "me"
+                    ? "rgba(255,255,255,0.7)"
+                    : "rgba(0,0,0,0.5)";
 
-            return (
-              <View
-                style={[
-                  styles.messageBubble,
-                  item.sender === "me" ? styles.myMessage : styles.theirMessage,
-                  isMyVideo && styles.myVideoBubble,
-                  item.kind === "video" && styles.videoMessageBubble,
-                  isMyVoice && styles.myVoiceBubble,
-                  { backgroundColor: bubbleBg },
-                ]}
-              >
-                {item.kind === "voice" && item.mediaUri ? (
-                  <VoiceMessageBubble
-                    uri={item.mediaUri}
-                    seed={item.id}
-                    durationMs={item.durationMs}
-                    isMine={item.sender === "me"}
-                    isActive={playingVoiceId === item.id}
-                    onActivate={() => {
-                      setPlayingVoiceId(item.id);
-                      if (playingVideoId) setPlayingVideoId(null);
-                    }}
-                    onDeactivate={() =>
-                      setPlayingVoiceId((cur) =>
-                        cur === item.id ? null : cur,
-                      )
-                    }
-                  />
-                ) : null}
-                {item.kind === "video" && item.mediaUri ? (
-                  <View
-                    style={[
-                      styles.videoBubbleWrap,
-                      playingVideoId === item.id && styles.videoBubbleWrapPlaying,
-                    ]}
-                  >
-                    <VideoMessageBubble
+              return (
+                <View
+                  style={[
+                    styles.messageBubble,
+                    item.sender === "me"
+                      ? styles.myMessage
+                      : styles.theirMessage,
+                    isMyVideo && styles.myVideoBubble,
+                    item.kind === "video" && styles.videoMessageBubble,
+                    isMyVoice && styles.myVoiceBubble,
+                    { backgroundColor: bubbleBg },
+                  ]}
+                >
+                  {item.kind === "voice" && item.mediaUri ? (
+                    <VoiceMessageBubble
                       uri={item.mediaUri}
-                      isMine={item.sender === "me"}
+                      seed={item.id}
                       durationMs={item.durationMs}
-                      isActive={playingVideoId === item.id}
+                      isMine={item.sender === "me"}
+                      isActive={playingVoiceId === item.id}
                       onActivate={() => {
-                        setPlayingVideoId(item.id);
-                        if (playingVoiceId) setPlayingVoiceId(null);
+                        setPlayingVoiceId(item.id);
+                        if (playingVideoId) setPlayingVideoId(null);
                       }}
                       onDeactivate={() =>
-                        setPlayingVideoId((cur) =>
+                        setPlayingVoiceId((cur) =>
                           cur === item.id ? null : cur,
                         )
                       }
                     />
-                  </View>
-                ) : null}
-                {item.kind === "text" ? (
-                  <ThemedText style={{ color: primaryColor }}>
-                    {item.text}
+                  ) : null}
+                  {item.kind === "video" && item.mediaUri ? (
+                    <View
+                      style={[
+                        styles.videoBubbleWrap,
+                        playingVideoId === item.id &&
+                          styles.videoBubbleWrapPlaying,
+                      ]}
+                    >
+                      <VideoMessageBubble
+                        uri={item.mediaUri}
+                        isMine={item.sender === "me"}
+                        durationMs={item.durationMs}
+                        isActive={playingVideoId === item.id}
+                        onActivate={() => {
+                          setPlayingVideoId(item.id);
+                          if (playingVoiceId) setPlayingVoiceId(null);
+                        }}
+                        onDeactivate={() =>
+                          setPlayingVideoId((cur) =>
+                            cur === item.id ? null : cur,
+                          )
+                        }
+                      />
+                    </View>
+                  ) : null}
+                  {item.kind === "text" ? (
+                    <ThemedText style={{ color: primaryColor }}>
+                      {item.text}
+                    </ThemedText>
+                  ) : item.kind === "video" ? (
+                    <ThemedText
+                      style={[styles.videoLabel, { color: timeColor }]}
+                    >
+                      Video message
+                    </ThemedText>
+                  ) : null}
+                  <ThemedText style={[styles.timeText, { color: timeColor }]}>
+                    {item.time}
                   </ThemedText>
-                ) : item.kind === "video" ? (
-                  <ThemedText style={[styles.videoLabel, { color: timeColor }]}>
-                    Video message
-                  </ThemedText>
-                ) : null}
-                <ThemedText style={[styles.timeText, { color: timeColor }]}>
-                  {item.time}
-                </ThemedText>
-              </View>
-            );
-          }}
-        />
+                </View>
+              );
+            }}
+          />
 
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
-        >
           <View
             style={[
               styles.composerShell,
@@ -930,14 +938,17 @@ export default function ChatRoomScreen() {
               </View>
             </View>
           </View>
-        </KeyboardAvoidingView>
-      </ThemedView>
+        </ThemedView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safeArea: {
+    flex: 1,
+  },
+  keyboardRoot: {
     flex: 1,
   },
   container: {
