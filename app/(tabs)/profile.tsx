@@ -213,7 +213,10 @@ export default function ProfileScreen() {
               },
             ]}
           >
-          <ProfileAvatar initials={profile.avatarInitials} />
+          <ProfileAvatar
+            initials={profile.avatarInitials}
+            source={profile.avatarImage}
+          />
           <View style={styles.profileCopy}>
             <ThemedText type="subtitle" style={styles.name}>
               {profile.name}
