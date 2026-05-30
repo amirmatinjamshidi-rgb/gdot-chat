@@ -94,7 +94,7 @@ export default function LoginScreen() {
           </View>
 
           <View style={styles.card}>
-            <View style={styles.switchRow}>
+            {/* <View style={styles.switchRow}>
               <Pressable
                 style={({ pressed }) => [
                   styles.switchBtn,
@@ -129,7 +129,7 @@ export default function LoginScreen() {
                   Email
                 </ThemedText>
               </Pressable>
-            </View>
+            </View> */}
 
             {mode === "phone" ? (
               <>
@@ -185,7 +185,10 @@ export default function LoginScreen() {
                   {phoneForm.formState.errors.phone?.message ?? " "}
                 </ThemedText>
                 <Pressable
-                  style={({ pressed }) => [styles.primaryBtn, pressed && styles.pressedFade]}
+                  style={({ pressed }) => [
+                    styles.primaryBtn,
+                    pressed && styles.pressedFade,
+                  ]}
                   onPress={onSubmitPhone}
                 >
                   <ThemedText style={styles.primaryBtnText}>
@@ -240,7 +243,10 @@ export default function LoginScreen() {
                   {emailForm.formState.errors.email?.message ?? " "}
                 </ThemedText>
                 <Pressable
-                  style={({ pressed }) => [styles.primaryBtn, pressed && styles.pressedFade]}
+                  style={({ pressed }) => [
+                    styles.primaryBtn,
+                    pressed && styles.pressedFade,
+                  ]}
                   onPress={onSubmitEmail}
                 >
                   <ThemedText style={styles.primaryBtnText}>
