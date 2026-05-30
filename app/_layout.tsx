@@ -2,6 +2,7 @@ import { ThemeProvider } from "@react-navigation/native";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { Platform } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "react-native-reanimated";
 
 import { ThemePaletteProvider, useThemePalette } from "@/providers/theme-palette-provider";
@@ -45,10 +46,12 @@ function RootNavigation() {
 
 export default function RootLayout() {
   return (
-    <ThemePaletteProvider>
-      <AuthProvider>
-        <RootNavigation />
-      </AuthProvider>
-    </ThemePaletteProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ThemePaletteProvider>
+        <AuthProvider>
+          <RootNavigation />
+        </AuthProvider>
+      </ThemePaletteProvider>
+    </GestureHandlerRootView>
   );
 }
