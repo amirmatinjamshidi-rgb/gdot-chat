@@ -7,7 +7,8 @@ import {
   type AudioRecorder,
 } from "expo-audio";
 import * as Haptics from "expo-haptics";
-import { Stack, useLocalSearchParams } from "expo-router";
+import { LinearGradient } from "expo-linear-gradient";
+import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import React, {
   useCallback,
   useEffect,
@@ -26,13 +27,16 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
+  Easing,
   cancelAnimation,
+  FadeInDown,
   interpolate,
+  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withSequence,
-  withSpring,
   withTiming,
 } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -43,7 +47,6 @@ import {
   LOCK_DRAG_PX,
 } from "@/components/hold-record-controls";
 import { ThemedText } from "@/components/themed-text";
-import { ThemedView } from "@/components/themed-view";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import {
   VIDEO_RECORD_MAX_MS,
@@ -52,9 +55,7 @@ import {
 } from "@/components/video-message";
 import { VideoMessageBubble } from "@/components/video-message-bubble";
 import { VoiceMessageBubble } from "@/components/voice-message-bubble";
-import { useColorScheme } from "@/hooks/use-color-scheme";
-
-const LIME = "#C4F542";
+import { useThemePalette } from "@/providers/theme-palette-provider";
 const MIN_RECORD_MS = 1000;
 const HOLD_MS = 320;
 const TAP_MAX_MS = 260;
@@ -104,6 +105,8 @@ type ComposerFabProps = {
   composerMode: ComposerMode;
   onSendText: () => void;
   onCycleSendEmpty: () => void;
+  fabColor: string;
+  iconColor: string;
 };
 
 function ComposerFab({
@@ -111,6 +114,8 @@ function ComposerFab({
   composerMode,
   onSendText,
   onCycleSendEmpty,
+  fabColor,
+  iconColor,
 }: ComposerFabProps) {
   const fabScale = useSharedValue(1);
   const sig = `${isSendOnly}:${composerMode}`;
@@ -120,8 +125,11 @@ function ComposerFab({
     if (prevSig.current === sig) return;
     prevSig.current = sig;
     fabScale.value = withSequence(
-      withTiming(1.1, { duration: 95 }),
-      withSpring(1, { damping: 14, stiffness: 280 }),
+      withTiming(0.94, { duration: 70 }),
+      withTiming(1, {
+        duration: 160,
+        easing: Easing.out(Easing.cubic),
+      }),
     );
   }, [fabScale, sig]);
 
@@ -135,10 +143,10 @@ function ComposerFab({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Send message"
-          style={styles.actionFab}
+          style={[styles.actionFab, { backgroundColor: fabColor }]}
           onPress={onSendText}
         >
-          <IconSymbol name="paperplane.fill" size={22} color="#fff" />
+          <IconSymbol name="paperplane.fill" size={22} color={iconColor} />
         </Pressable>
       </Animated.View>
     );
@@ -150,10 +158,10 @@ function ComposerFab({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Switch to voice message"
-          style={styles.actionFab}
+          style={[styles.actionFab, { backgroundColor: fabColor }]}
           onPress={onCycleSendEmpty}
         >
-          <IconSymbol name="paperplane.fill" size={22} color="#fff" />
+          <IconSymbol name="paperplane.fill" size={22} color={iconColor} />
         </Pressable>
       </Animated.View>
     );
@@ -184,9 +192,23 @@ export default function ChatRoomScreen() {
   const sweep = useSharedValue(0);
   const neonVisible = useSharedValue(0);
 
-  const colorScheme = useColorScheme() ?? "light";
-  const isDark = colorScheme === "dark";
+  const router = useRouter();
+  const { colors, mode } = useThemePalette();
+  const isDark = mode === "dark";
   const contactName = useMemo(() => name || "Chat", [name]);
+
+  const swipeBackGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetX(-14)
+        .failOffsetY([-40, 40])
+        .onEnd((e) => {
+          if (e.translationX < -88) {
+            runOnJS(router.back)();
+          }
+        }),
+    [router],
+  );
 
   useEffect(() => {
     const id = requestAnimationFrame(() => {
@@ -203,19 +225,17 @@ export default function ChatRoomScreen() {
       neonVisible.value = 0;
       return;
     }
-    // Show the bar, then do two fast passes and fade it out completely.
     neonVisible.value = 1;
     sweep.value = 0;
-    sweep.value = withSequence(
-      withTiming(1, { duration: 525 }),
-      withTiming(0, { duration: 0 }),
-      withTiming(1, { duration: 350 }),
-      withTiming(0, { duration: 50 }, (finished) => {
+    sweep.value = withTiming(
+      1,
+      { duration: 480, easing: Easing.out(Easing.cubic) },
+      (finished) => {
         "worklet";
         if (finished) {
-          neonVisible.value = withTiming(0, { duration: 180 });
+          neonVisible.value = withTiming(0, { duration: 200 });
         }
-      }),
+      },
     );
   }, [inputFocused, sweep, neonVisible]);
 
@@ -229,8 +249,8 @@ export default function ChatRoomScreen() {
       width: barW,
       borderRadius: 2,
       opacity: neonVisible.value,
-      backgroundColor: "#5cf9e8",
-      shadowColor: "#39f6ff",
+      backgroundColor: colors.accentGlow,
+      shadowColor: colors.accentGlow,
       shadowOpacity: 0.9,
       shadowRadius: 10,
       shadowOffset: { width: 0, height: 0 },
@@ -245,7 +265,7 @@ export default function ChatRoomScreen() {
         },
       ],
     };
-  });
+  }, [colors.accentGlow, neonVisible, shellW, sweep]);
 
   const onInputShellLayout = useCallback(
     (e: LayoutChangeEvent) => {
@@ -411,13 +431,14 @@ export default function ChatRoomScreen() {
         return;
       }
       if (uri) {
-        appendMessage({
-          kind: "voice",
+        const payload = {
+          kind: "voice" as const,
           mediaUri: uri,
           durationMs: dur,
-          sender: "me",
+          sender: "me" as const,
           text: `Voice message · ${formatDuration(dur)}`,
-        });
+        };
+        appendMessage(payload);
         void Haptics.notificationAsync(
           Haptics.NotificationFeedbackType.Success,
         );
@@ -429,7 +450,11 @@ export default function ChatRoomScreen() {
       setVoiceRecordingActive(false);
       setVoiceLocked(false);
     }
-  }, [appendMessage, resetComposerAfterSend, safeStopVoiceRecording]);
+  }, [
+    appendMessage,
+    resetComposerAfterSend,
+    safeStopVoiceRecording,
+  ]);
 
   const discardVoiceRecording = useCallback(async () => {
     voiceRecordingLiveRef.current = false;
@@ -487,13 +512,14 @@ export default function ChatRoomScreen() {
         setComposerError("Hold longer to record a video message.");
         return;
       }
-      appendMessage({
-        kind: "video",
+      const payload = {
+        kind: "video" as const,
         mediaUri: file.uri,
         durationMs: dur,
-        sender: "me",
+        sender: "me" as const,
         text: "Video message",
-      });
+      };
+      appendMessage(payload);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       resetComposerAfterSend();
     } catch {
@@ -722,18 +748,40 @@ export default function ChatRoomScreen() {
   const isSendOnly = message.trim().length > 0;
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["bottom"]}>
-      <KeyboardAvoidingView
-        style={styles.keyboardRoot}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={
-          Platform.OS === "ios" ? 100 : KEYBOARD_EXTRA_OFFSET
-        }
-      >
-        <ThemedView style={styles.container}>
-          <Stack.Screen
-            options={{ title: contactName, headerBackTitle: "Chats" }}
+    <SafeAreaView
+      style={[styles.safeArea, { backgroundColor: colors.background }]}
+      edges={["bottom"]}
+    >
+      <GestureDetector gesture={swipeBackGesture}>
+        <View style={styles.gestureFill}>
+          <LinearGradient
+            colors={[
+              colors.gradientEnd,
+              colors.background,
+              colors.backgroundSecondary,
+            ]}
+            locations={[0, 0.45, 1]}
+            start={{ x: 0.5, y: 0 }}
+            end={{ x: 0.5, y: 1 }}
+            style={StyleSheet.absoluteFill}
           />
+          <KeyboardAvoidingView
+            style={styles.keyboardRoot}
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            keyboardVerticalOffset={
+              Platform.OS === "ios" ? 100 : KEYBOARD_EXTRA_OFFSET
+            }
+          >
+            <View style={styles.container}>
+              <Stack.Screen
+                options={{
+                  title: contactName,
+                  headerBackTitle: "Chats",
+                  headerStyle: { backgroundColor: colors.surfaceElevated },
+                  headerTintColor: colors.text,
+                  headerShadowVisible: false,
+                }}
+              />
 
           {Platform.OS !== "web" && videoSessionActive ? (
             <VideoMessage
@@ -761,16 +809,12 @@ export default function ChatRoomScreen() {
               const bubbleBg = isMediaBubble
                 ? "transparent"
                 : item.sender === "me"
-                  ? "#3B82F6"
-                  : isDark
-                    ? "#374151"
-                    : "#E5E7EB";
+                  ? colors.primary
+                  : colors.surfaceElevated;
               const primaryColor =
                 item.sender === "me" && !isMediaBubble
-                  ? "white"
-                  : isDark
-                    ? "white"
-                    : "black";
+                  ? colors.onPrimary
+                  : colors.text;
               const timeColor = isMyVideo
                 ? isDark
                   ? "rgba(148,163,184,0.95)"
@@ -782,7 +826,10 @@ export default function ChatRoomScreen() {
                     : "rgba(0,0,0,0.5)";
 
               return (
-                <View
+                <Animated.View
+                  entering={FadeInDown.duration(200).easing(
+                    Easing.out(Easing.cubic),
+                  )}
                   style={[
                     styles.messageBubble,
                     item.sender === "me"
@@ -791,7 +838,11 @@ export default function ChatRoomScreen() {
                     isMyVideo && styles.myVideoBubble,
                     item.kind === "video" && styles.videoMessageBubble,
                     isMyVoice && styles.myVoiceBubble,
-                    { backgroundColor: bubbleBg },
+                    {
+                      backgroundColor: bubbleBg,
+                      borderWidth: item.sender === "me" || isMediaBubble ? 0 : 1,
+                      borderColor: colors.surfaceBorder,
+                    },
                   ]}
                 >
                   {item.kind === "voice" && item.mediaUri ? (
@@ -851,7 +902,7 @@ export default function ChatRoomScreen() {
                   <ThemedText style={[styles.timeText, { color: timeColor }]}>
                     {item.time}
                   </ThemedText>
-                </View>
+                </Animated.View>
               );
             }}
           />
@@ -859,7 +910,10 @@ export default function ChatRoomScreen() {
           <View
             style={[
               styles.composerShell,
-              { borderTopColor: isDark ? "#374151" : "#E5E7EB" },
+              {
+                borderTopColor: colors.surfaceBorder,
+                backgroundColor: colors.surfaceElevated,
+              },
             ]}
           >
             <ErrorHandlerButton
@@ -871,7 +925,8 @@ export default function ChatRoomScreen() {
                 style={[
                   styles.inputShell,
                   {
-                    borderColor: isDark ? "#4b5563" : "#cbd5e1",
+                    borderColor: colors.inputBorder,
+                    backgroundColor: colors.inputFill,
                   },
                 ]}
                 onLayout={onInputShellLayout}
@@ -886,11 +941,11 @@ export default function ChatRoomScreen() {
                   style={[
                     styles.input,
                     {
-                      color: isDark ? "white" : "black",
+                      color: colors.text,
                     },
                   ]}
                   placeholder="Type a message..."
-                  placeholderTextColor={isDark ? "#9CA3AF" : "#6B7280"}
+                  placeholderTextColor={colors.textMuted}
                   value={message}
                   onChangeText={setMessage}
                   onFocus={() => setInputFocused(true)}
@@ -904,11 +959,15 @@ export default function ChatRoomScreen() {
                     composerMode={composerMode}
                     onSendText={sendTextMessage}
                     onCycleSendEmpty={() => setComposerMode("voice")}
+                    fabColor={colors.primary}
+                    iconColor={colors.onPrimary}
                   />
                 ) : (
                   <HoldRecordControls
                     mode={composerMode}
                     recording={recordingLive}
+                    accentColor={colors.primary}
+                    iconColor={colors.onPrimary}
                     locked={
                       composerMode === "voice" ? voiceLocked : videoLocked
                     }
@@ -938,8 +997,10 @@ export default function ChatRoomScreen() {
               </View>
             </View>
           </View>
-        </ThemedView>
-      </KeyboardAvoidingView>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </GestureDetector>
     </SafeAreaView>
   );
 }
@@ -1055,7 +1116,6 @@ const styles = StyleSheet.create({
     elevation: 16,
   },
   actionFab: {
-    backgroundColor: LIME,
     width: 44,
     height: 44,
     borderRadius: 22,
@@ -1066,5 +1126,8 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 2 },
     elevation: 3,
+  },
+  gestureFill: {
+    flex: 1,
   },
 });
