@@ -21,6 +21,7 @@ import Animated, {
 } from "react-native-reanimated";
 
 import { VoiceWaveform } from "@/components/voice-waveform";
+import { useThemePalette } from "@/providers/theme-palette-provider";
 
 const ICON_MS = 200;
 
@@ -52,6 +53,7 @@ export function VoiceMessageBubble({
   onActivate,
   onDeactivate,
 }: VoiceMessageBubbleProps) {
+  const { colors, mode } = useThemePalette();
   const player = useAudioPlayer(uri, { updateInterval: 100 });
   const status = useAudioPlayerStatus(player);
 
@@ -101,8 +103,8 @@ export function VoiceMessageBubble({
 
   const togglePlayback = useCallback(async () => {
     buttonScale.value = withSequence(
-      withTiming(0.9, { duration: 90 }),
-      withTiming(1, { duration: 120 }),
+      withTiming(0.94, { duration: 70 }),
+      withTiming(1, { duration: 130 }),
     );
 
     if (playing) {
@@ -156,6 +158,11 @@ export function VoiceMessageBubble({
         : durationMs ?? 0;
   const displayMs = playing ? elapsedMs : durationMs ?? elapsedMs;
 
+  const shellBorder = isMine
+    ? `${colors.primary}66`
+    : `${colors.surfaceBorder}CC`;
+  const blurTint = mode === "dark" ? "dark" : "light";
+
   const glass = (
     <View style={styles.content}>
       <Animated.View style={buttonAnimStyle}>
@@ -163,13 +170,23 @@ export function VoiceMessageBubble({
           onPress={() => void togglePlayback()}
           accessibilityRole="button"
           accessibilityLabel={playing ? "Pause voice message" : "Play voice message"}
-          style={styles.playButton}
+          style={[
+            styles.playButton,
+            {
+              backgroundColor: colors.primary,
+              shadowColor: colors.primary,
+            },
+          ]}
         >
           <Animated.View style={[styles.iconLayer, playIconStyle]}>
-            <MaterialIcons name="play-arrow" size={22} color="#fff" />
+            <MaterialIcons
+              name="play-arrow"
+              size={22}
+              color={colors.onPrimary}
+            />
           </Animated.View>
           <Animated.View style={[styles.iconLayer, pauseIconStyle]}>
-            <MaterialIcons name="pause" size={22} color="#fff" />
+            <MaterialIcons name="pause" size={22} color={colors.onPrimary} />
           </Animated.View>
         </Pressable>
       </Animated.View>
@@ -180,16 +197,32 @@ export function VoiceMessageBubble({
         onSeek={seekToProgress}
       />
 
-      <Text style={styles.duration}>{formatDuration(displayMs)}</Text>
+      <Text style={[styles.duration, { color: colors.textSecondary }]}>
+        {formatDuration(displayMs)}
+      </Text>
     </View>
   );
 
   return (
-    <View style={[styles.shell, isMine ? styles.shellMine : styles.shellTheirs]}>
+    <View style={[styles.shell, { borderColor: shellBorder }]}>
       {Platform.OS === "web" ? (
-        <View style={styles.webGlass}>{glass}</View>
+        <View
+          style={[
+            styles.webGlass,
+            { backgroundColor: colors.surfaceElevated },
+          ]}
+        >
+          {glass}
+        </View>
       ) : (
-        <BlurView intensity={42} tint="dark" style={styles.blur}>
+        <BlurView
+          intensity={mode === "dark" ? 48 : 56}
+          tint={blurTint}
+          style={[
+            styles.blur,
+            { backgroundColor: `${colors.surfaceElevated}B3` },
+          ]}
+        >
           {glass}
         </BlurView>
       )}
@@ -204,20 +237,12 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     borderWidth: 1,
   },
-  shellMine: {
-    borderColor: "rgba(96,165,250,0.35)",
-  },
-  shellTheirs: {
-    borderColor: "rgba(148,163,184,0.28)",
-  },
   blur: {
     borderRadius: 18,
     overflow: "hidden",
-    backgroundColor: "rgba(15,23,42,0.28)",
   },
   webGlass: {
     borderRadius: 18,
-    backgroundColor: "rgba(15,23,42,0.62)",
   },
   content: {
     flexDirection: "row",
@@ -230,11 +255,9 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#3B82F6",
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#2563EB",
-    shadowOpacity: 0.45,
+    shadowOpacity: 0.35,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
     elevation: 4,
@@ -246,7 +269,6 @@ const styles = StyleSheet.create({
   },
   duration: {
     minWidth: 36,
-    color: "rgba(226,232,240,0.92)",
     fontSize: 12,
     fontVariant: ["tabular-nums"],
     fontWeight: "600",
