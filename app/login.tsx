@@ -1,4 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
+import { BlurView } from "expo-blur";
+import { LinearGradient } from "expo-linear-gradient";
 import { Redirect, useRouter } from "expo-router";
 import React, { useMemo, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
@@ -10,11 +12,10 @@ import {
   TextInput,
   View,
 } from "react-native";
+import Animated, { FadeInDown, FadeInUp } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ThemedText } from "@/components/themed-text";
-import { ThemedView } from "@/components/themed-view";
-import { useColorScheme } from "@/hooks/use-color-scheme";
 import {
   formatPhoneAsYouType,
   getPhoneCountryInfo,
@@ -27,16 +28,17 @@ import {
   type PhoneInput,
 } from "@/lib/auth/schemas";
 import { useAuth } from "@/providers/auth-provider";
+import { useThemePalette } from "@/providers/theme-palette-provider";
 
 type LoginMode = "phone" | "email";
 
 export default function LoginScreen() {
   const router = useRouter();
   const { isAuthenticated, isReady } = useAuth();
-  const [mode, setMode] = useState<LoginMode>("phone");
+  const { colors, mode } = useThemePalette();
+  const [loginMode, setLoginMode] = useState<LoginMode>("phone");
   const [phoneFocused, setPhoneFocused] = useState(false);
   const [emailFocused, setEmailFocused] = useState(false);
-  const isDark = (useColorScheme() ?? "light") === "dark";
 
   const phoneForm = useForm<PhoneInput>({
     resolver: zodResolver(phoneSchema),
@@ -80,244 +82,315 @@ export default function LoginScreen() {
     });
   });
 
+  const blurTint = mode === "dark" ? "dark" : "light";
+
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        style={styles.flex}
-      >
-        <ThemedView style={styles.container}>
-          <View style={styles.header}>
-            <ThemedText type="title" style={styles.title}>
-              Log in to Smash
-            </ThemedText>
-          </View>
+    <View style={styles.root}>
+      <LinearGradient
+        colors={[colors.gradientStart, colors.gradientMid, colors.gradientEnd]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFill}
+      />
+      {/* Soft orbs */}
+      <View
+        pointerEvents="none"
+        style={[
+          styles.orb,
+          {
+            backgroundColor: colors.primary,
+            opacity: mode === "dark" ? 0.12 : 0.18,
+            top: "8%",
+            right: "-12%",
+          },
+        ]}
+      />
+      <View
+        pointerEvents="none"
+        style={[
+          styles.orb,
+          {
+            backgroundColor: colors.tint,
+            opacity: mode === "dark" ? 0.1 : 0.14,
+            bottom: "12%",
+            left: "-18%",
+          },
+        ]}
+      />
 
-          <View style={styles.card}>
-            {/* <View style={styles.switchRow}>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.switchBtn,
-                  mode === "phone" && styles.switchBtnActive,
-                  pressed && styles.pressedFade,
-                ]}
-                onPress={() => setMode("phone")}
-              >
-                <ThemedText
+      <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          style={styles.flex}
+        >
+          <View style={styles.container}>
+            <Animated.View entering={FadeInDown.duration(420).springify()}>
+              <View style={styles.hero}>
+                <View
                   style={[
-                    styles.switchText,
-                    mode === "phone" && styles.switchTextActive,
+                    styles.blockAccent,
+                    { backgroundColor: colors.primary },
                   ]}
-                >
-                  Phone
-                </ThemedText>
-              </Pressable>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.switchBtn,
-                  mode === "email" && styles.switchBtnActive,
-                  pressed && styles.pressedFade,
-                ]}
-                onPress={() => setMode("email")}
-              >
+                />
                 <ThemedText
-                  style={[
-                    styles.switchText,
-                    mode === "email" && styles.switchTextActive,
-                  ]}
+                  type="title"
+                  style={[styles.wordmark, { color: colors.text }]}
+                  lightColor={colors.text}
+                  darkColor={colors.text}
                 >
-                  Email
+                  Smash
                 </ThemedText>
-              </Pressable>
-            </View> */}
+                <ThemedText
+                  style={[styles.tagline, { color: colors.textSecondary }]}
+                  lightColor={colors.textSecondary}
+                  darkColor={colors.textSecondary}
+                >
+                  Messages that feel alive — sign in to continue.
+                </ThemedText>
+              </View>
+            </Animated.View>
 
-            {mode === "phone" ? (
-              <>
-                {countryInfo ? (
-                  <View style={styles.countryRow}>
-                    <ThemedText style={styles.countryFlag}>
-                      {countryInfo.flag}
-                    </ThemedText>
-                    <ThemedText style={styles.countryText}>
-                      {countryInfo.name}
-                      {countryInfo.callingCode
-                        ? ` (+${countryInfo.callingCode})`
-                        : ""}
-                    </ThemedText>
-                  </View>
-                ) : null}
-                <Controller
-                  control={phoneForm.control}
-                  name="phone"
-                  render={({ field: { onChange, onBlur, value } }) => (
-                    <TextInput
-                      keyboardType="phone-pad"
-                      autoComplete="tel"
-                      textContentType="telephoneNumber"
-                      placeholder="+1 202 555 0101"
-                      placeholderTextColor={isDark ? "#64748B" : "#94A3B8"}
-                      value={value}
-                      onFocus={() => setPhoneFocused(true)}
-                      onBlur={() => {
-                        setPhoneFocused(false);
-                        onBlur();
-                      }}
-                      onChangeText={(text) =>
-                        onChange(formatPhoneAsYouType(text))
-                      }
-                      style={[
-                        styles.telegramInput,
-                        {
-                          color: isDark ? "#F8FAFC" : "#0F172A",
-                          borderColor: phoneForm.formState.errors.phone
-                            ? "#EF4444"
-                            : phoneFocused
-                              ? "#229ED9"
-                              : isDark
-                                ? "#334155"
-                                : "#CBD5E1",
-                        },
-                      ]}
-                    />
-                  )}
-                />
-                <ThemedText style={styles.errorText}>
-                  {phoneForm.formState.errors.phone?.message ?? " "}
-                </ThemedText>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.primaryBtn,
-                    pressed && styles.pressedFade,
+            <Animated.View entering={FadeInUp.delay(90).duration(380)}>
+              <BlurView
+                intensity={mode === "dark" ? 42 : 56}
+                tint={blurTint}
+                style={styles.blurShell}
+              >
+                <View
+                  style={[
+                    styles.cardInner,
+                    {
+                      borderColor: colors.surfaceBorder,
+                      backgroundColor:
+                        Platform.OS === "ios"
+                          ? "transparent"
+                          : colors.surface,
+                    },
                   ]}
-                  onPress={onSubmitPhone}
                 >
-                  <ThemedText style={styles.primaryBtnText}>
-                    Send OTP
-                  </ThemedText>
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [pressed && styles.pressedFade]}
-                  onPress={() => setMode("email")}
-                >
-                  <ThemedText style={styles.switchLink}>
-                    Login with email instead
-                  </ThemedText>
-                </Pressable>
-              </>
-            ) : (
-              <>
-                <Controller
-                  control={emailForm.control}
-                  name="email"
-                  render={({ field: { onChange, onBlur, value } }) => (
-                    <TextInput
-                      keyboardType="email-address"
-                      autoComplete="email"
-                      autoCapitalize="none"
-                      placeholder="you@example.com"
-                      placeholderTextColor={isDark ? "#64748B" : "#94A3B8"}
-                      value={value}
-                      onFocus={() => setEmailFocused(true)}
-                      onBlur={() => {
-                        setEmailFocused(false);
-                        onBlur();
-                      }}
-                      onChangeText={onChange}
-                      style={[
-                        styles.telegramInput,
-                        {
-                          color: isDark ? "#F8FAFC" : "#0F172A",
-                          borderColor: emailForm.formState.errors.email
-                            ? "#EF4444"
-                            : emailFocused
-                              ? "#229ED9"
-                              : isDark
-                                ? "#334155"
-                                : "#CBD5E1",
-                        },
-                      ]}
-                    />
+                  {loginMode === "phone" ? (
+                    <>
+                      {countryInfo ? (
+                        <View style={styles.countryRow}>
+                          <ThemedText style={styles.countryFlag}>
+                            {countryInfo.flag}
+                          </ThemedText>
+                          <ThemedText
+                            style={[styles.countryText, { color: colors.textMuted }]}
+                            lightColor={colors.textMuted}
+                            darkColor={colors.textMuted}
+                          >
+                            {countryInfo.name}
+                            {countryInfo.callingCode
+                              ? ` (+${countryInfo.callingCode})`
+                              : ""}
+                          </ThemedText>
+                        </View>
+                      ) : null}
+                      <Controller
+                        control={phoneForm.control}
+                        name="phone"
+                        render={({ field: { onChange, onBlur, value } }) => (
+                          <TextInput
+                            keyboardType="phone-pad"
+                            autoComplete="tel"
+                            textContentType="telephoneNumber"
+                            placeholder="+1 202 555 0101"
+                            placeholderTextColor={colors.textMuted}
+                            value={value}
+                            onFocus={() => setPhoneFocused(true)}
+                            onBlur={() => {
+                              setPhoneFocused(false);
+                              onBlur();
+                            }}
+                            onChangeText={(text) =>
+                              onChange(formatPhoneAsYouType(text))
+                            }
+                            style={[
+                              styles.input,
+                              {
+                                color: colors.text,
+                                borderBottomColor: phoneForm.formState.errors.phone
+                                  ? colors.error
+                                  : phoneFocused
+                                    ? colors.inputBorderFocus
+                                    : colors.inputBorder,
+                                backgroundColor: colors.inputFill,
+                              },
+                            ]}
+                          />
+                        )}
+                      />
+                      <ThemedText
+                        style={styles.errorText}
+                        lightColor={colors.error}
+                        darkColor={colors.error}
+                      >
+                        {phoneForm.formState.errors.phone?.message ?? " "}
+                      </ThemedText>
+                      <Pressable
+                        style={({ pressed }) => [
+                          styles.primaryBtn,
+                          { backgroundColor: colors.primary },
+                          pressed && styles.pressedFade,
+                        ]}
+                        onPress={onSubmitPhone}
+                      >
+                        <ThemedText
+                          style={[styles.primaryBtnText, { color: colors.onPrimary }]}
+                          lightColor={colors.onPrimary}
+                          darkColor={colors.onPrimary}
+                        >
+                          Send OTP
+                        </ThemedText>
+                      </Pressable>
+                      <Pressable
+                        style={({ pressed }) => [pressed && styles.pressedFade]}
+                        onPress={() => setLoginMode("email")}
+                      >
+                        <ThemedText
+                          type="link"
+                          style={[styles.switchLink, { color: colors.link }]}
+                          lightColor={colors.link}
+                          darkColor={colors.link}
+                        >
+                          Login with email instead
+                        </ThemedText>
+                      </Pressable>
+                    </>
+                  ) : (
+                    <>
+                      <Controller
+                        control={emailForm.control}
+                        name="email"
+                        render={({ field: { onChange, onBlur, value } }) => (
+                          <TextInput
+                            keyboardType="email-address"
+                            autoComplete="email"
+                            autoCapitalize="none"
+                            placeholder="you@example.com"
+                            placeholderTextColor={colors.textMuted}
+                            value={value}
+                            onFocus={() => setEmailFocused(true)}
+                            onBlur={() => {
+                              setEmailFocused(false);
+                              onBlur();
+                            }}
+                            onChangeText={onChange}
+                            style={[
+                              styles.input,
+                              {
+                                color: colors.text,
+                                borderBottomColor: emailForm.formState.errors.email
+                                  ? colors.error
+                                  : emailFocused
+                                    ? colors.inputBorderFocus
+                                    : colors.inputBorder,
+                                backgroundColor: colors.inputFill,
+                              },
+                            ]}
+                          />
+                        )}
+                      />
+                      <ThemedText
+                        style={styles.errorText}
+                        lightColor={colors.error}
+                        darkColor={colors.error}
+                      >
+                        {emailForm.formState.errors.email?.message ?? " "}
+                      </ThemedText>
+                      <Pressable
+                        style={({ pressed }) => [
+                          styles.primaryBtn,
+                          { backgroundColor: colors.primary },
+                          pressed && styles.pressedFade,
+                        ]}
+                        onPress={onSubmitEmail}
+                      >
+                        <ThemedText
+                          style={[styles.primaryBtnText, { color: colors.onPrimary }]}
+                          lightColor={colors.onPrimary}
+                          darkColor={colors.onPrimary}
+                        >
+                          Send OTP
+                        </ThemedText>
+                      </Pressable>
+                      <Pressable
+                        style={({ pressed }) => [pressed && styles.pressedFade]}
+                        onPress={() => setLoginMode("phone")}
+                      >
+                        <ThemedText
+                          type="link"
+                          style={[styles.switchLink, { color: colors.link }]}
+                          lightColor={colors.link}
+                          darkColor={colors.link}
+                        >
+                          Login with phone instead
+                        </ThemedText>
+                      </Pressable>
+                    </>
                   )}
-                />
-                <ThemedText style={styles.errorText}>
-                  {emailForm.formState.errors.email?.message ?? " "}
-                </ThemedText>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.primaryBtn,
-                    pressed && styles.pressedFade,
-                  ]}
-                  onPress={onSubmitEmail}
-                >
-                  <ThemedText style={styles.primaryBtnText}>
-                    Send OTP
-                  </ThemedText>
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [pressed && styles.pressedFade]}
-                  onPress={() => setMode("phone")}
-                >
-                  <ThemedText style={styles.switchLink}>
-                    Login with phone instead
-                  </ThemedText>
-                </Pressable>
-              </>
-            )}
+                </View>
+              </BlurView>
+            </Animated.View>
           </View>
-        </ThemedView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
   safeArea: {
     flex: 1,
+    backgroundColor: "transparent",
   },
   flex: {
     flex: 1,
   },
   container: {
     flex: 1,
-    paddingHorizontal: 18,
-    paddingTop: 24,
-    gap: 20,
+    paddingHorizontal: 22,
+    paddingTop: 12,
+    justifyContent: "center",
+    gap: 28,
   },
-  header: {
-    gap: 8,
+  hero: {
+    gap: 12,
   },
-  title: {
-    fontSize: 34,
-    lineHeight: 40,
+  blockAccent: {
+    width: 56,
+    height: 8,
+    borderRadius: 4,
+    marginBottom: 4,
   },
-  card: {
-    paddingVertical: 8,
+  wordmark: {
+    fontSize: 44,
+    lineHeight: 48,
+    fontWeight: "800",
+    letterSpacing: -1.2,
+  },
+  tagline: {
+    fontSize: 16,
+    lineHeight: 24,
+    maxWidth: 340,
+    opacity: 0.95,
+  },
+  blurShell: {
+    borderRadius: 28,
+    overflow: "hidden",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(255,255,255,0.2)",
+  },
+  cardInner: {
+    borderRadius: 28,
+    paddingHorizontal: 22,
+    paddingVertical: 24,
+    borderWidth: 1,
     gap: 10,
-  },
-  switchRow: {
-    flexDirection: "row",
-    backgroundColor: "rgba(148,163,184,0.15)",
-    borderRadius: 14,
-    padding: 3,
-    marginBottom: 6,
-  },
-  switchBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: "center",
-    borderRadius: 11,
-  },
-  switchBtnActive: {
-    backgroundColor: "#3B82F6",
-  },
-  switchText: {
-    fontSize: 14,
-    opacity: 0.8,
-  },
-  switchTextActive: {
-    color: "#FFFFFF",
-    opacity: 1,
-    fontWeight: "700",
   },
   countryRow: {
     flexDirection: "row",
@@ -330,45 +403,54 @@ const styles = StyleSheet.create({
     lineHeight: 24,
   },
   countryText: {
-    opacity: 0.8,
     fontSize: 13,
   },
-  telegramInput: {
+  input: {
     borderBottomWidth: 2,
-    borderRadius: 0,
-    fontSize: 22,
-    lineHeight: 28,
+    borderRadius: 12,
+    fontSize: 20,
+    lineHeight: 26,
     paddingVertical: 14,
-    paddingHorizontal: 2,
-    letterSpacing: 0.15,
-    backgroundColor: "transparent",
+    paddingHorizontal: 14,
+    letterSpacing: 0.12,
+    marginTop: 4,
   },
   errorText: {
     minHeight: 18,
-    color: "#EF4444",
     fontSize: 12,
     lineHeight: 16,
   },
   primaryBtn: {
-    height: 50,
-    borderRadius: 12,
+    height: 54,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#229ED9",
-    marginTop: 2,
+    marginTop: 6,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 4,
   },
   primaryBtnText: {
-    color: "#FFFFFF",
-    fontWeight: "700",
+    fontWeight: "800",
     fontSize: 16,
+    letterSpacing: 0.3,
   },
   switchLink: {
     textAlign: "center",
-    color: "#229ED9",
-    fontSize: 14,
-    marginTop: 4,
+    fontSize: 15,
+    marginTop: 8,
+    fontWeight: "600",
   },
   pressedFade: {
-    opacity: 0.72,
+    opacity: 0.78,
+    transform: [{ scale: 0.99 }],
+  },
+  orb: {
+    position: "absolute",
+    width: 280,
+    height: 280,
+    borderRadius: 140,
   },
 });

@@ -1,4 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
+import { LinearGradient } from "expo-linear-gradient";
 import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useMemo, useRef, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
@@ -20,10 +21,9 @@ import Animated, {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ThemedText } from "@/components/themed-text";
-import { ThemedView } from "@/components/themed-view";
-import { useColorScheme } from "@/hooks/use-color-scheme";
 import { otpSchema, type OtpInput } from "@/lib/auth/schemas";
 import { useAuth } from "@/providers/auth-provider";
+import { useThemePalette } from "@/providers/theme-palette-provider";
 
 type Params = {
   method?: "phone" | "email";
@@ -36,7 +36,7 @@ export default function VerifyOtpScreen() {
   const router = useRouter();
   const { method = "phone", value = "" } = useLocalSearchParams<Params>();
   const { signIn, isAuthenticated, isReady } = useAuth();
-  const isDark = (useColorScheme() ?? "light") === "dark";
+  const { colors } = useThemePalette();
   const inputRef = useRef<TextInput>(null);
   const [status, setStatus] = useState<"idle" | "error" | "success">("idle");
   const [submitting, setSubmitting] = useState(false);
@@ -67,6 +67,10 @@ export default function VerifyOtpScreen() {
     return `${value.slice(0, 4)}***${value.slice(-2)}`;
   }, [method, value]);
 
+  const idleBorder = colors.inputBorder;
+  const ok = colors.success;
+  const err = colors.error;
+
   const shakeStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: shakeX.value }],
   }));
@@ -74,74 +78,62 @@ export default function VerifyOtpScreen() {
   const box0Style = useAnimatedStyle(() => ({
     borderColor:
       status === "error"
-        ? "#EF4444"
+        ? err
         : progress.value >= 1
-          ? "#22C55E"
-          : isDark
-            ? "#334155"
-            : "#CBD5E1",
+          ? ok
+          : idleBorder,
     transform: [{ scale: scale0.value }],
-  }));
+  }), [status, err, ok, idleBorder]);
 
   const box1Style = useAnimatedStyle(() => ({
     borderColor:
       status === "error"
-        ? "#EF4444"
+        ? err
         : progress.value >= 2
-          ? "#22C55E"
-          : isDark
-            ? "#334155"
-            : "#CBD5E1",
+          ? ok
+          : idleBorder,
     transform: [{ scale: scale1.value }],
-  }));
+  }), [status, err, ok, idleBorder]);
 
   const box2Style = useAnimatedStyle(() => ({
     borderColor:
       status === "error"
-        ? "#EF4444"
+        ? err
         : progress.value >= 3
-          ? "#22C55E"
-          : isDark
-            ? "#334155"
-            : "#CBD5E1",
+          ? ok
+          : idleBorder,
     transform: [{ scale: scale2.value }],
-  }));
+  }), [status, err, ok, idleBorder]);
 
   const box3Style = useAnimatedStyle(() => ({
     borderColor:
       status === "error"
-        ? "#EF4444"
+        ? err
         : progress.value >= 4
-          ? "#22C55E"
-          : isDark
-            ? "#334155"
-            : "#CBD5E1",
+          ? ok
+          : idleBorder,
     transform: [{ scale: scale3.value }],
-  }));
+  }), [status, err, ok, idleBorder]);
 
   const box4Style = useAnimatedStyle(() => ({
     borderColor:
       status === "error"
-        ? "#EF4444"
+        ? err
         : progress.value >= 5
-          ? "#22C55E"
-          : isDark
-            ? "#334155"
-            : "#CBD5E1",
+          ? ok
+          : idleBorder,
     transform: [{ scale: scale4.value }],
-  }));
+  }), [status, err, ok, idleBorder]);
 
   const box5Style = useAnimatedStyle(() => ({
     borderColor:
       status === "error"
-        ? "#EF4444"
+        ? err
         : progress.value >= 6
-          ? "#22C55E"
-          : isDark
-            ? "#334155"
-            : "#CBD5E1",
+          ? ok
+          : idleBorder,
     transform: [{ scale: scale5.value }],
-  }));
+  }), [status, err, ok, idleBorder]);
 
   if (!value) {
     return <Redirect href="/login" />;
@@ -207,7 +199,6 @@ export default function VerifyOtpScreen() {
     setSubmitting(true);
     setStatus("idle");
     try {
-      // Mock verification for now. Replace with API call later.
       await new Promise((resolve) => setTimeout(resolve, 300));
       if (code !== "123456") {
         runErrorAnimation();
@@ -222,150 +213,159 @@ export default function VerifyOtpScreen() {
     }
   });
 
+  const boxFill = colors.surfaceElevated;
+
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        style={styles.flex}
-      >
-        <ThemedView style={styles.container}>
-          <View style={styles.header}>
-            <ThemedText type="title" style={styles.title}>
-              Enter code
-            </ThemedText>
-            <ThemedText style={styles.subtitle}>
-              We sent a 6-digit code to {maskedTarget}
-            </ThemedText>
-          </View>
+    <View style={styles.root}>
+      <LinearGradient
+        colors={[colors.gradientStart, colors.background, colors.gradientEnd]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFill}
+      />
+      <SafeAreaView style={styles.safeArea}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          style={styles.flex}
+        >
+          <View style={styles.container}>
+            <View style={styles.header}>
+              <ThemedText
+                type="title"
+                style={[styles.title, { color: colors.text }]}
+                lightColor={colors.text}
+                darkColor={colors.text}
+              >
+                Enter code
+              </ThemedText>
+              <ThemedText
+                style={[styles.subtitle, { color: colors.textSecondary }]}
+                lightColor={colors.textSecondary}
+                darkColor={colors.textSecondary}
+              >
+                We sent a 6-digit code to {maskedTarget}
+              </ThemedText>
+            </View>
 
-          <Pressable
-            style={({ pressed }) => [pressed && styles.pressedFade]}
-            onPress={() => inputRef.current?.focus()}
-          >
-            <Animated.View style={[styles.boxRow, shakeStyle]}>
-              <Animated.View
-                style={[
-                  styles.box,
-                  { backgroundColor: isDark ? "#0B1220" : "#FFFFFF" },
-                  box0Style,
-                ]}
-              >
-                <ThemedText style={styles.boxText}>{otp[0] ?? ""}</ThemedText>
+            <Pressable
+              style={({ pressed }) => [pressed && styles.pressedFade]}
+              onPress={() => inputRef.current?.focus()}
+            >
+              <Animated.View style={[styles.boxRow, shakeStyle]}>
+                {(
+                  [
+                    box0Style,
+                    box1Style,
+                    box2Style,
+                    box3Style,
+                    box4Style,
+                    box5Style,
+                  ] as const
+                ).map((st, i) => (
+                  <Animated.View
+                    key={i}
+                    style={[styles.box, { backgroundColor: boxFill }, st]}
+                  >
+                    <ThemedText
+                      style={[styles.boxText, { color: colors.text }]}
+                      lightColor={colors.text}
+                      darkColor={colors.text}
+                    >
+                      {otp[i] ?? ""}
+                    </ThemedText>
+                  </Animated.View>
+                ))}
               </Animated.View>
-              <Animated.View
-                style={[
-                  styles.box,
-                  { backgroundColor: isDark ? "#0B1220" : "#FFFFFF" },
-                  box1Style,
-                ]}
-              >
-                <ThemedText style={styles.boxText}>{otp[1] ?? ""}</ThemedText>
-              </Animated.View>
-              <Animated.View
-                style={[
-                  styles.box,
-                  { backgroundColor: isDark ? "#0B1220" : "#FFFFFF" },
-                  box2Style,
-                ]}
-              >
-                <ThemedText style={styles.boxText}>{otp[2] ?? ""}</ThemedText>
-              </Animated.View>
-              <Animated.View
-                style={[
-                  styles.box,
-                  { backgroundColor: isDark ? "#0B1220" : "#FFFFFF" },
-                  box3Style,
-                ]}
-              >
-                <ThemedText style={styles.boxText}>{otp[3] ?? ""}</ThemedText>
-              </Animated.View>
-              <Animated.View
-                style={[
-                  styles.box,
-                  { backgroundColor: isDark ? "#0B1220" : "#FFFFFF" },
-                  box4Style,
-                ]}
-              >
-                <ThemedText style={styles.boxText}>{otp[4] ?? ""}</ThemedText>
-              </Animated.View>
-              <Animated.View
-                style={[
-                  styles.box,
-                  { backgroundColor: isDark ? "#0B1220" : "#FFFFFF" },
-                  box5Style,
-                ]}
-              >
-                <ThemedText style={styles.boxText}>{otp[5] ?? ""}</ThemedText>
-              </Animated.View>
-            </Animated.View>
-          </Pressable>
+            </Pressable>
 
-          <Controller
-            control={control}
-            name="otp"
-            render={({ field: { onChange, value: formValue } }) => (
-              <TextInput
-                ref={inputRef}
-                keyboardType="number-pad"
-                textContentType="oneTimeCode"
-                autoComplete="sms-otp"
-                value={formValue}
-                onChangeText={(text) => {
-                  const next = text.replace(/\D/g, "").slice(0, OTP_LEN);
-                  onChange(next);
-                  if (status !== "idle") setStatus("idle");
-                  if (next.length === OTP_LEN && !submitting) {
-                    setValue("otp", next, { shouldValidate: true });
-                    void onSubmit();
-                  }
-                }}
-                style={styles.hiddenInput}
-              />
+            <Controller
+              control={control}
+              name="otp"
+              render={({ field: { onChange, value: formValue } }) => (
+                <TextInput
+                  ref={inputRef}
+                  keyboardType="number-pad"
+                  textContentType="oneTimeCode"
+                  autoComplete="sms-otp"
+                  value={formValue}
+                  onChangeText={(text) => {
+                    const next = text.replace(/\D/g, "").slice(0, OTP_LEN);
+                    onChange(next);
+                    if (status !== "idle") setStatus("idle");
+                    if (next.length === OTP_LEN && !submitting) {
+                      setValue("otp", next, { shouldValidate: true });
+                      void onSubmit();
+                    }
+                  }}
+                  style={styles.hiddenInput}
+                />
+              )}
+            />
+
+            {status === "error" ? (
+              <ThemedText
+                style={[styles.errorText, { color: colors.error }]}
+                lightColor={colors.error}
+                darkColor={colors.error}
+              >
+                Wrong code, try again
+              </ThemedText>
+            ) : (
+              <View style={styles.errorSpacer} />
             )}
-          />
 
-          {status === "error" ? (
-            <ThemedText style={styles.errorText}>Wrong code, try again</ThemedText>
-          ) : (
-            <View style={styles.errorSpacer} />
-          )}
+            <Pressable
+              style={({ pressed }) => [
+                styles.primaryBtn,
+                { backgroundColor: colors.primary },
+                submitting && styles.btnDisabled,
+                pressed && styles.pressedFade,
+              ]}
+              onPress={() => void onSubmit()}
+              disabled={submitting}
+            >
+              <ThemedText
+                style={[styles.primaryBtnText, { color: colors.onPrimary }]}
+                lightColor={colors.onPrimary}
+                darkColor={colors.onPrimary}
+              >
+                {submitting ? "Checking..." : "Verify"}
+              </ThemedText>
+            </Pressable>
 
-          <Pressable
-            style={({ pressed }) => [
-              styles.primaryBtn,
-              submitting && styles.btnDisabled,
-              pressed && styles.pressedFade,
-            ]}
-            onPress={() => void onSubmit()}
-            disabled={submitting}
-          >
-            <ThemedText style={styles.primaryBtnText}>
-              {submitting ? "Checking..." : "Verify"}
-            </ThemedText>
-          </Pressable>
-
-          <Pressable
-            style={({ pressed }) => [pressed && styles.pressedFade]}
-            onPress={() => router.replace("/login")}
-          >
-            <ThemedText style={styles.linkText}>Use another phone/email</ThemedText>
-          </Pressable>
-        </ThemedView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+            <Pressable
+              style={({ pressed }) => [pressed && styles.pressedFade]}
+              onPress={() => router.replace("/login")}
+            >
+              <ThemedText
+                style={[styles.linkText, { color: colors.link }]}
+                lightColor={colors.link}
+                darkColor={colors.link}
+              >
+                Use another phone/email
+              </ThemedText>
+            </Pressable>
+          </View>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
   safeArea: {
     flex: 1,
+    backgroundColor: "transparent",
   },
   flex: {
     flex: 1,
   },
   container: {
     flex: 1,
-    paddingHorizontal: 18,
+    paddingHorizontal: 20,
     paddingTop: 28,
     gap: 22,
   },
@@ -375,11 +375,13 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 34,
     lineHeight: 40,
+    fontWeight: "800",
+    letterSpacing: -0.5,
   },
   subtitle: {
-    opacity: 0.7,
     fontSize: 14,
     lineHeight: 20,
+    opacity: 0.92,
   },
   boxRow: {
     flexDirection: "row",
@@ -398,7 +400,7 @@ const styles = StyleSheet.create({
   boxText: {
     fontSize: 28,
     lineHeight: 34,
-    fontWeight: "700",
+    fontWeight: "800",
     letterSpacing: 1,
   },
   hiddenInput: {
@@ -408,7 +410,6 @@ const styles = StyleSheet.create({
     height: 1,
   },
   errorText: {
-    color: "#EF4444",
     textAlign: "center",
     fontSize: 14,
     lineHeight: 20,
@@ -417,24 +418,28 @@ const styles = StyleSheet.create({
     height: 20,
   },
   primaryBtn: {
-    height: 50,
-    borderRadius: 14,
+    height: 54,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#3B82F6",
+    marginTop: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 3,
   },
   btnDisabled: {
     opacity: 0.6,
   },
   primaryBtnText: {
-    color: "#FFFFFF",
-    fontWeight: "700",
+    fontWeight: "800",
     fontSize: 16,
   },
   linkText: {
     textAlign: "center",
-    color: "#3B82F6",
-    fontSize: 14,
+    fontSize: 15,
+    fontWeight: "600",
   },
   pressedFade: {
     opacity: 0.72,
