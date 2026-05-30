@@ -30,6 +30,8 @@ type HoldRecordControlsProps = {
   panHandlers: PanResponderInstance["panHandlers"];
   onSendLocked: () => void;
   onCancelLocked: () => void;
+  accentColor?: string;
+  iconColor?: string;
 };
 
 function formatDuration(ms: number) {
@@ -52,6 +54,8 @@ export function HoldRecordControls({
   panHandlers,
   onSendLocked,
   onCancelLocked,
+  accentColor = "#C4F542",
+  iconColor = "#ffffff",
 }: HoldRecordControlsProps) {
   const holdIcon = mode === "voice" ? ("mic.fill" as const) : ("video.fill" as const);
   const dragUp = Math.max(0, -dragY);
@@ -94,7 +98,10 @@ export function HoldRecordControls({
         <View
           style={[
             styles.lockTarget,
-            lockReached && styles.lockTargetActive,
+            lockReached && {
+              backgroundColor: accentColor,
+              borderColor: accentColor,
+            },
             { opacity: locked ? 1 : 0.35 + lockProgress * 0.65 },
           ]}
           pointerEvents="none"
@@ -102,7 +109,7 @@ export function HoldRecordControls({
           <MaterialIcons
             name={lockReached ? "lock" : "lock-open"}
             size={20}
-            color={lockReached ? "#fff" : "#94a3b8"}
+            color={lockReached ? iconColor : "#94a3b8"}
           />
         </View>
       ) : null}
@@ -113,10 +120,14 @@ export function HoldRecordControls({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Send recording"
-              style={[styles.actionFab, styles.actionFabLocked]}
+              style={[
+                styles.actionFab,
+                styles.actionFabLocked,
+                { backgroundColor: accentColor },
+              ]}
               onPress={onSendLocked}
             >
-              <MaterialIcons name="send" size={22} color="#fff" />
+              <MaterialIcons name="send" size={22} color={iconColor} />
             </Pressable>
           ) : (
             <View
@@ -126,9 +137,9 @@ export function HoldRecordControls({
                   ? "Hold to record voice message"
                   : "Hold to record video message"
               }
-              style={styles.actionFab}
+              style={[styles.actionFab, { backgroundColor: accentColor }]}
             >
-              <IconSymbol name={holdIcon} size={22} color="#fff" />
+              <IconSymbol name={holdIcon} size={22} color={iconColor} />
             </View>
           )}
         </Animated.View>
@@ -190,10 +201,6 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: "rgba(148,163,184,0.45)",
   },
-  lockTargetActive: {
-    backgroundColor: "#3B82F6",
-    borderColor: "#60a5fa",
-  },
   fabWrap: {
     width: FAB,
     height: FAB,
@@ -204,14 +211,11 @@ const styles = StyleSheet.create({
     borderRadius: FAB / 2,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#C4F542",
     shadowColor: "#000",
     shadowOpacity: 0.18,
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 2 },
     elevation: 3,
   },
-  actionFabLocked: {
-    backgroundColor: "#3B82F6",
-  },
+  actionFabLocked: {},
 });

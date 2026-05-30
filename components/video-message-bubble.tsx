@@ -9,6 +9,7 @@ import Animated, {
 } from "react-native-reanimated";
 
 import { CircularProgressRing } from "@/components/circular-progress-ring";
+import { useThemePalette } from "@/providers/theme-palette-provider";
 
 export const VIDEO_BUBBLE_SIZE = 160;
 const PLAY_SCALE = 1.5;
@@ -32,6 +33,7 @@ export function VideoMessageBubble({
   onActivate,
   onDeactivate,
 }: VideoMessageBubbleProps) {
+  const { colors } = useThemePalette();
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const scale = useSharedValue(1);
@@ -106,6 +108,8 @@ export function VideoMessageBubble({
   }));
 
   const ringSize = VIDEO_BUBBLE_SIZE + 10;
+  const progressFill = isMine ? colors.primary : colors.tint;
+  const trackColor = `${colors.textMuted}4D`;
 
   return (
     <Pressable
@@ -122,15 +126,21 @@ export function VideoMessageBubble({
             size={ringSize}
             stroke={4}
             progress={progress}
-            fillColor={isMine ? "#5cf9e8" : "#60a5fa"}
-            trackColor="rgba(148,163,184,0.3)"
+            fillColor={progressFill}
+            trackColor={trackColor}
           />
         )}
         <View
           style={[
             styles.videoRing,
-            isMine && styles.videoRingMine,
-            playing && styles.videoRingPlaying,
+            {
+              borderColor: isMine
+                ? `${colors.primary}D9`
+                : `${colors.surfaceBorder}E6`,
+            },
+            playing && {
+              borderColor: progressFill,
+            },
           ]}
         >
           <VideoView
@@ -164,13 +174,6 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     backgroundColor: "#000",
     borderWidth: 2,
-    borderColor: "rgba(148,163,184,0.55)",
-  },
-  videoRingMine: {
-    borderColor: "rgba(92,249,232,0.85)",
-  },
-  videoRingPlaying: {
-    borderColor: "#5cf9e8",
   },
   video: {
     width: VIDEO_BUBBLE_SIZE,

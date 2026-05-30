@@ -15,7 +15,7 @@ export default function ModalScreen() {
   return (
     <ThemedView style={styles.container}>
       <Stack.Screen options={{ title: 'Quick Action' }} />
-      <Animated.View entering={FadeInDown.springy()} style={styles.cardWrap}>
+      <Animated.View entering={FadeInDown.springify()} style={styles.cardWrap}>
         <Animated.View
           entering={ZoomIn.springify()}
           style={[
