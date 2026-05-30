@@ -1,6 +1,12 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { useMemo, useState } from "react";
-import { Alert, ScrollView, StyleSheet, View } from "react-native";
+import {
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Animated, { FadeInDown } from "react-native-reanimated";
 
@@ -17,13 +23,16 @@ import {
   settingsSections,
   type SettingsSection as SettingsSectionType
 } from "@/constants/profile-data";
+import { APP_THEMES, type ThemeId } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useAuth } from "@/providers/auth-provider";
+import { useThemePalette } from "@/providers/theme-palette-provider";
 
 export default function ProfileScreen() {
   const colorScheme = useColorScheme() ?? "light";
   const isDark = colorScheme === "dark";
   const { signOut } = useAuth();
+  const { themeId, setThemeId, colors } = useThemePalette();
   const [toggleState, setToggleState] = useState(
     Object.fromEntries(
       settingsSections.flatMap((section) =>
@@ -73,7 +82,7 @@ export default function ProfileScreen() {
     <SafeAreaView
       style={[
         styles.safeArea,
-        { backgroundColor: isDark ? "#111827" : "#F6F8FC" },
+        { backgroundColor: colors.background },
       ]}
     >
       <ScrollView
@@ -88,8 +97,8 @@ export default function ProfileScreen() {
               </ThemedText>
               <ThemedText
                 style={styles.screenSubtitle}
-                lightColor="#64748B"
-                darkColor="#AAB4C3"
+                lightColor={colors.textMuted}
+                darkColor={colors.textMuted}
               >
                 Account, safety, storage, and preferences
               </ThemedText>
@@ -99,8 +108,8 @@ export default function ProfileScreen() {
               style={[
                 styles.iconButton,
                 {
-                  backgroundColor: isDark ? "#1F2937" : "#FFFFFF",
-                  borderColor: isDark ? "#2F3A4A" : "#E8EEF8",
+                  backgroundColor: colors.surfaceElevated,
+                  borderColor: colors.surfaceBorder,
                   borderWidth: 1,
                 },
               ]}
@@ -108,19 +117,99 @@ export default function ProfileScreen() {
               <MaterialIcons
                 name="qr-code-scanner"
                 size={23}
-                color={isDark ? "#E5E7EB" : "#111827"}
+                color={colors.text}
               />
             </ScalePressable>
           </View>
         </Animated.View>
 
         <Animated.View entering={FadeInDown.delay(70).springify()}>
+          <ThemedText
+            type="subtitle"
+            style={[styles.sectionLabel, { color: colors.text }]}
+            lightColor={colors.text}
+            darkColor={colors.text}
+          >
+            Signature look
+          </ThemedText>
+          <ThemedText
+            style={[styles.sectionHint, { color: colors.textMuted }]}
+            lightColor={colors.textMuted}
+            darkColor={colors.textMuted}
+          >
+            Curated palettes — saved on this device.
+          </ThemedText>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.themeScroll}
+          >
+            {APP_THEMES.map((t) => {
+              const active = themeId === t.id;
+              const swatch = isDark ? t.dark : t.light;
+              return (
+                <Pressable
+                  key={t.id}
+                  onPress={() => setThemeId(t.id as ThemeId)}
+                  style={({ pressed }) => [
+                    styles.themeCard,
+                    {
+                      borderColor: active ? swatch.tint : colors.surfaceBorder,
+                      backgroundColor: colors.surfaceElevated,
+                      opacity: pressed ? 0.88 : 1,
+                    },
+                    active && { shadowColor: swatch.tint, shadowOpacity: 0.35 },
+                  ]}
+                >
+                  <View style={styles.themeSwatches}>
+                    <View
+                      style={[
+                        styles.swatchDot,
+                        { backgroundColor: swatch.primary },
+                      ]}
+                    />
+                    <View
+                      style={[
+                        styles.swatchDot,
+                        { backgroundColor: swatch.tint },
+                      ]}
+                    />
+                    <View
+                      style={[
+                        styles.swatchDot,
+                        { backgroundColor: swatch.gradientMid },
+                      ]}
+                    />
+                  </View>
+                  <ThemedText
+                    type="defaultSemiBold"
+                    style={[styles.themeTitle, { color: colors.text }]}
+                    lightColor={colors.text}
+                    darkColor={colors.text}
+                  >
+                    {t.label}
+                  </ThemedText>
+                  <ThemedText
+                    numberOfLines={2}
+                    style={[styles.themeTag, { color: colors.textMuted }]}
+                    lightColor={colors.textMuted}
+                    darkColor={colors.textMuted}
+                  >
+                    {t.tagline}
+                  </ThemedText>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </Animated.View>
+
+        <Animated.View entering={FadeInDown.delay(90).springify()}>
           <View
             style={[
               styles.profileCard,
               {
-                backgroundColor: isDark ? "#1F2937" : "#FFFFFF",
-                borderColor: isDark ? "#2F3A4A" : "#E8EEF8",
+                backgroundColor: colors.surfaceElevated,
+                borderColor: colors.surfaceBorder,
               },
             ]}
           >
@@ -131,15 +220,15 @@ export default function ProfileScreen() {
             </ThemedText>
             <ThemedText
               style={styles.handle}
-              lightColor="#3B82F6"
-              darkColor="#93C5FD"
+              lightColor={colors.tint}
+              darkColor={colors.tintMuted}
             >
               {profile.handle}
             </ThemedText>
             <ThemedText
               style={styles.status}
-              lightColor="#64748B"
-              darkColor="#AAB4C3"
+              lightColor={colors.textMuted}
+              darkColor={colors.textMuted}
             >
               {profile.status}
             </ThemedText>
@@ -147,25 +236,25 @@ export default function ProfileScreen() {
               <MaterialIcons
                 name="phone-iphone"
                 size={16}
-                color={isDark ? "#AAB4C3" : "#64748B"}
+                color={colors.textMuted}
               />
               <ThemedText
                 style={styles.metaText}
-                lightColor="#64748B"
-                darkColor="#AAB4C3"
+                lightColor={colors.textMuted}
+                darkColor={colors.textMuted}
               >
                 {profile.phone}
               </ThemedText>
               <View
                 style={[
                   styles.metaDivider,
-                  { backgroundColor: isDark ? "#475569" : "#CBD5E1" },
+                  { backgroundColor: colors.surfaceBorder },
                 ]}
               />
               <ThemedText
                 style={styles.metaText}
-                lightColor="#64748B"
-                darkColor="#AAB4C3"
+                lightColor={colors.textMuted}
+                darkColor={colors.textMuted}
               >
                 {profile.joinedAt}
               </ThemedText>
@@ -174,7 +263,7 @@ export default function ProfileScreen() {
         </View>
         </Animated.View>
 
-        <Animated.View entering={FadeInDown.delay(130).springify()}>
+        <Animated.View entering={FadeInDown.delay(140).springify()}>
           <View style={styles.actionsGrid}>
             {profileActions.map((action) => (
               <View key={action.id} style={styles.actionCell}>
@@ -184,23 +273,23 @@ export default function ProfileScreen() {
           </View>
         </Animated.View>
 
-        <Animated.View entering={FadeInDown.delay(180).springify()}>
+        <Animated.View entering={FadeInDown.delay(200).springify()}>
           <SecuritySummaryCard />
         </Animated.View>
-        <Animated.View entering={FadeInDown.delay(220).springify()}>
+        <Animated.View entering={FadeInDown.delay(240).springify()}>
           <StorageSummaryCard />
         </Animated.View>
 
         {sections.map((section, index) => (
           <Animated.View
             key={section.id}
-            entering={FadeInDown.delay(260 + index * 55).springify()}
+            entering={FadeInDown.delay(300 + index * 55).springify()}
           >
             <SettingsSection section={section} onToggle={handleToggle} />
           </Animated.View>
         ))}
 
-        <Animated.View entering={FadeInDown.delay(520).springify()}>
+        <Animated.View entering={FadeInDown.delay(560).springify()}>
           <ScalePressable
             accessibilityRole="button"
             accessibilityLabel="Log out"
@@ -322,5 +411,47 @@ const styles = StyleSheet.create({
   logoutText: {
     fontSize: 16,
     fontWeight: "700",
+  },
+  sectionLabel: {
+    fontSize: 18,
+    marginBottom: 4,
+  },
+  sectionHint: {
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 12,
+  },
+  themeScroll: {
+    gap: 12,
+    paddingRight: 18,
+    paddingBottom: 4,
+  },
+  themeCard: {
+    width: 156,
+    borderRadius: 20,
+    borderWidth: 2,
+    padding: 14,
+    marginRight: 4,
+    shadowOffset: { width: 0, height: 6 },
+    shadowRadius: 14,
+    elevation: 4,
+  },
+  themeSwatches: {
+    flexDirection: "row",
+    gap: 6,
+    marginBottom: 10,
+  },
+  swatchDot: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+  },
+  themeTitle: {
+    fontSize: 15,
+    marginBottom: 4,
+  },
+  themeTag: {
+    fontSize: 12,
+    lineHeight: 16,
   },
 });
