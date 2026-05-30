@@ -1,5 +1,5 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   StyleSheet,
   TextInput,
@@ -16,11 +16,26 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
+function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  const h = hex.replace("#", "");
+  const full =
+    h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  return {
+    r: parseInt(full.slice(0, 2), 16),
+    g: parseInt(full.slice(2, 4), 16),
+    b: parseInt(full.slice(4, 6), 16),
+  };
+}
+
 type ChatSearchBarProps = {
   value: string;
   onChangeText: (text: string) => void;
   visible: boolean;
   isDark: boolean;
+  /** Primary accent (hex), drives border + shadow */
+  accentHex?: string;
+  /** Top sweep bar color */
+  glowHex?: string;
   style?: StyleProp<ViewStyle>;
 };
 
@@ -29,8 +44,11 @@ export function ChatSearchBar({
   onChangeText,
   visible,
   isDark,
+  accentHex = "#3B82F6",
+  glowHex = "#5cf9e8",
   style,
 }: ChatSearchBarProps) {
+  const rgb = useMemo(() => hexToRgb(accentHex), [accentHex]);
   const [mounted, setMounted] = useState(visible);
   const reveal = useSharedValue(visible ? 1 : 0);
   const focus = useSharedValue(0);
@@ -83,10 +101,10 @@ export function ChatSearchBar({
 
   const borderAnim = useAnimatedStyle(() => ({
     borderColor: isDark
-      ? `rgba(96,165,250,${0.28 + focus.value * 0.55})`
-      : `rgba(59,130,246,${0.22 + focus.value * 0.5})`,
+      ? `rgba(${rgb.r},${rgb.g},${rgb.b},${0.28 + focus.value * 0.55})`
+      : `rgba(${rgb.r},${rgb.g},${rgb.b},${0.22 + focus.value * 0.5})`,
     shadowOpacity: 0.08 + focus.value * 0.18,
-  }));
+  }), [rgb.r, rgb.g, rgb.b, isDark]);
 
   const neonAnim = useAnimatedStyle(() => {
     const barW = 42;
@@ -112,11 +130,14 @@ export function ChatSearchBar({
             backgroundColor: isDark
               ? "rgba(15,23,42,0.42)"
               : "rgba(255,255,255,0.45)",
+            shadowColor: accentHex,
           },
         ]}
       >
         <View style={styles.neonClip} pointerEvents="none">
-          <Animated.View style={[styles.neonBar, neonAnim]} />
+          <Animated.View
+            style={[styles.neonBar, neonAnim, { backgroundColor: glowHex }]}
+          />
         </View>
         <MaterialIcons
           name="search"
@@ -152,7 +173,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     overflow: "hidden",
-    shadowColor: "#3B82F6",
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 2 },
     elevation: 2,
@@ -169,7 +189,6 @@ const styles = StyleSheet.create({
     height: 2,
     width: 42,
     borderRadius: 2,
-    backgroundColor: "#5cf9e8",
   },
   searchIcon: {
     marginLeft: 14,
