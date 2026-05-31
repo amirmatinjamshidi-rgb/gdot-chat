@@ -33,7 +33,7 @@ export const profile = {
   avatarInitials: "AM",
   avatarImage,
   phone: "+98 *** *** 2048",
-  joinedAt: "Joined May 2026",
+  // joinedAt: "Joined May 2026",
 };
 
 export const profileActions: ProfileAction[] = [

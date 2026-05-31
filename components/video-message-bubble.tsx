@@ -3,6 +3,7 @@ import { useVideoPlayer, VideoView } from "expo-video";
 import React, { useCallback, useEffect, useState } from "react";
 import { Platform, Pressable, StyleSheet, View } from "react-native";
 import Animated, {
+  Easing,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
@@ -12,9 +13,10 @@ import { CircularProgressRing } from "@/components/circular-progress-ring";
 import { useThemePalette } from "@/providers/theme-palette-provider";
 
 export const VIDEO_BUBBLE_SIZE = 160;
-const PLAY_SCALE = 1.5;
-const PLAY_SHIFT = 44;
-const PLAY_MS = 200;
+const PLAY_SCALE = 1.7;
+const PLAY_SHIFT = 80;
+const PLAY_MS = 170;
+const EASE = Easing.out(Easing.cubic);
 
 type VideoMessageBubbleProps = {
   uri: string;
@@ -42,12 +44,12 @@ export function VideoMessageBubble({
 
   const player = useVideoPlayer(uri, (p) => {
     p.loop = false;
-    p.timeUpdateEventInterval = 0.2;
+    p.timeUpdateEventInterval = 0.016;
   });
 
   const resetPlayback = useCallback(() => {
-    scale.value = withTiming(1, { duration: PLAY_MS });
-    translateX.value = withTiming(0, { duration: PLAY_MS });
+    scale.value = withTiming(1, { duration: PLAY_MS, easing: EASE });
+    translateX.value = withTiming(0, { duration: PLAY_MS, easing: EASE });
     setPlaying(false);
     setProgress(0);
     player.pause();
@@ -67,9 +69,7 @@ export function VideoMessageBubble({
         : durationMs
           ? durationMs / 1000
           : 1;
-    setProgress(
-      Math.min(1, player.currentTime / Math.max(durationSec, 0.001)),
-    );
+    setProgress(Math.min(1, player.currentTime / Math.max(durationSec, 0.001)));
   });
 
   useEventListener(player, "playToEnd", () => {
@@ -80,8 +80,8 @@ export function VideoMessageBubble({
   const togglePlayback = useCallback(() => {
     if (playing) {
       player.pause();
-      scale.value = withTiming(1, { duration: PLAY_MS });
-      translateX.value = withTiming(0, { duration: PLAY_MS });
+      scale.value = withTiming(1, { duration: PLAY_MS, easing: EASE });
+      translateX.value = withTiming(0, { duration: PLAY_MS, easing: EASE });
       setPlaying(false);
       onDeactivate();
       return;
@@ -89,18 +89,13 @@ export function VideoMessageBubble({
 
     onActivate();
     player.play();
-    scale.value = withTiming(PLAY_SCALE, { duration: PLAY_MS });
-    translateX.value = withTiming(playShift, { duration: PLAY_MS });
+    scale.value = withTiming(PLAY_SCALE, { duration: PLAY_MS, easing: EASE });
+    translateX.value = withTiming(playShift, {
+      duration: PLAY_MS,
+      easing: EASE,
+    });
     setPlaying(true);
-  }, [
-    onActivate,
-    onDeactivate,
-    playShift,
-    player,
-    playing,
-    scale,
-    translateX,
-  ]);
+  }, [onActivate, onDeactivate, playShift, player, playing, scale, translateX]);
 
   const animStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: translateX.value }, { scale: scale.value }],
@@ -118,9 +113,21 @@ export function VideoMessageBubble({
       accessibilityLabel={
         playing ? "Pause video message" : "Play video message"
       }
-      style={styles.pressable}
+      style={({ pressed }) => [styles.pressable, pressed && { opacity: 0.92 }]}
     >
-      <Animated.View style={[styles.outer, animStyle]}>
+      <Animated.View
+        style={[
+          styles.outer,
+          animStyle,
+          {
+            shadowColor: colors.text,
+            shadowOpacity: playing ? 0.14 : 0.06,
+            shadowRadius: playing ? 16 : 8,
+            shadowOffset: { width: 0, height: playing ? 6 : 3 },
+            elevation: playing ? 8 : 3,
+          },
+        ]}
+      >
         {(playing || progress > 0) && (
           <CircularProgressRing
             size={ringSize}
@@ -133,14 +140,14 @@ export function VideoMessageBubble({
         <View
           style={[
             styles.videoRing,
-            {
-              borderColor: isMine
-                ? `${colors.primary}D9`
-                : `${colors.surfaceBorder}E6`,
-            },
-            playing && {
-              borderColor: progressFill,
-            },
+            // {
+            //   borderColor: isMine
+            //     ? `${colors.primary}D9`
+            //     : `${colors.surfaceBorder}E6`,
+            // },
+            // playing && {
+            //   borderColor: progressFill,
+            // },
           ]}
         >
           <VideoView

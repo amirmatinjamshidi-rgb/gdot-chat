@@ -12,8 +12,10 @@ import {
   useCameraPermissions,
   useMicrophonePermissions,
 } from "expo-camera";
+import Animated, { Easing, FadeIn } from "react-native-reanimated";
 
 import { CircularProgressRing } from "@/components/circular-progress-ring";
+import { useThemePalette } from "@/providers/theme-palette-provider";
 
 export const VIDEO_RECORD_MAX_MS = 90_000;
 const CIRCLE = 220;
@@ -41,6 +43,7 @@ function formatDuration(ms: number) {
 
 export const VideoMessage = forwardRef<VideoMessageHandle, VideoMessageProps>(
   function VideoMessage({ active, elapsedMs = 0 }, ref) {
+    const { colors } = useThemePalette();
     const cameraRef = useRef<CameraViewRef>(null);
     const [cameraPermission, requestCameraPermission] = useCameraPermissions();
     const [micPermission, requestMicPermission] = useMicrophonePermissions();
@@ -155,23 +158,49 @@ export const VideoMessage = forwardRef<VideoMessageHandle, VideoMessageProps>(
 
     const recordProgress = Math.min(1, elapsedMs / VIDEO_RECORD_MAX_MS);
     const ringSize = CIRCLE + 14;
+    const remainingMs = Math.max(0, VIDEO_RECORD_MAX_MS - elapsedMs);
+    const trackRing = `${colors.textMuted}40`;
 
     return (
-      <View style={styles.overlayContent} pointerEvents="box-none">
-        <View style={styles.circularPanel}>
+      <Animated.View
+        entering={FadeIn.duration(260).easing(Easing.out(Easing.cubic))}
+        style={styles.overlayContent}
+        pointerEvents="box-none"
+      >
+        <View
+          style={[
+            styles.circularPanel,
+            {
+              backgroundColor: `${colors.surfaceElevated}EE`,
+              borderColor: colors.surfaceBorder,
+              shadowColor: colors.text,
+            },
+          ]}
+        >
           <View style={styles.centerStack}>
+            <Text style={[styles.hint, { color: colors.textMuted }]}>
+              Swipe up on the button to lock · tap send when done
+            </Text>
             <View style={styles.ringWrap}>
               <CircularProgressRing
                 size={ringSize}
                 stroke={5}
                 progress={recordProgress}
-                fillColor="#c4f542"
-                trackColor="rgba(255,255,255,0.2)"
+                fillColor={colors.primary}
+                trackColor={trackRing}
               />
-              <View style={styles.ring}>
+              <View
+                style={[
+                  styles.ring,
+                  {
+                    borderColor: colors.primary,
+                    backgroundColor: "#000",
+                  },
+                ]}
+              >
                 {!cameraReady ? (
                   <ActivityIndicator
-                    color="#fff"
+                    color={colors.tint}
                     style={StyleSheet.absoluteFill}
                   />
                 ) : null}
@@ -185,13 +214,18 @@ export const VideoMessage = forwardRef<VideoMessageHandle, VideoMessageProps>(
                 />
               </View>
             </View>
-            <Text style={styles.timer}>
-              {formatDuration(elapsedMs)} /{" "}
-              {formatDuration(VIDEO_RECORD_MAX_MS)}
-            </Text>
+            <View style={styles.timerBlock}>
+              <Text style={[styles.timerMain, { color: colors.text }]}>
+                {formatDuration(elapsedMs)}
+              </Text>
+              <Text style={[styles.timerMeta, { color: colors.textMuted }]}>
+                {formatDuration(remainingMs)} left · max{" "}
+                {formatDuration(VIDEO_RECORD_MAX_MS)}
+              </Text>
+            </View>
           </View>
         </View>
-      </View>
+      </Animated.View>
     );
   },
 );
@@ -207,20 +241,28 @@ const styles = StyleSheet.create({
   },
   circularPanel: {
     width: CIRCLE + 96,
-    height: CIRCLE + 96,
-    borderRadius: (CIRCLE + 96) / 2,
-    backgroundColor: "rgba(15,23,42,0.88)",
+    minHeight: CIRCLE + 112,
+    borderRadius: 28,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.35,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    shadowOpacity: 0.14,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 12,
   },
   centerStack: {
     alignItems: "center",
-    gap: 12,
+    gap: 10,
+    paddingHorizontal: 12,
+  },
+  hint: {
+    fontSize: 11,
+    fontWeight: "600",
+    textAlign: "center",
+    lineHeight: 15,
+    maxWidth: CIRCLE + 40,
+    letterSpacing: 0.15,
   },
   ringWrap: {
     width: CIRCLE + 14,
@@ -234,17 +276,25 @@ const styles = StyleSheet.create({
     borderRadius: CIRCLE / 2,
     overflow: "hidden",
     borderWidth: 3,
-    borderColor: "#c4f542",
-    backgroundColor: "#000",
   },
   camera: {
     width: CIRCLE,
     height: CIRCLE,
   },
-  timer: {
-    color: "#f8fafc",
-    fontSize: 15,
+  timerBlock: {
+    alignItems: "center",
+    gap: 4,
+    marginTop: 2,
+  },
+  timerMain: {
+    fontSize: 22,
     fontVariant: ["tabular-nums"],
-    fontWeight: "700",
+    fontWeight: "800",
+    letterSpacing: 0.5,
+  },
+  timerMeta: {
+    fontSize: 12,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "600",
   },
 });
