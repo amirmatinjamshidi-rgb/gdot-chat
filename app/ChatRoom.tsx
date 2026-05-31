@@ -44,8 +44,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { ErrorHandlerButton } from "@/components/error-handler-button";
 import {
   HoldRecordControls,
+  type HoldRecordControlsHandle,
   LOCK_DRAG_PX,
 } from "@/components/hold-record-controls";
+import { VoiceRecordingMeter } from "@/components/voice-recording-meter";
 import { ThemedText } from "@/components/themed-text";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import {
@@ -188,6 +190,7 @@ export default function ChatRoomScreen() {
   const [inputFocused, setInputFocused] = useState(false);
   const listRef = useRef<FlatList<MessageRow>>(null);
   const inputRef = useRef<TextInput>(null);
+  const holdRecordControlsRef = useRef<HoldRecordControlsHandle>(null);
   const shellW = useSharedValue(260);
   const sweep = useSharedValue(0);
   const neonVisible = useSharedValue(0);
@@ -313,6 +316,7 @@ export default function ChatRoomScreen() {
   const dismissError = useCallback(() => setComposerError(null), []);
 
   const resetComposerAfterSend = useCallback(() => {
+    holdRecordControlsRef.current?.resetLayout();
     setComposerMode("send");
     setDragY(0);
     setVoiceLocked(false);
@@ -461,6 +465,8 @@ export default function ChatRoomScreen() {
     await safeStopVoiceRecording();
     setVoiceRecordingActive(false);
     setVoiceLocked(false);
+    setDragY(0);
+    holdRecordControlsRef.current?.resetLayout();
   }, [safeStopVoiceRecording]);
 
   const startVoiceRecording = useCallback(async () => {
@@ -538,6 +544,8 @@ export default function ChatRoomScreen() {
     setVideoLocked(false);
     setVideoRecordingActive(false);
     videoRecordingActiveRef.current = false;
+    setDragY(0);
+    holdRecordControlsRef.current?.resetLayout();
   }, []);
 
   const startVideoRecording = useCallback(async (): Promise<boolean> => {
@@ -745,6 +753,9 @@ export default function ChatRoomScreen() {
     return 0;
   }, [voiceRecordingActive, videoRecordingActive, recordHudTick]);
 
+  const showVoiceRecordingMeter =
+    voiceRecordingActive && composerMode === "voice";
+
   const isSendOnly = message.trim().length > 0;
 
   return (
@@ -931,26 +942,35 @@ export default function ChatRoomScreen() {
                 ]}
                 onLayout={onInputShellLayout}
               >
-                {inputFocused ? (
-                  <View pointerEvents="auto" style={styles.neonClip}>
-                    <Animated.View style={neonBarStyle} />
-                  </View>
-                ) : null}
-                <TextInput
-                  ref={inputRef}
-                  style={[
-                    styles.input,
-                    {
-                      color: colors.text,
-                    },
-                  ]}
-                  placeholder="Type a message..."
-                  placeholderTextColor={colors.textMuted}
-                  value={message}
-                  onChangeText={setMessage}
-                  onFocus={() => setInputFocused(true)}
-                  onBlur={() => setInputFocused(false)}
-                />
+                {showVoiceRecordingMeter ? (
+                  <VoiceRecordingMeter
+                    elapsedMs={recordElapsedMs}
+                    tick={recordHudTick}
+                  />
+                ) : (
+                  <>
+                    {inputFocused ? (
+                      <View pointerEvents="auto" style={styles.neonClip}>
+                        <Animated.View style={neonBarStyle} />
+                      </View>
+                    ) : null}
+                    <TextInput
+                      ref={inputRef}
+                      style={[
+                        styles.input,
+                        {
+                          color: colors.text,
+                        },
+                      ]}
+                      placeholder="Type a message..."
+                      placeholderTextColor={colors.textMuted}
+                      value={message}
+                      onChangeText={setMessage}
+                      onFocus={() => setInputFocused(true)}
+                      onBlur={() => setInputFocused(false)}
+                    />
+                  </>
+                )}
               </View>
               <View style={styles.actionSlot}>
                 {isSendOnly || composerMode === "send" ? (
@@ -964,6 +984,7 @@ export default function ChatRoomScreen() {
                   />
                 ) : (
                   <HoldRecordControls
+                    ref={holdRecordControlsRef}
                     mode={composerMode}
                     recording={recordingLive}
                     accentColor={colors.primary}
@@ -973,6 +994,7 @@ export default function ChatRoomScreen() {
                     }
                     dragY={dragY}
                     elapsedMs={recordElapsedMs}
+                    hideFloatingTimer={showVoiceRecordingMeter}
                     maxDurationMs={
                       composerMode === "video" && recordingLive
                         ? VIDEO_RECORD_MAX_MS
