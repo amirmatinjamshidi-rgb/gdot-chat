@@ -1,6 +1,8 @@
 import React, { useMemo } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 
+import { useThemePalette } from "@/providers/theme-palette-provider";
+
 const BAR_COUNT = 44;
 const BAR_WIDTH = 2.5;
 const BAR_GAP = 2;
@@ -32,6 +34,7 @@ type VoiceWaveformProps = {
 };
 
 export function VoiceWaveform({ seed, progress, onSeek }: VoiceWaveformProps) {
+  const { colors } = useThemePalette();
   const bars = useMemo(() => buildWaveform(seed), [seed]);
   const clamped = Math.min(1, Math.max(0, progress));
   const playedBars = clamped * bars.length;
@@ -55,6 +58,8 @@ export function VoiceWaveform({ seed, progress, onSeek }: VoiceWaveformProps) {
       {bars.map((height, index) => {
         const barHeight = height * MAX_BAR_HEIGHT;
         const isPlayed = index < playedBars;
+        const played = `${colors.tint}D9`;
+        const unplayed = `${colors.textMuted}66`;
         return (
           <View
             key={index}
@@ -62,9 +67,7 @@ export function VoiceWaveform({ seed, progress, onSeek }: VoiceWaveformProps) {
               styles.bar,
               {
                 height: barHeight,
-                backgroundColor: isPlayed
-                  ? "rgba(203,213,225,0.95)"
-                  : "rgba(100,116,139,0.55)",
+                backgroundColor: isPlayed ? played : unplayed,
               },
             ]}
           />

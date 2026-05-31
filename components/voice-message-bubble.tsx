@@ -14,6 +14,7 @@ import {
   View,
 } from "react-native";
 import Animated, {
+  Easing,
   useAnimatedStyle,
   useSharedValue,
   withSequence,
@@ -24,6 +25,7 @@ import { VoiceWaveform } from "@/components/voice-waveform";
 import { useThemePalette } from "@/providers/theme-palette-provider";
 
 const ICON_MS = 200;
+const ICON_EASE = Easing.out(Easing.cubic);
 
 type VoiceMessageBubbleProps = {
   uri: string;
@@ -74,8 +76,8 @@ export function VoiceMessageBubble({
   const resetPlayback = useCallback(() => {
     player.pause();
     player.seekTo(0);
-    playOpacity.value = withTiming(1, { duration: ICON_MS });
-    pauseOpacity.value = withTiming(0, { duration: ICON_MS });
+    playOpacity.value = withTiming(1, { duration: ICON_MS, easing: ICON_EASE });
+    pauseOpacity.value = withTiming(0, { duration: ICON_MS, easing: ICON_EASE });
   }, [pauseOpacity, playOpacity, player]);
 
   useEffect(() => {
@@ -93,18 +95,18 @@ export function VoiceMessageBubble({
 
   useEffect(() => {
     if (playing) {
-      playOpacity.value = withTiming(0, { duration: ICON_MS });
-      pauseOpacity.value = withTiming(1, { duration: ICON_MS });
+      playOpacity.value = withTiming(0, { duration: ICON_MS, easing: ICON_EASE });
+      pauseOpacity.value = withTiming(1, { duration: ICON_MS, easing: ICON_EASE });
       return;
     }
-    playOpacity.value = withTiming(1, { duration: ICON_MS });
-    pauseOpacity.value = withTiming(0, { duration: ICON_MS });
+    playOpacity.value = withTiming(1, { duration: ICON_MS, easing: ICON_EASE });
+    pauseOpacity.value = withTiming(0, { duration: ICON_MS, easing: ICON_EASE });
   }, [pauseOpacity, playOpacity, playing]);
 
   const togglePlayback = useCallback(async () => {
     buttonScale.value = withSequence(
-      withTiming(0.94, { duration: 70 }),
-      withTiming(1, { duration: 130 }),
+      withTiming(0.94, { duration: 70, easing: ICON_EASE }),
+      withTiming(1, { duration: 130, easing: ICON_EASE }),
     );
 
     if (playing) {
@@ -204,7 +206,19 @@ export function VoiceMessageBubble({
   );
 
   return (
-    <View style={[styles.shell, { borderColor: shellBorder }]}>
+    <View
+      style={[
+        styles.shell,
+        { borderColor: shellBorder },
+        {
+          shadowColor: colors.text,
+          shadowOpacity: 0.08,
+          shadowRadius: 12,
+          shadowOffset: { width: 0, height: 4 },
+          elevation: 3,
+        },
+      ]}
+    >
       {Platform.OS === "web" ? (
         <View
           style={[

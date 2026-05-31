@@ -973,6 +973,11 @@ export default function ChatRoomScreen() {
                     }
                     dragY={dragY}
                     elapsedMs={recordElapsedMs}
+                    maxDurationMs={
+                      composerMode === "video" && recordingLive
+                        ? VIDEO_RECORD_MAX_MS
+                        : undefined
+                    }
                     panHandlers={
                       (composerMode === "voice" ? voiceLocked : videoLocked)
                         ? {}
