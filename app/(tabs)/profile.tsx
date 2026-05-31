@@ -1,14 +1,8 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { useMemo, useState } from "react";
-import {
-  Alert,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  View,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { Alert, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ProfileActionCard } from "@/components/profile-action-card";
 import { ProfileAvatar } from "@/components/profile-avatar";
@@ -21,7 +15,7 @@ import {
   profile,
   profileActions,
   settingsSections,
-  type SettingsSection as SettingsSectionType
+  type SettingsSection as SettingsSectionType,
 } from "@/constants/profile-data";
 import { APP_THEMES, type ThemeId } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
@@ -59,31 +53,24 @@ export default function ProfileScreen() {
   };
 
   const handleLogoutPress = () => {
-    Alert.alert(
-      "Log out",
-      "You are about to log out. Are you sure?",
-      [
-        {
-          text: "Cancel",
-          style: "cancel",
+    Alert.alert("Log out", "You are about to log out. Are you sure?", [
+      {
+        text: "Cancel",
+        style: "cancel",
+      },
+      {
+        text: "Logout",
+        style: "destructive",
+        onPress: () => {
+          void signOut();
         },
-        {
-          text: "Logout",
-          style: "destructive",
-          onPress: () => {
-            void signOut();
-          },
-        },
-      ],
-    );
+      },
+    ]);
   };
 
   return (
     <SafeAreaView
-      style={[
-        styles.safeArea,
-        { backgroundColor: colors.background },
-      ]}
+      style={[styles.safeArea, { backgroundColor: colors.background }]}
     >
       <ScrollView
         contentContainerStyle={styles.content}
@@ -104,7 +91,12 @@ export default function ProfileScreen() {
               </ThemedText>
             </View>
             <ScalePressable
-              onPress={() => Alert.alert('QR scanner', 'QR contact adding will be connected soon.')}
+              onPress={() =>
+                Alert.alert(
+                  "QR scanner",
+                  "QR contact adding will be connected soon.",
+                )
+              }
               style={[
                 styles.iconButton,
                 {
@@ -213,57 +205,57 @@ export default function ProfileScreen() {
               },
             ]}
           >
-          <ProfileAvatar
-            initials={profile.avatarInitials}
-            source={profile.avatarImage}
-          />
-          <View style={styles.profileCopy}>
-            <ThemedText type="subtitle" style={styles.name}>
-              {profile.name}
-            </ThemedText>
-            <ThemedText
-              style={styles.handle}
-              lightColor={colors.tint}
-              darkColor={colors.tintMuted}
-            >
-              {profile.handle}
-            </ThemedText>
-            <ThemedText
-              style={styles.status}
-              lightColor={colors.textMuted}
-              darkColor={colors.textMuted}
-            >
-              {profile.status}
-            </ThemedText>
-            <View style={styles.metaRow}>
-              <MaterialIcons
-                name="phone-iphone"
-                size={16}
-                color={colors.textMuted}
-              />
+            <ProfileAvatar
+              initials={profile.avatarInitials}
+              source={profile.avatarImage}
+            />
+            <View style={styles.profileCopy}>
+              <ThemedText type="subtitle" style={styles.name}>
+                {profile.name}
+              </ThemedText>
               <ThemedText
-                style={styles.metaText}
+                style={styles.handle}
+                lightColor={colors.tint}
+                darkColor={colors.tintMuted}
+              >
+                {profile.handle}
+              </ThemedText>
+              <ThemedText
+                style={styles.status}
                 lightColor={colors.textMuted}
                 darkColor={colors.textMuted}
               >
-                {profile.phone}
+                {profile.status}
               </ThemedText>
-              <View
-                style={[
-                  styles.metaDivider,
-                  { backgroundColor: colors.surfaceBorder },
-                ]}
-              />
-              <ThemedText
+              <View style={styles.metaRow}>
+                <MaterialIcons
+                  name="phone-iphone"
+                  size={16}
+                  color={colors.textMuted}
+                />
+                <ThemedText
+                  style={styles.metaText}
+                  lightColor={colors.textMuted}
+                  darkColor={colors.textMuted}
+                >
+                  {profile.phone}
+                </ThemedText>
+                <View
+                  style={[
+                    styles.metaDivider,
+                    { backgroundColor: colors.surfaceBorder },
+                  ]}
+                />
+                {/* <ThemedText
                 style={styles.metaText}
                 lightColor={colors.textMuted}
                 darkColor={colors.textMuted}
               >
                 {profile.joinedAt}
-              </ThemedText>
+              </ThemedText> */}
+              </View>
             </View>
           </View>
-        </View>
         </Animated.View>
 
         <Animated.View entering={FadeInDown.delay(140).springify()}>
@@ -310,7 +302,11 @@ export default function ProfileScreen() {
             ]}
           >
             <MaterialIcons name="logout" size={20} color="#EF4444" />
-            <ThemedText style={styles.logoutText} lightColor="#DC2626" darkColor="#F87171">
+            <ThemedText
+              style={styles.logoutText}
+              lightColor="#DC2626"
+              darkColor="#F87171"
+            >
               Log out
             </ThemedText>
           </ScalePressable>

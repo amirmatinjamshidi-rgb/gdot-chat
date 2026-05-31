@@ -1,22 +1,33 @@
-import { Image, type ImageSourcePropType, StyleSheet, View } from "react-native";
+import {
+  Image,
+  type ImageSourcePropType,
+  StyleSheet,
+  View,
+} from "react-native";
 
 import { ThemedText } from "@/components/themed-text";
 
 type ProfileAvatarProps = {
   initials: string;
-  /** When set, shows this image instead of letter initials. */
   source?: ImageSourcePropType;
   size?: number;
 };
 
-export function ProfileAvatar({ initials, source, size = 86 }: ProfileAvatarProps) {
+export function ProfileAvatar({
+  initials,
+  source,
+  size = 86,
+}: ProfileAvatarProps) {
   const dim = { width: size, height: size, borderRadius: size / 2 };
   return (
     <View style={[styles.avatar, dim]}>
       {source ? (
         <Image source={source} style={[styles.image, dim]} resizeMode="cover" />
       ) : (
-        <ThemedText style={[styles.initials, { fontSize: size * 0.34 }]} lightColor="#FFFFFF">
+        <ThemedText
+          style={[styles.initials, { fontSize: size * 0.34 }]}
+          lightColor="#FFFFFF"
+        >
           {initials}
         </ThemedText>
       )}
