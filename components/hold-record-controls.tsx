@@ -1,11 +1,10 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
-import React, { useEffect, useImperativeHandle, forwardRef } from "react";
+import React, { forwardRef, useEffect, useImperativeHandle } from "react";
 import {
   Pressable,
   StyleSheet,
-  Text,
   View,
-  type PanResponderInstance,
+  type PanResponderInstance
 } from "react-native";
 import Animated, {
   cancelAnimation,
@@ -180,7 +179,7 @@ export const HoldRecordControls = forwardRef<
           <Animated.View style={[styles.recDotWrap, recDotStyle]}>
             <View style={[styles.recDot, { backgroundColor: colors.error }]} />
           </Animated.View>
-          <View style={styles.timerTextCol}>
+          {/* <View style={styles.timerTextCol}>
             <Text style={[styles.timerText, { color: colors.text }]}>
               {formatDuration(elapsedMs)}
             </Text>
@@ -192,7 +191,7 @@ export const HoldRecordControls = forwardRef<
                 {formatDuration(remainingMs)} left
               </Text>
             ) : null}
-          </View>
+          </View> */}
         </View>
       ) : null}
 

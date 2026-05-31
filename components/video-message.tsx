@@ -12,13 +12,18 @@ import {
   useCameraPermissions,
   useMicrophonePermissions,
 } from "expo-camera";
+import { LinearGradient } from "expo-linear-gradient";
 import Animated, { Easing, FadeIn } from "react-native-reanimated";
 
 import { CircularProgressRing } from "@/components/circular-progress-ring";
 import { useThemePalette } from "@/providers/theme-palette-provider";
 
 export const VIDEO_RECORD_MAX_MS = 90_000;
-const CIRCLE = 220;
+/** Visible camera disc */
+const CIRCLE = 212;
+/** Space between disc edge and progress ring */
+const RING_BAND = 11;
+const ORB_MARGIN = 36;
 const READY_TIMEOUT_MS = 8000;
 
 export type VideoMessageHandle = {
@@ -157,71 +162,87 @@ export const VideoMessage = forwardRef<VideoMessageHandle, VideoMessageProps>(
     if (!active) return null;
 
     const recordProgress = Math.min(1, elapsedMs / VIDEO_RECORD_MAX_MS);
-    const ringSize = CIRCLE + 14;
+    const ringSize = CIRCLE + RING_BAND * 2;
+    const orbSize = ringSize + ORB_MARGIN * 2;
     const remainingMs = Math.max(0, VIDEO_RECORD_MAX_MS - elapsedMs);
-    const trackRing = `${colors.textMuted}40`;
+    const trackRing = `${colors.textMuted}55`;
 
     return (
       <Animated.View
-        entering={FadeIn.duration(260).easing(Easing.out(Easing.cubic))}
+        entering={FadeIn.duration(280).easing(Easing.out(Easing.cubic))}
         style={styles.overlayContent}
         pointerEvents="box-none"
       >
-        <View
-          style={[
-            styles.circularPanel,
-            {
-              backgroundColor: `${colors.surfaceElevated}EE`,
-              borderColor: colors.surfaceBorder,
-              shadowColor: colors.text,
-            },
-          ]}
-        >
-          <View style={styles.centerStack}>
-            <Text style={[styles.hint, { color: colors.textMuted }]}>
-              Swipe up on the button to lock · tap send when done
-            </Text>
-            <View style={styles.ringWrap}>
-              <CircularProgressRing
-                size={ringSize}
-                stroke={5}
-                progress={recordProgress}
-                fillColor={colors.primary}
-                trackColor={trackRing}
-              />
+        <View style={styles.column}>
+          <Text style={[styles.hint, { color: colors.textMuted }]}>
+            Swipe up on the button to lock · tap send when done
+          </Text>
+
+          <View
+            style={[
+              styles.orb,
+              {
+                width: orbSize,
+                height: orbSize,
+                borderRadius: orbSize / 2,
+                backgroundColor: `${colors.surfaceElevated}F0`,
+                borderColor: `${colors.surfaceBorder}CC`,
+                shadowColor: colors.text,
+              },
+            ]}
+          >
+            <View style={styles.orbInner}>
               <View
-                style={[
-                  styles.ring,
-                  {
-                    borderColor: colors.primary,
-                    backgroundColor: "#000",
-                  },
-                ]}
+                style={[styles.ringWrap, { width: ringSize, height: ringSize }]}
               >
-                {!cameraReady ? (
-                  <ActivityIndicator
-                    color={colors.tint}
-                    style={StyleSheet.absoluteFill}
-                  />
-                ) : null}
-                <CameraView
-                  ref={cameraRef}
-                  style={styles.camera}
-                  facing="front"
-                  mode="video"
-                  mirror
-                  onCameraReady={onCameraReady}
+                <CircularProgressRing
+                  size={ringSize}
+                  stroke={4}
+                  progress={recordProgress}
+                  fillColor={colors.primary}
+                  trackColor={trackRing}
                 />
+                <View
+                  style={[
+                    styles.cameraDisc,
+                    {
+                      top: RING_BAND,
+                      left: RING_BAND,
+                      borderColor: `${colors.primary}CC`,
+                      backgroundColor: "#000",
+                    },
+                  ]}
+                >
+                  {!cameraReady ? (
+                    <ActivityIndicator
+                      color={colors.primary}
+                      style={StyleSheet.absoluteFill}
+                    />
+                  ) : null}
+                  <CameraView
+                    ref={cameraRef}
+                    style={styles.camera}
+                    facing="front"
+                    mode="video"
+                    mirror
+                    onCameraReady={onCameraReady}
+                  />
+                  <LinearGradient
+                    pointerEvents="none"
+                    colors={["transparent", "rgba(0,0,0,0.78)"]}
+                    locations={[0.35, 1]}
+                    style={styles.bottomScrim}
+                  />
+                  <View style={styles.timerStack} pointerEvents="none">
+                    <Text style={styles.timerMain}>
+                      {formatDuration(elapsedMs)}
+                    </Text>
+                    <Text style={styles.timerSub}>
+                      {formatDuration(remainingMs)} left
+                    </Text>
+                  </View>
+                </View>
               </View>
-            </View>
-            <View style={styles.timerBlock}>
-              <Text style={[styles.timerMain, { color: colors.text }]}>
-                {formatDuration(elapsedMs)}
-              </Text>
-              <Text style={[styles.timerMeta, { color: colors.textMuted }]}>
-                {formatDuration(remainingMs)} left · max{" "}
-                {formatDuration(VIDEO_RECORD_MAX_MS)}
-              </Text>
             </View>
           </View>
         </View>
@@ -239,62 +260,80 @@ const styles = StyleSheet.create({
     zIndex: 10,
     elevation: 10,
   },
-  circularPanel: {
-    width: CIRCLE + 96,
-    minHeight: CIRCLE + 112,
-    borderRadius: 28,
+  column: {
+    alignItems: "center",
+    gap: 16,
+    paddingHorizontal: 20,
+  },
+  hint: {
+    fontSize: 12,
+    fontWeight: "600",
+    textAlign: "center",
+    lineHeight: 16,
+    maxWidth: 300,
+    letterSpacing: 0.2,
+    opacity: 0.92,
+  },
+  orb: {
     alignItems: "center",
     justifyContent: "center",
     borderWidth: StyleSheet.hairlineWidth,
-    shadowOpacity: 0.14,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 12,
+    shadowOpacity: 0.12,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 14,
   },
-  centerStack: {
-    alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 12,
-  },
-  hint: {
-    fontSize: 11,
-    fontWeight: "600",
-    textAlign: "center",
-    lineHeight: 15,
-    maxWidth: CIRCLE + 40,
-    letterSpacing: 0.15,
-  },
-  ringWrap: {
-    width: CIRCLE + 14,
-    height: CIRCLE + 14,
+  orbInner: {
+    flex: 1,
+    width: "100%",
     alignItems: "center",
     justifyContent: "center",
   },
-  ring: {
+  ringWrap: {
+    position: "relative",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cameraDisc: {
+    position: "absolute",
     width: CIRCLE,
     height: CIRCLE,
     borderRadius: CIRCLE / 2,
     overflow: "hidden",
-    borderWidth: 3,
+    borderWidth: 2.5,
   },
   camera: {
     width: CIRCLE,
     height: CIRCLE,
   },
-  timerBlock: {
+  bottomScrim: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 88,
+    zIndex: 2,
+  },
+  timerStack: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 14,
     alignItems: "center",
-    gap: 4,
-    marginTop: 2,
+    zIndex: 3,
+    gap: 2,
   },
   timerMain: {
-    fontSize: 22,
+    fontSize: 20,
     fontVariant: ["tabular-nums"],
     fontWeight: "800",
-    letterSpacing: 0.5,
+    letterSpacing: 0.4,
+    color: "#FFFFFF",
   },
-  timerMeta: {
-    fontSize: 12,
+  timerSub: {
+    fontSize: 11,
     fontVariant: ["tabular-nums"],
     fontWeight: "600",
+    color: "rgba(255,255,255,0.78)",
   },
 });
