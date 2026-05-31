@@ -140,14 +140,14 @@ export function VideoMessageBubble({
         <View
           style={[
             styles.videoRing,
-            {
-              borderColor: isMine
-                ? `${colors.primary}D9`
-                : `${colors.surfaceBorder}E6`,
-            },
-            playing && {
-              borderColor: progressFill,
-            },
+            // {
+            //   borderColor: isMine
+            //     ? `${colors.primary}D9`
+            //     : `${colors.surfaceBorder}E6`,
+            // },
+            // playing && {
+            //   borderColor: progressFill,
+            // },
           ]}
         >
           <VideoView
