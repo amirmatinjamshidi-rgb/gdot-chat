@@ -1,5 +1,5 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
-import React, { useEffect } from "react";
+import React, { useEffect, useImperativeHandle, forwardRef } from "react";
 import {
   Pressable,
   StyleSheet,
@@ -26,6 +26,11 @@ const LOCK_LIFT = 72;
 const LOCK_DRAG_PX = 56;
 const DELETE_SIZE = 38;
 
+export type HoldRecordControlsHandle = {
+  /** Snap FAB / lock / pulse animations back after cancel or layout drift. */
+  resetLayout: () => void;
+};
+
 type HoldRecordControlsProps = {
   mode: "voice" | "video";
   recording: boolean;
@@ -34,6 +39,8 @@ type HoldRecordControlsProps = {
   elapsedMs: number;
   /** When set (e.g. video clip max), shows remaining time in the timer pill. */
   maxDurationMs?: number;
+  /** Hide the floating timer pill (e.g. timer shown in the composer row for voice). */
+  hideFloatingTimer?: boolean;
   panHandlers: PanResponderInstance["panHandlers"];
   onSendLocked: () => void;
   onCancelLocked: () => void;
@@ -52,19 +59,26 @@ function formatDuration(ms: number) {
 
 export { LOCK_DRAG_PX };
 
-export function HoldRecordControls({
-  mode,
-  recording,
-  locked,
-  dragY,
-  elapsedMs,
-  maxDurationMs,
-  panHandlers,
-  onSendLocked,
-  onCancelLocked,
-  accentColor = "#C4F542",
-  iconColor = "#ffffff",
-}: HoldRecordControlsProps) {
+export const HoldRecordControls = forwardRef<
+  HoldRecordControlsHandle,
+  HoldRecordControlsProps
+>(function HoldRecordControls(
+  {
+    mode,
+    recording,
+    locked,
+    dragY,
+    elapsedMs,
+    maxDurationMs,
+    hideFloatingTimer = false,
+    panHandlers,
+    onSendLocked,
+    onCancelLocked,
+    accentColor = "#C4F542",
+    iconColor = "#ffffff",
+  },
+  ref,
+) {
   const { colors } = useThemePalette();
   const holdIcon =
     mode === "voice" ? ("mic.fill" as const) : ("video.fill" as const);
@@ -93,7 +107,7 @@ export function HoldRecordControls({
   }, [lockProgSv, lockProgress, lockReached]);
 
   useEffect(() => {
-    if (!recording || locked) {
+    if (!recording || locked || hideFloatingTimer) {
       cancelAnimation(recPulse);
       recPulse.value = 1;
       return;
@@ -113,7 +127,26 @@ export function HoldRecordControls({
       false,
     );
     return () => cancelAnimation(recPulse);
-  }, [locked, recPulse, recording]);
+  }, [hideFloatingTimer, locked, recPulse, recording]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      resetLayout: () => {
+        fabLift.value = withTiming(0, {
+          duration: 220,
+          easing: Easing.out(Easing.cubic),
+        });
+        lockProgSv.value = withTiming(0, {
+          duration: 200,
+          easing: Easing.out(Easing.cubic),
+        });
+        cancelAnimation(recPulse);
+        recPulse.value = 1;
+      },
+    }),
+    [fabLift, lockProgSv, recPulse],
+  );
 
   const fabAnim = useAnimatedStyle(() => ({
     transform: [{ translateY: fabLift.value }],
@@ -133,7 +166,7 @@ export function HoldRecordControls({
 
   return (
     <View style={styles.root} pointerEvents="box-none">
-      {recording ? (
+      {recording && !hideFloatingTimer ? (
         <View
           style={[
             styles.timerPill,
@@ -235,7 +268,7 @@ export function HoldRecordControls({
       </View>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   root: {
