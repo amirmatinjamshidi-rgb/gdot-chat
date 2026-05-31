@@ -14,6 +14,7 @@ import { useThemePalette } from "@/providers/theme-palette-provider";
 
 export const VIDEO_BUBBLE_SIZE = 160;
 const PLAY_SCALE = 1.7;
+export const VIDEO_BUBBLE_PLAY_SCALE = PLAY_SCALE;
 const PLAY_SHIFT = 80;
 const PLAY_MS = 170;
 const EASE = Easing.out(Easing.cubic);

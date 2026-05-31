@@ -1,3 +1,9 @@
+import {
+  CameraView,
+  useCameraPermissions,
+  useMicrophonePermissions,
+} from "expo-camera";
+import { LinearGradient } from "expo-linear-gradient";
 import React, {
   forwardRef,
   useCallback,
@@ -7,12 +13,6 @@ import React, {
   useState,
 } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
-import {
-  CameraView,
-  useCameraPermissions,
-  useMicrophonePermissions,
-} from "expo-camera";
-import { LinearGradient } from "expo-linear-gradient";
 import Animated, { Easing, FadeIn } from "react-native-reanimated";
 
 import { CircularProgressRing } from "@/components/circular-progress-ring";
@@ -21,8 +21,7 @@ import { useThemePalette } from "@/providers/theme-palette-provider";
 export const VIDEO_RECORD_MAX_MS = 90_000;
 /** Visible camera disc */
 const CIRCLE = 212;
-/** Space between disc edge and progress ring */
-const RING_BAND = 11;
+const RING_INSET = 10;
 const ORB_MARGIN = 36;
 const READY_TIMEOUT_MS = 8000;
 
@@ -162,7 +161,7 @@ export const VideoMessage = forwardRef<VideoMessageHandle, VideoMessageProps>(
     if (!active) return null;
 
     const recordProgress = Math.min(1, elapsedMs / VIDEO_RECORD_MAX_MS);
-    const ringSize = CIRCLE + RING_BAND * 2;
+    const ringSize = CIRCLE + RING_INSET;
     const orbSize = ringSize + ORB_MARGIN * 2;
     const remainingMs = Math.max(0, VIDEO_RECORD_MAX_MS - elapsedMs);
     const trackRing = `${colors.textMuted}55`;
@@ -184,17 +183,16 @@ export const VideoMessage = forwardRef<VideoMessageHandle, VideoMessageProps>(
               {
                 width: orbSize,
                 height: orbSize,
-                borderRadius: orbSize / 2,
+                borderRadius: orbSize,
                 backgroundColor: `${colors.surfaceElevated}F0`,
-                borderColor: `${colors.surfaceBorder}CC`,
+                // borderColor: `${colors.surfaceBorder}CC`,
+
                 shadowColor: colors.text,
               },
             ]}
           >
             <View style={styles.orbInner}>
-              <View
-                style={[styles.ringWrap, { width: ringSize, height: ringSize }]}
-              >
+              <View style={styles.ringWrap}>
                 <CircularProgressRing
                   size={ringSize}
                   stroke={4}
@@ -206,8 +204,6 @@ export const VideoMessage = forwardRef<VideoMessageHandle, VideoMessageProps>(
                   style={[
                     styles.cameraDisc,
                     {
-                      top: RING_BAND,
-                      left: RING_BAND,
                       borderColor: `${colors.primary}CC`,
                       backgroundColor: "#000",
                     },
@@ -290,12 +286,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   ringWrap: {
-    position: "relative",
     alignItems: "center",
     justifyContent: "center",
   },
   cameraDisc: {
-    position: "absolute",
     width: CIRCLE,
     height: CIRCLE,
     borderRadius: CIRCLE / 2,
