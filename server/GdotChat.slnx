@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="GdotChat.Api/GdotChat.Api.csproj" />
+  <Project Path="GdotChat.Application/GdotChat.Application.csproj" />
+  <Project Path="GdotChat.Domain/GdotChat.Domain.csproj" />
+  <Project Path="GdotChat.Infrastructure/GdotChat.Infrastructure.csproj" />
+  <Project Path="GdotChat.Tests/GdotChat.Tests.csproj" />
+</Solution>
