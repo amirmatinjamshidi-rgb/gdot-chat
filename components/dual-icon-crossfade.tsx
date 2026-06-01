@@ -36,13 +36,13 @@ export function DualIconCrossfade({
 
   useEffect(() => {
     focus.value = withTiming(INDEX[active], {
-      duration: 150,
-      easing: Easing.out(Easing.cubic),
+      duration: 200,
+      easing: Easing.out(Easing.circle),
     });
   }, [active, focus]);
 
   const sendStyle = useAnimatedStyle(() => {
-    const d = Math.abs(focus.value - 0);
+    const d = Math.abs(focus.value);
     const scale = 0.74 + 0.26 * Math.max(0, 1 - d * 1.05);
     const opacity = 0.18 + 0.82 * Math.max(0, 1 - d * 1.12);
     return { transform: [{ scale }], opacity };
@@ -50,15 +50,15 @@ export function DualIconCrossfade({
 
   const micStyle = useAnimatedStyle(() => {
     const d = Math.abs(focus.value - 1);
-    const scale = 0.74 + 0.26 * Math.max(0, 1 - d * 1.05);
-    const opacity = 0.18 + 0.82 * Math.max(0, 1 - d * 1.12);
+    const scale = 0.74 + 0.26 * Math.max(0, 1 - d * 1.55);
+    const opacity = 0.18 + 0.82 * Math.max(0, 1 - d * 1.52);
     return { transform: [{ scale }], opacity };
   });
 
   const videoStyle = useAnimatedStyle(() => {
     const d = Math.abs(focus.value - 2);
-    const scale = 0.74 + 0.26 * Math.max(0, 1 - d * 1.05);
-    const opacity = 0.18 + 0.82 * Math.max(0, 1 - d * 1.12);
+    const scale = 0.74 + 0.26 * Math.max(0, 1 - d * 1.55);
+    const opacity = 0.18 + 0.82 * Math.max(0, 1 - d * 1.52);
     return { transform: [{ scale }], opacity };
   });
 
