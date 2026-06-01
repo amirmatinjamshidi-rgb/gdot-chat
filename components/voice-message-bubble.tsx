@@ -1,18 +1,12 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
-import { BlurView } from "expo-blur";
 import {
   setAudioModeAsync,
   useAudioPlayer,
   useAudioPlayerStatus,
 } from "expo-audio";
-import React, { useCallback, useEffect } from "react";
-import {
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
+import { BlurView } from "expo-blur";
+import React, { useCallback, useEffect, useLayoutEffect } from "react";
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -21,7 +15,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
-import { VoiceWaveform } from "@/components/voice-waveform";
+import { VoiceWaveformSkia } from "@/components/voice-waveform-skia";
 import { useThemePalette } from "@/providers/theme-palette-provider";
 
 const ICON_MS = 200;
@@ -56,28 +50,33 @@ export function VoiceMessageBubble({
   onDeactivate,
 }: VoiceMessageBubbleProps) {
   const { colors, mode } = useThemePalette();
-  const player = useAudioPlayer(uri, { updateInterval: 100 });
+  const player = useAudioPlayer(uri, { updateInterval: 20 });
   const status = useAudioPlayerStatus(player);
+
+  const waveformProgressSV = useSharedValue(0);
 
   const playOpacity = useSharedValue(1);
   const pauseOpacity = useSharedValue(0);
   const buttonScale = useSharedValue(1);
 
   const durationSec =
-    status.duration > 0
-      ? status.duration
-      : durationMs
-        ? durationMs / 1000
-        : 0;
+    status.duration > 0 ? status.duration : durationMs ? durationMs / 1000 : 0;
   const progress =
     durationSec > 0 ? Math.min(1, status.currentTime / durationSec) : 0;
   const playing = status.playing;
+
+  useLayoutEffect(() => {
+    waveformProgressSV.value = progress;
+  }, [progress, waveformProgressSV]);
 
   const resetPlayback = useCallback(() => {
     player.pause();
     player.seekTo(0);
     playOpacity.value = withTiming(1, { duration: ICON_MS, easing: ICON_EASE });
-    pauseOpacity.value = withTiming(0, { duration: ICON_MS, easing: ICON_EASE });
+    pauseOpacity.value = withTiming(0, {
+      duration: ICON_MS,
+      easing: ICON_EASE,
+    });
   }, [pauseOpacity, playOpacity, player]);
 
   useEffect(() => {
@@ -95,12 +94,21 @@ export function VoiceMessageBubble({
 
   useEffect(() => {
     if (playing) {
-      playOpacity.value = withTiming(0, { duration: ICON_MS, easing: ICON_EASE });
-      pauseOpacity.value = withTiming(1, { duration: ICON_MS, easing: ICON_EASE });
+      playOpacity.value = withTiming(0, {
+        duration: ICON_MS,
+        easing: ICON_EASE,
+      });
+      pauseOpacity.value = withTiming(1, {
+        duration: ICON_MS,
+        easing: ICON_EASE,
+      });
       return;
     }
     playOpacity.value = withTiming(1, { duration: ICON_MS, easing: ICON_EASE });
-    pauseOpacity.value = withTiming(0, { duration: ICON_MS, easing: ICON_EASE });
+    pauseOpacity.value = withTiming(0, {
+      duration: ICON_MS,
+      easing: ICON_EASE,
+    });
   }, [pauseOpacity, playOpacity, playing]);
 
   const togglePlayback = useCallback(async () => {
@@ -119,6 +127,9 @@ export function VoiceMessageBubble({
     await setAudioModeAsync({
       allowsRecording: false,
       playsInSilentMode: true,
+      interruptionMode: "mixWithOthers",
+      shouldPlayInBackground: false,
+      shouldRouteThroughEarpiece: false,
     });
     player.play();
   }, [buttonScale, onActivate, onDeactivate, player, playing]);
@@ -132,6 +143,9 @@ export function VoiceMessageBubble({
         void setAudioModeAsync({
           allowsRecording: false,
           playsInSilentMode: true,
+          interruptionMode: "mixWithOthers",
+          shouldPlayInBackground: false,
+          shouldRouteThroughEarpiece: false,
         }).then(() => player.play());
       }
     },
@@ -157,13 +171,12 @@ export function VoiceMessageBubble({
       ? status.currentTime * 1000
       : playing
         ? 0
-        : durationMs ?? 0;
-  const displayMs = playing ? elapsedMs : durationMs ?? elapsedMs;
+        : (durationMs ?? 0);
+  const displayMs = playing ? elapsedMs : (durationMs ?? elapsedMs);
 
   const shellBorder = isMine
     ? `${colors.primary}66`
     : `${colors.surfaceBorder}CC`;
-  const blurTint = mode === "dark" ? "dark" : "light";
 
   const glass = (
     <View style={styles.content}>
@@ -171,7 +184,9 @@ export function VoiceMessageBubble({
         <Pressable
           onPress={() => void togglePlayback()}
           accessibilityRole="button"
-          accessibilityLabel={playing ? "Pause voice message" : "Play voice message"}
+          accessibilityLabel={
+            playing ? "Pause voice message" : "Play voice message"
+          }
           style={[
             styles.playButton,
             {
@@ -193,9 +208,11 @@ export function VoiceMessageBubble({
         </Pressable>
       </Animated.View>
 
-      <VoiceWaveform
+      <VoiceWaveformSkia
         seed={seed}
-        progress={progress}
+        progressSV={waveformProgressSV}
+        playedColor={`${colors.tint}D9`}
+        unplayedColor={`${colors.textMuted}66`}
         onSeek={seekToProgress}
       />
 
@@ -221,21 +238,15 @@ export function VoiceMessageBubble({
     >
       {Platform.OS === "web" ? (
         <View
-          style={[
-            styles.webGlass,
-            { backgroundColor: colors.surfaceElevated },
-          ]}
+          style={[styles.webGlass, { backgroundColor: colors.surfaceElevated }]}
         >
           {glass}
         </View>
       ) : (
         <BlurView
           intensity={mode === "dark" ? 48 : 56}
-          tint={blurTint}
-          style={[
-            styles.blur,
-            { backgroundColor: `${colors.surfaceElevated}B3` },
-          ]}
+          // tint={blurTint}
+          style={[styles.blur, { backgroundColor: `${colors.background}B3` }]}
         >
           {glass}
         </BlurView>

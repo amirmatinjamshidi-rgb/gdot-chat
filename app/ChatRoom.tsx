@@ -490,6 +490,10 @@ export default function ChatRoomScreen() {
     await setAudioModeAsync({
       allowsRecording: true,
       playsInSilentMode: true,
+
+      interruptionMode: "mixWithOthers",
+      shouldPlayInBackground: true,
+      shouldRouteThroughEarpiece: true,
     });
     if (gen !== voiceStartGenRef.current) return;
     const recorder = audioRecorderRef.current;

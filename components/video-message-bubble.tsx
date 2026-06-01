@@ -1,6 +1,11 @@
 import { useEventListener } from "expo";
 import { useVideoPlayer, VideoView } from "expo-video";
-import React, { useCallback, useEffect, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useState,
+  type ComponentProps,
+} from "react";
 import { Platform, Pressable, StyleSheet, View } from "react-native";
 import Animated, {
   Easing,
@@ -152,7 +157,9 @@ export function VideoMessageBubble({
           ]}
         >
           <VideoView
-            player={player}
+            // expo-video web typings intersect VideoViewProps with the web class instance
+            // (VideoPlayerWeb & VideoPlayer); useVideoPlayer is typed as VideoPlayer only.
+            player={player as ComponentProps<typeof VideoView>["player"]}
             style={styles.video}
             contentFit="cover"
             nativeControls={false}
