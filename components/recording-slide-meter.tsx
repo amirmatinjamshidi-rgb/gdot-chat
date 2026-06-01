@@ -60,7 +60,8 @@ export function RecordingSlideMeter({
 
   useFrameCallback((frame) => {
     "worklet";
-    flow.value += frame.timeSincePreviousFrame * 0.0018;
+    const dt = frame.timeSincePreviousFrame ?? 16;
+    flow.value += dt * 0.0018;
   });
 
   const chevronRowStyle = useAnimatedStyle(() => {
