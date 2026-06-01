@@ -55,7 +55,6 @@
       ],
       "expo-video",
       "expo-audio",
-<<<<<<< HEAD
       [
         "expo-sqlite",
         {
@@ -63,11 +62,8 @@
           "useSQLCipher": true
         }
       ],
-      "expo-secure-store"
-=======
       "expo-secure-store",
       "expo-font"
->>>>>>> 8a3a64b08492dd743e451fcadf379ca5ae2fbb2c
     ],
     "experiments": {
       "typedRoutes": true,

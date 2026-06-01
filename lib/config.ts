@@ -4,7 +4,7 @@ import Constants from "expo-constants";
 export const API_BASE_URL =
   (Constants.expoConfig?.extra?.apiBaseUrl as string | undefined) ??
   process.env.EXPO_PUBLIC_API_URL ??
-  "https://localhost:5067/v1";
+  "https://192.168.1.0:5067/v1";
 
 export const SIGNALR_HUB_URL = API_BASE_URL.replace(/\/v1\/?$/, "") + "/hubs/messages";
 
