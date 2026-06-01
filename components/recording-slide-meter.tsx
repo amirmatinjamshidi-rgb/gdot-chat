@@ -1,27 +1,15 @@
-import { buildWaveform } from "@/components/voice-waveform";
 import { useThemePalette } from "@/providers/theme-palette-provider";
-import React, { useMemo } from "react";
-import { StyleSheet, Text, View } from "react-native";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import React, { useEffect } from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import Animated, {
-  clamp,
-  interpolate,
-  runOnJS,
+  cancelAnimation,
+  Easing,
   useAnimatedStyle,
-  useFrameCallback,
   useSharedValue,
-  withSpring,
+  withRepeat,
+  withSequence,
+  withTiming,
 } from "react-native-reanimated";
-
-const BAR_COUNT = 34;
-const BAR_WIDTH = 2.25;
-const BAR_GAP = 2;
-const MAX_BAR_HEIGHT = 22;
-
-/** Full horizontal drag to reach slide progress = 1 */
-export const SLIDE_CANCEL_DRAG_PX = 88;
-/** Release above this progress cancels the recording */
-const SLIDE_CANCEL_COMMIT = 0.58;
 
 function formatDuration(ms: number) {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -34,149 +22,105 @@ function formatDuration(ms: number) {
 
 type RecordingSlideMeterProps = {
   variant: "voice" | "video";
+  locked: boolean;
   elapsedMs: number;
-  tick: number;
   onSlideCancel: () => void;
 };
 
 /**
- * Recording waveform in the composer input with slide-left-to-cancel.
- * While dragging left, the waveform crossfades to a frame-driven chevron hint.
+ * Composer strip while recording: timer only when unlocked (cancel = swipe FAB);
+ * locked = borderless glowing Cancel.
  */
 export function RecordingSlideMeter({
   variant,
+  locked,
   elapsedMs,
-  tick,
   onSlideCancel,
 }: RecordingSlideMeterProps) {
   const { colors } = useThemePalette();
-  const seed =
-    variant === "voice" ? "voice-recording-meter" : "video-recording-meter";
-  const bars = useMemo(() => buildWaveform(seed, BAR_COUNT), [seed]);
-  const phase = elapsedMs / 420 + tick * 0.12;
+  const glowOpacity = useSharedValue(0.7);
 
-  const slideProgress = useSharedValue(0);
-  const flow = useSharedValue(0);
+  useEffect(() => {
+    if (!locked) {
+      cancelAnimation(glowOpacity);
+      glowOpacity.value = 0.5;
+      return;
+    }
+    glowOpacity.value = withRepeat(
+      withSequence(
+        withTiming(0.35, { duration: 700, easing: Easing.inOut(Easing.quad) }),
+        withTiming(0.65, { duration: 700, easing: Easing.inOut(Easing.quad) }),
+      ),
+      -1,
+      true,
+    );
+    return () => cancelAnimation(glowOpacity);
+  }, [glowOpacity, locked]);
 
-  useFrameCallback((frame) => {
-    "worklet";
-    const dt = frame.timeSincePreviousFrame ?? 16;
-    flow.value += dt * 0.0018;
-  });
+  const cancelGlowStyle = useAnimatedStyle(() => ({
+    opacity: glowOpacity.value,
+  }));
 
-  const chevronRowStyle = useAnimatedStyle(() => {
-    const t = flow.value;
-    return {
-      transform: [{ translateX: Math.sin(t * 1.15) * 9 }],
-      opacity: 0.5 + 0.5 * (0.5 + 0.5 * Math.sin(t * 0.95)),
-    };
-  });
-
-  const pan = useMemo(
-    () =>
-      Gesture.Pan()
-        .onUpdate((e) => {
-          const p = clamp(-e.translationX / SLIDE_CANCEL_DRAG_PX, 0, 1);
-          slideProgress.value = p;
-        })
-        .onEnd(() => {
-          if (slideProgress.value >= SLIDE_CANCEL_COMMIT) {
-            runOnJS(onSlideCancel)();
-          }
-          slideProgress.value = withSpring(0, { damping: 18, stiffness: 220 });
-        }),
-    [onSlideCancel, slideProgress],
+  const timerBlock = (
+    <View style={styles.timerBlock}>
+      <View style={[styles.recDot, { backgroundColor: colors.error }]} />
+      <Text
+        style={[styles.timerText, { color: colors.text }]}
+        numberOfLines={1}
+      >
+        {formatDuration(elapsedMs)}
+      </Text>
+    </View>
   );
 
-  const waveLayerStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(slideProgress.value, [0, 0.2, 0.45], [1, 0.45, 0]),
-    transform: [
-      {
-        scaleX: interpolate(slideProgress.value, [0, 1], [1, 0.92]),
-      },
-    ],
-  }));
-
-  const slideLayerStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(slideProgress.value, [0.08, 0.28, 1], [0, 1, 1]),
-  }));
-
-  const labelStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(slideProgress.value, [0.12, 0.3], [0, 1]),
-  }));
-
-  const barColor =
-    variant === "voice" ? `${colors.primary}CC` : `${colors.tint}CC`;
-
-  return (
-    <GestureDetector gesture={pan}>
+  if (locked) {
+    return (
       <View
         style={styles.row}
         accessibilityLabel={
           variant === "voice"
-            ? "Voice recording — slide left to cancel"
-            : "Video recording — slide left to cancel"
+            ? "Cancel voice recording"
+            : "Cancel video recording"
         }
       >
-        <View style={styles.meterBody}>
-          <Animated.View style={[styles.wave, waveLayerStyle]}>
-            {bars.map((base, index) => {
-              const wobble =
-                0.42 +
-                0.58 *
-                  Math.sin(
-                    phase * 1.15 + index * 0.41 + Math.sin(index) * 0.2,
-                  );
-              const height = Math.max(4, base * wobble * MAX_BAR_HEIGHT);
-              return (
-                <View
-                  key={index}
-                  style={[
-                    styles.bar,
-                    {
-                      height,
-                      backgroundColor: barColor,
-                    },
-                  ]}
-                />
-              );
-            })}
-          </Animated.View>
-
-          <Animated.View
-            style={[styles.slideOverlay, slideLayerStyle]}
-            pointerEvents="none"
+        <Pressable
+          onPress={onSlideCancel}
+          hitSlop={12}
+          style={({ pressed }) => [
+            styles.lockedCancelPress,
+            pressed && { opacity: 0.85 },
+          ]}
+        >
+          <Animated.Text
+            style={[
+              styles.lockedCancelLabel,
+              {
+                color: colors.error,
+                textShadowColor: `${colors.error}80`,
+              },
+              cancelGlowStyle,
+            ]}
           >
-            <Animated.View style={[styles.chevronRow, chevronRowStyle]}>
-              {[0, 1, 2, 3, 4].map((i) => (
-                <Text
-                  key={i}
-                  style={[styles.chevron, { color: colors.text }]}
-                >
-                  ‹
-                </Text>
-              ))}
-            </Animated.View>
-            <Animated.Text
-              style={[styles.slideHint, { color: colors.textMuted }, labelStyle]}
-              numberOfLines={1}
-            >
-              Slide to cancel
-            </Animated.Text>
-          </Animated.View>
-        </View>
-
-        <View style={styles.timerBlock}>
-          <View style={[styles.recDot, { backgroundColor: colors.error }]} />
-          <Text
-            style={[styles.timerText, { color: colors.text }]}
-            numberOfLines={1}
-          >
-            {formatDuration(elapsedMs)}
-          </Text>
-        </View>
+            Cancel
+          </Animated.Text>
+        </Pressable>
+        {timerBlock}
       </View>
-    </GestureDetector>
+    );
+  }
+
+  return (
+    <View
+      style={styles.row}
+      accessibilityLabel={
+        variant === "voice"
+          ? "Voice recording in progress"
+          : "Video recording in progress"
+      }
+    >
+      <View style={styles.timerSpacer} />
+      {timerBlock}
+    </View>
   );
 }
 
@@ -190,44 +134,23 @@ const styles = StyleSheet.create({
     paddingRight: 10,
     gap: 10,
   },
-  meterBody: {
+  timerSpacer: {
     flex: 1,
-    height: MAX_BAR_HEIGHT + 8,
-    justifyContent: "center",
-    position: "relative",
   },
-  wave: {
-    flexDirection: "row",
-    alignItems: "center",
-    height: MAX_BAR_HEIGHT,
-    gap: BAR_GAP,
-  },
-  bar: {
-    width: BAR_WIDTH,
-    borderRadius: BAR_WIDTH,
-  },
-  slideOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: "center",
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 8,
+  lockedCancelPress: {
+    flex: 1,
+    paddingVertical: 6,
     paddingHorizontal: 4,
+    justifyContent: "center",
+    alignItems: "flex-start",
+    backgroundColor: "transparent",
   },
-  chevronRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 1,
-  },
-  chevron: {
-    fontSize: 20,
-    fontWeight: "800",
-    lineHeight: 22,
-  },
-  slideHint: {
-    fontSize: 12,
+  lockedCancelLabel: {
+    fontSize: 16,
     fontWeight: "700",
-    letterSpacing: 0.2,
+    letterSpacing: 0.3,
+    textShadowRadius: 12,
+    textShadowOffset: { width: 0, height: 0 },
   },
   timerBlock: {
     flexDirection: "row",

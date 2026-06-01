@@ -174,7 +174,7 @@ export const VideoMessage = forwardRef<VideoMessageHandle, VideoMessageProps>(
       >
         <View style={styles.column}>
           <Text style={[styles.hint, { color: colors.textMuted }]}>
-            Swipe up on the button to lock · slide left on the bar below to
+            Swipe up on the button to lock · swipe the record button left to
             cancel · tap send when done
           </Text>
 

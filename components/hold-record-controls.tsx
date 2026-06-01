@@ -4,8 +4,9 @@ import React, { forwardRef, useEffect, useImperativeHandle } from "react";
 import {
   Pressable,
   StyleSheet,
+  Text,
   View,
-  type PanResponderInstance
+  type PanResponderInstance,
 } from "react-native";
 import Animated, {
   cancelAnimation,
@@ -15,6 +16,7 @@ import Animated, {
   withRepeat,
   withSequence,
   withTiming,
+  type SharedValue,
 } from "react-native-reanimated";
 
 import { useThemePalette } from "@/providers/theme-palette-provider";
@@ -41,6 +43,8 @@ type HoldRecordControlsProps = {
   hideFloatingTimer?: boolean;
   panHandlers: PanResponderInstance["panHandlers"];
   onSendLocked: () => void;
+  /** Horizontal drag (px) applied to the FAB while recording (not locked). */
+  slideFabX: SharedValue<number>;
   accentColor?: string;
   iconColor?: string;
 };
@@ -70,6 +74,7 @@ export const HoldRecordControls = forwardRef<
     hideFloatingTimer = false,
     panHandlers,
     onSendLocked,
+    slideFabX,
     accentColor = "#C4F542",
     iconColor = "#ffffff",
   },
@@ -135,15 +140,19 @@ export const HoldRecordControls = forwardRef<
           duration: 200,
           easing: Easing.out(Easing.cubic),
         });
+        slideFabX.value = withTiming(0, {
+          duration: 200,
+          easing: Easing.out(Easing.cubic),
+        });
         cancelAnimation(recPulse);
         recPulse.value = 1;
       },
     }),
-    [fabLift, lockProgSv, recPulse],
+    [fabLift, lockProgSv, recPulse, slideFabX],
   );
 
   const fabAnim = useAnimatedStyle(() => ({
-    transform: [{ translateY: fabLift.value }],
+    transform: [{ translateX: slideFabX.value }, { translateY: fabLift.value }],
   }));
 
   const lockAnimStyle = useAnimatedStyle(() => ({
@@ -212,6 +221,20 @@ export const HoldRecordControls = forwardRef<
             color={lockReached ? iconColor : colors.textMuted}
           />
         </Animated.View>
+      ) : null}
+
+      {recording && !locked ? (
+        <View
+          style={styles.slideHintNearFab}
+          pointerEvents="none"
+          accessibilityElementsHidden
+        >
+          <MaterialIcons name="chevron-left" size={22} color={accentColor} />
+          <View style={styles.slideHintGap} />
+          <Text style={[styles.slideHintCancel, { color: colors.textMuted }]}>
+            cancel
+          </Text>
+        </View>
       ) : null}
 
       <View style={styles.fabWrap} {...panHandlers}>
@@ -314,6 +337,23 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 3 },
     elevation: 4,
+  },
+  slideHintNearFab: {
+    position: "absolute",
+    left: FAB,
+    bottom: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    maxWidth: 120,
+  },
+  slideHintGap: {
+    width: 6,
+  },
+  slideHintCancel: {
+    fontSize: 13,
+    fontWeight: "600",
+    letterSpacing: 0.3,
+    textTransform: "lowercase",
   },
   fabWrap: {
     width: FAB,
