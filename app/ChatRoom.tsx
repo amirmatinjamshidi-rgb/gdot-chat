@@ -41,6 +41,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { DualIconCrossfade } from "@/components/dual-icon-crossfade";
 import { ErrorHandlerButton } from "@/components/error-handler-button";
 import {
   HoldRecordControls,
@@ -48,7 +49,6 @@ import {
   type HoldRecordControlsHandle,
 } from "@/components/hold-record-controls";
 import { ThemedText } from "@/components/themed-text";
-import { IconSymbol } from "@/components/ui/icon-symbol";
 import {
   VIDEO_RECORD_MAX_MS,
   VideoMessage,
@@ -158,7 +158,7 @@ function ComposerFab({
           style={[styles.actionFab, { backgroundColor: fabColor }]}
           onPress={onSendText}
         >
-          <IconSymbol name="paperplane.fill" size={22} color={iconColor} />
+          <DualIconCrossfade active="send" size={22} color={iconColor} />
         </Pressable>
       </Animated.View>
     );
@@ -173,7 +173,7 @@ function ComposerFab({
           style={[styles.actionFab, { backgroundColor: fabColor }]}
           onPress={onCycleSendEmpty}
         >
-          <IconSymbol name="paperplane.fill" size={22} color={iconColor} />
+          <DualIconCrossfade active="send" size={22} color={iconColor} />
         </Pressable>
       </Animated.View>
     );
@@ -610,9 +610,20 @@ export default function ChatRoomScreen() {
 
   useEffect(() => {
     if (!recordingLive) return;
-    const id = setInterval(() => setRecordHudTick((n) => n + 1), 200);
+    const hiFreqMeter =
+      (voiceRecordingActive && composerMode === "voice") ||
+      (videoRecordingActive && composerMode === "video");
+    const id = setInterval(
+      () => setRecordHudTick((n) => n + 1),
+      hiFreqMeter ? 16 : 200,
+    );
     return () => clearInterval(id);
-  }, [recordingLive]);
+  }, [
+    recordingLive,
+    voiceRecordingActive,
+    videoRecordingActive,
+    composerMode,
+  ]);
 
   useEffect(() => {
     if (!videoRecordingActive) return;

@@ -1,3 +1,4 @@
+import { DualIconCrossfade } from "@/components/dual-icon-crossfade";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import React, { forwardRef, useEffect, useImperativeHandle } from "react";
 import {
@@ -16,7 +17,6 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
-import { IconSymbol } from "@/components/ui/icon-symbol";
 import { useThemePalette } from "@/providers/theme-palette-provider";
 
 const FAB = 44;
@@ -76,8 +76,6 @@ export const HoldRecordControls = forwardRef<
   ref,
 ) {
   const { colors } = useThemePalette();
-  const holdIcon =
-    mode === "voice" ? ("mic.fill" as const) : ("video.fill" as const);
   const dragUp = Math.max(0, -dragY);
   const lockProgress = Math.min(1, dragUp / LOCK_DRAG_PX);
   const lockVisible = recording && !locked && lockProgress > 0.05;
@@ -229,7 +227,7 @@ export const HoldRecordControls = forwardRef<
               ]}
               onPress={onSendLocked}
             >
-              <MaterialIcons name="send" size={22} color={iconColor} />
+              <DualIconCrossfade active="send" size={22} color={iconColor} />
             </Pressable>
           ) : (
             <View
@@ -241,7 +239,11 @@ export const HoldRecordControls = forwardRef<
               }
               style={[styles.actionFab, { backgroundColor: accentColor }]}
             >
-              <IconSymbol name={holdIcon} size={22} color={iconColor} />
+              <DualIconCrossfade
+                active={mode === "voice" ? "mic" : "video"}
+                size={22}
+                color={iconColor}
+              />
             </View>
           )}
         </Animated.View>
