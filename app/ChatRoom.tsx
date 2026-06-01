@@ -36,11 +36,12 @@ import Animated, {
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
-  withSequence,
+  withSpring,
   withTiming,
 } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { DualIconCrossfade } from "@/components/dual-icon-crossfade";
 import { ErrorHandlerButton } from "@/components/error-handler-button";
 import {
   HoldRecordControls,
@@ -48,7 +49,6 @@ import {
   type HoldRecordControlsHandle,
 } from "@/components/hold-record-controls";
 import { ThemedText } from "@/components/themed-text";
-import { IconSymbol } from "@/components/ui/icon-symbol";
 import {
   VIDEO_RECORD_MAX_MS,
   VideoMessage,
@@ -60,12 +60,14 @@ import {
   VideoMessageBubble,
 } from "@/components/video-message-bubble";
 import { VoiceMessageBubble } from "@/components/voice-message-bubble";
-import { VoiceRecordingMeter } from "@/components/voice-recording-meter";
+import { RecordingSlideMeter } from "@/components/recording-slide-meter";
 import { useThemePalette } from "@/providers/theme-palette-provider";
 const MIN_RECORD_MS = 1000;
 const HOLD_MS = 320;
 const TAP_MAX_MS = 260;
 const KEYBOARD_EXTRA_OFFSET = 100;
+/** Swipe FAB left by this distance (px) then release to cancel recording. */
+const FAB_CANCEL_DRAG_PX = 100;
 
 /** Min row height when a video bubble is scaled up during playback (avoids clip / layout jump). */
 const VIDEO_BUBBLE_PLAYING_MIN_HEIGHT = Math.max(
@@ -129,53 +131,29 @@ function ComposerFab({
   fabColor,
   iconColor,
 }: ComposerFabProps) {
-  const fabScale = useSharedValue(1);
-  const sig = `${isSendOnly}:${composerMode}`;
-  const prevSig = useRef(sig);
-
-  useEffect(() => {
-    if (prevSig.current === sig) return;
-    prevSig.current = sig;
-    fabScale.value = withSequence(
-      withTiming(0.94, { duration: 70 }),
-      withTiming(1, {
-        duration: 160,
-        easing: Easing.out(Easing.cubic),
-      }),
-    );
-  }, [fabScale, sig]);
-
-  const fabAnim = useAnimatedStyle(() => ({
-    transform: [{ scale: fabScale.value }],
-  }));
-
   if (isSendOnly) {
     return (
-      <Animated.View style={fabAnim}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Send message"
-          style={[styles.actionFab, { backgroundColor: fabColor }]}
-          onPress={onSendText}
-        >
-          <IconSymbol name="paperplane.fill" size={22} color={iconColor} />
-        </Pressable>
-      </Animated.View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Send message"
+        style={[styles.actionFab, { backgroundColor: fabColor }]}
+        onPress={onSendText}
+      >
+        <DualIconCrossfade active="send" size={22} color={iconColor} />
+      </Pressable>
     );
   }
 
   if (composerMode === "send") {
     return (
-      <Animated.View style={fabAnim}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Switch to voice message"
-          style={[styles.actionFab, { backgroundColor: fabColor }]}
-          onPress={onCycleSendEmpty}
-        >
-          <IconSymbol name="paperplane.fill" size={22} color={iconColor} />
-        </Pressable>
-      </Animated.View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Switch to voice message"
+        style={[styles.actionFab, { backgroundColor: fabColor }]}
+        onPress={onCycleSendEmpty}
+      >
+        <DualIconCrossfade active="send" size={22} color={iconColor} />
+      </Pressable>
     );
   }
 
@@ -193,6 +171,7 @@ export default function ChatRoomScreen() {
   const [voiceLocked, setVoiceLocked] = useState(false);
   const [videoLocked, setVideoLocked] = useState(false);
   const [videoRecordingActive, setVideoRecordingActive] = useState(false);
+  const recordingLive = voiceRecordingActive || videoRecordingActive;
   const [dragY, setDragY] = useState(0);
   const [recordHudTick, setRecordHudTick] = useState(0);
   const [playingVideoId, setPlayingVideoId] = useState<string | null>(null);
@@ -201,6 +180,7 @@ export default function ChatRoomScreen() {
   const listRef = useRef<FlatList<MessageRow>>(null);
   const inputRef = useRef<TextInput>(null);
   const holdRecordControlsRef = useRef<HoldRecordControlsHandle>(null);
+  const slideCancelFabX = useSharedValue(0);
   const shellW = useSharedValue(260);
   const sweep = useSharedValue(0);
   const neonVisible = useSharedValue(0);
@@ -213,6 +193,7 @@ export default function ChatRoomScreen() {
   const swipeBackGesture = useMemo(
     () =>
       Gesture.Pan()
+        .enabled(!recordingLive)
         .activeOffsetX(-14)
         .failOffsetY([-40, 40])
         .onEnd((e) => {
@@ -220,7 +201,7 @@ export default function ChatRoomScreen() {
             runOnJS(router.back)();
           }
         }),
-    [router],
+    [router, recordingLive],
   );
 
   useEffect(() => {
@@ -475,6 +456,10 @@ export default function ChatRoomScreen() {
     holdRecordControlsRef.current?.resetLayout();
   }, [safeStopVoiceRecording]);
 
+  const onVoiceSlideCancel = useCallback(() => {
+    void discardVoiceRecording();
+  }, [discardVoiceRecording]);
+
   const startVoiceRecording = useCallback(async () => {
     const gen = ++voiceStartGenRef.current;
     if (Platform.OS === "web") {
@@ -490,6 +475,10 @@ export default function ChatRoomScreen() {
     await setAudioModeAsync({
       allowsRecording: true,
       playsInSilentMode: true,
+
+      interruptionMode: "mixWithOthers",
+      shouldPlayInBackground: true,
+      shouldRouteThroughEarpiece: true,
     });
     if (gen !== voiceStartGenRef.current) return;
     const recorder = audioRecorderRef.current;
@@ -594,7 +583,9 @@ export default function ChatRoomScreen() {
     }
   }, []);
 
-  const recordingLive = voiceRecordingActive || videoRecordingActive;
+  const onVideoSlideCancel = useCallback(() => {
+    void discardVideoRecording();
+  }, [discardVideoRecording]);
 
   useEffect(() => {
     if (!recordingLive) return;
@@ -695,6 +686,7 @@ export default function ChatRoomScreen() {
         onMoveShouldSetPanResponder: () =>
           recordingLiveRef.current || holdArmedRef.current,
         onPanResponderGrant: () => {
+          slideCancelFabX.value = 0;
           if (voiceLockedRef.current || videoLockedRef.current) return;
           pressDownAt.current = Date.now();
           holdArmedRef.current = false;
@@ -730,19 +722,70 @@ export default function ChatRoomScreen() {
           if (!recordingLiveRef.current && !holdArmedRef.current) return;
           setDragY(g.dy);
           lockFromDrag(g.dy);
+          if (
+            recordingLiveRef.current &&
+            !voiceLockedRef.current &&
+            !videoLockedRef.current
+          ) {
+            slideCancelFabX.value = Math.max(
+              -FAB_CANCEL_DRAG_PX * 1.25,
+              Math.min(0, g.dx),
+            );
+          }
         },
         onPanResponderRelease: () => {
+          const dx = slideCancelFabX.value;
+          const shouldSlideCancel =
+            recordingLiveRef.current &&
+            !voiceLockedRef.current &&
+            !videoLockedRef.current &&
+            dx <= -FAB_CANCEL_DRAG_PX;
+          slideCancelFabX.value = withSpring(0, {
+            damping: 22,
+            stiffness: 320,
+          });
           setDragY(0);
+          if (shouldSlideCancel) {
+            const mode = composerModeRef.current;
+            if (mode === "voice") {
+              void discardVoiceRecording();
+            } else if (mode === "video") {
+              void discardVideoRecording();
+            }
+            return;
+          }
           void onComposerPressOut();
         },
         onPanResponderTerminate: () => {
+          const dx = slideCancelFabX.value;
+          const shouldSlideCancel =
+            recordingLiveRef.current &&
+            !voiceLockedRef.current &&
+            !videoLockedRef.current &&
+            dx <= -FAB_CANCEL_DRAG_PX;
+          slideCancelFabX.value = withSpring(0, {
+            damping: 22,
+            stiffness: 320,
+          });
           setDragY(0);
+          if (shouldSlideCancel) {
+            const mode = composerModeRef.current;
+            if (mode === "voice") {
+              void discardVoiceRecording();
+            } else if (mode === "video") {
+              void discardVideoRecording();
+            }
+            return;
+          }
           void onComposerPressOut();
         },
       }),
     [
       clearHoldTimer,
+      discardVideoRecording,
+      discardVoiceRecording,
       lockFromDrag,
+      slideCancelFabX,
       startVideoRecording,
       startVoiceRecording,
       onComposerPressOut,
@@ -761,6 +804,11 @@ export default function ChatRoomScreen() {
 
   const showVoiceRecordingMeter =
     voiceRecordingActive && composerMode === "voice";
+
+  const showVideoRecordingMeter =
+    Platform.OS !== "web" &&
+    videoRecordingActive &&
+    composerMode === "video";
 
   const isSendOnly = message.trim().length > 0;
 
@@ -954,9 +1002,18 @@ export default function ChatRoomScreen() {
                     onLayout={onInputShellLayout}
                   >
                     {showVoiceRecordingMeter ? (
-                      <VoiceRecordingMeter
+                      <RecordingSlideMeter
+                        variant="voice"
+                        locked={voiceLocked}
                         elapsedMs={recordElapsedMs}
-                        tick={recordHudTick}
+                        onSlideCancel={onVoiceSlideCancel}
+                      />
+                    ) : showVideoRecordingMeter ? (
+                      <RecordingSlideMeter
+                        variant="video"
+                        locked={videoLocked}
+                        elapsedMs={recordElapsedMs}
+                        onSlideCancel={onVideoSlideCancel}
                       />
                     ) : (
                       <>
@@ -1005,7 +1062,9 @@ export default function ChatRoomScreen() {
                         }
                         dragY={dragY}
                         elapsedMs={recordElapsedMs}
-                        hideFloatingTimer={showVoiceRecordingMeter}
+                        hideFloatingTimer={
+                          showVoiceRecordingMeter || showVideoRecordingMeter
+                        }
                         maxDurationMs={
                           composerMode === "video" && recordingLive
                             ? VIDEO_RECORD_MAX_MS
@@ -1023,13 +1082,7 @@ export default function ChatRoomScreen() {
                             void finishVideoCapture();
                           }
                         }}
-                        onCancelLocked={() => {
-                          if (composerMode === "voice") {
-                            void discardVoiceRecording();
-                          } else {
-                            void discardVideoRecording();
-                          }
-                        }}
+                        slideFabX={slideCancelFabX}
                       />
                     )}
                   </View>

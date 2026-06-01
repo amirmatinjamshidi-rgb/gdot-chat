@@ -1,10 +1,12 @@
+import { DualIconCrossfade } from "@/components/dual-icon-crossfade";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import React, { forwardRef, useEffect, useImperativeHandle } from "react";
 import {
   Pressable,
   StyleSheet,
+  Text,
   View,
-  type PanResponderInstance
+  type PanResponderInstance,
 } from "react-native";
 import Animated, {
   cancelAnimation,
@@ -14,16 +16,15 @@ import Animated, {
   withRepeat,
   withSequence,
   withTiming,
+  type SharedValue,
 } from "react-native-reanimated";
 
-import { IconSymbol } from "@/components/ui/icon-symbol";
 import { useThemePalette } from "@/providers/theme-palette-provider";
 
 const FAB = 44;
 const LOCK_SIZE = 40;
 const LOCK_LIFT = 72;
 const LOCK_DRAG_PX = 56;
-const DELETE_SIZE = 38;
 
 export type HoldRecordControlsHandle = {
   /** Snap FAB / lock / pulse animations back after cancel or layout drift. */
@@ -42,7 +43,8 @@ type HoldRecordControlsProps = {
   hideFloatingTimer?: boolean;
   panHandlers: PanResponderInstance["panHandlers"];
   onSendLocked: () => void;
-  onCancelLocked: () => void;
+  /** Horizontal drag (px) applied to the FAB while recording (not locked). */
+  slideFabX: SharedValue<number>;
   accentColor?: string;
   iconColor?: string;
 };
@@ -72,15 +74,13 @@ export const HoldRecordControls = forwardRef<
     hideFloatingTimer = false,
     panHandlers,
     onSendLocked,
-    onCancelLocked,
+    slideFabX,
     accentColor = "#C4F542",
     iconColor = "#ffffff",
   },
   ref,
 ) {
   const { colors } = useThemePalette();
-  const holdIcon =
-    mode === "voice" ? ("mic.fill" as const) : ("video.fill" as const);
   const dragUp = Math.max(0, -dragY);
   const lockProgress = Math.min(1, dragUp / LOCK_DRAG_PX);
   const lockVisible = recording && !locked && lockProgress > 0.05;
@@ -140,15 +140,19 @@ export const HoldRecordControls = forwardRef<
           duration: 200,
           easing: Easing.out(Easing.cubic),
         });
+        slideFabX.value = withTiming(0, {
+          duration: 200,
+          easing: Easing.out(Easing.cubic),
+        });
         cancelAnimation(recPulse);
         recPulse.value = 1;
       },
     }),
-    [fabLift, lockProgSv, recPulse],
+    [fabLift, lockProgSv, recPulse, slideFabX],
   );
 
   const fabAnim = useAnimatedStyle(() => ({
-    transform: [{ translateY: fabLift.value }],
+    transform: [{ translateX: slideFabX.value }, { translateY: fabLift.value }],
   }));
 
   const lockAnimStyle = useAnimatedStyle(() => ({
@@ -195,22 +199,6 @@ export const HoldRecordControls = forwardRef<
         </View>
       ) : null}
 
-      {locked ? (
-        <Pressable
-          style={[
-            styles.cancelBtn,
-            {
-              backgroundColor: colors.error,
-              borderColor: `${colors.surfaceElevated}CC`,
-            },
-          ]}
-          onPress={onCancelLocked}
-          accessibilityLabel="Cancel recording"
-        >
-          <MaterialIcons name="delete" size={20} color="#FFFFFF" />
-        </Pressable>
-      ) : null}
-
       {lockVisible || locked ? (
         <Animated.View
           style={[
@@ -235,6 +223,20 @@ export const HoldRecordControls = forwardRef<
         </Animated.View>
       ) : null}
 
+      {recording && !locked ? (
+        <View
+          style={styles.slideHintNearFab}
+          pointerEvents="none"
+          accessibilityElementsHidden
+        >
+          <MaterialIcons name="chevron-left" size={22} color={accentColor} />
+          <View style={styles.slideHintGap} />
+          <Text style={[styles.slideHintCancel, { color: colors.textMuted }]}>
+            cancel
+          </Text>
+        </View>
+      ) : null}
+
       <View style={styles.fabWrap} {...panHandlers}>
         <Animated.View style={fabAnim}>
           {locked ? (
@@ -248,7 +250,7 @@ export const HoldRecordControls = forwardRef<
               ]}
               onPress={onSendLocked}
             >
-              <MaterialIcons name="send" size={22} color={iconColor} />
+              <DualIconCrossfade active="send" size={22} color={iconColor} />
             </Pressable>
           ) : (
             <View
@@ -260,7 +262,11 @@ export const HoldRecordControls = forwardRef<
               }
               style={[styles.actionFab, { backgroundColor: accentColor }]}
             >
-              <IconSymbol name={holdIcon} size={22} color={iconColor} />
+              <DualIconCrossfade
+                active={mode === "voice" ? "mic" : "video"}
+                size={22}
+                color={iconColor}
+              />
             </View>
           )}
         </Animated.View>
@@ -272,7 +278,7 @@ export const HoldRecordControls = forwardRef<
 const styles = StyleSheet.create({
   root: {
     width: 260,
-    height: FAB + LOCK_LIFT + DELETE_SIZE + 12,
+    height: FAB + LOCK_LIFT + 12,
     alignItems: "flex-end",
     justifyContent: "flex-end",
   },
@@ -317,21 +323,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginTop: 1,
   },
-  cancelBtn: {
-    position: "absolute",
-    bottom: FAB + 18 + LOCK_SIZE + 10,
-    width: DELETE_SIZE,
-    height: DELETE_SIZE,
-    borderRadius: DELETE_SIZE / 2,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 2,
-    shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 5,
-  },
   lockTarget: {
     position: "absolute",
     bottom: FAB + 18,
@@ -346,6 +337,23 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 3 },
     elevation: 4,
+  },
+  slideHintNearFab: {
+    position: "absolute",
+    left: FAB,
+    bottom: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    maxWidth: 120,
+  },
+  slideHintGap: {
+    width: 6,
+  },
+  slideHintCancel: {
+    fontSize: 13,
+    fontWeight: "600",
+    letterSpacing: 0.3,
+    textTransform: "lowercase",
   },
   fabWrap: {
     width: FAB,
