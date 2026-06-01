@@ -602,6 +602,10 @@ export default function ChatRoomScreen() {
     }
   }, []);
 
+  const onVideoSlideCancel = useCallback(() => {
+    void discardVideoRecording();
+  }, [discardVideoRecording]);
+
   const recordingLive = voiceRecordingActive || videoRecordingActive;
 
   useEffect(() => {
@@ -769,6 +773,11 @@ export default function ChatRoomScreen() {
 
   const showVoiceRecordingMeter =
     voiceRecordingActive && composerMode === "voice";
+
+  const showVideoRecordingMeter =
+    Platform.OS !== "web" &&
+    videoRecordingActive &&
+    composerMode === "video";
 
   const isSendOnly = message.trim().length > 0;
 
@@ -968,6 +977,13 @@ export default function ChatRoomScreen() {
                         tick={recordHudTick}
                         onSlideCancel={onVoiceSlideCancel}
                       />
+                    ) : showVideoRecordingMeter ? (
+                      <RecordingSlideMeter
+                        variant="video"
+                        elapsedMs={recordElapsedMs}
+                        tick={recordHudTick}
+                        onSlideCancel={onVideoSlideCancel}
+                      />
                     ) : (
                       <>
                         {inputFocused ? (
@@ -1015,7 +1031,9 @@ export default function ChatRoomScreen() {
                         }
                         dragY={dragY}
                         elapsedMs={recordElapsedMs}
-                        hideFloatingTimer={showVoiceRecordingMeter}
+                        hideFloatingTimer={
+                          showVoiceRecordingMeter || showVideoRecordingMeter
+                        }
                         maxDurationMs={
                           composerMode === "video" && recordingLive
                             ? VIDEO_RECORD_MAX_MS
