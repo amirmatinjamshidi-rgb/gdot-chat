@@ -60,7 +60,7 @@ import {
   VideoMessageBubble,
 } from "@/components/video-message-bubble";
 import { VoiceMessageBubble } from "@/components/voice-message-bubble";
-import { VoiceRecordingMeter } from "@/components/voice-recording-meter";
+import { RecordingSlideMeter } from "@/components/recording-slide-meter";
 import { useThemePalette } from "@/providers/theme-palette-provider";
 const MIN_RECORD_MS = 1000;
 const HOLD_MS = 320;
@@ -474,6 +474,10 @@ export default function ChatRoomScreen() {
     setDragY(0);
     holdRecordControlsRef.current?.resetLayout();
   }, [safeStopVoiceRecording]);
+
+  const onVoiceSlideCancel = useCallback(() => {
+    void discardVoiceRecording();
+  }, [discardVoiceRecording]);
 
   const startVoiceRecording = useCallback(async () => {
     const gen = ++voiceStartGenRef.current;
@@ -958,9 +962,11 @@ export default function ChatRoomScreen() {
                     onLayout={onInputShellLayout}
                   >
                     {showVoiceRecordingMeter ? (
-                      <VoiceRecordingMeter
+                      <RecordingSlideMeter
+                        variant="voice"
                         elapsedMs={recordElapsedMs}
                         tick={recordHudTick}
+                        onSlideCancel={onVoiceSlideCancel}
                       />
                     ) : (
                       <>
@@ -1025,13 +1031,6 @@ export default function ChatRoomScreen() {
                             void finishVoiceCapture();
                           } else {
                             void finishVideoCapture();
-                          }
-                        }}
-                        onCancelLocked={() => {
-                          if (composerMode === "voice") {
-                            void discardVoiceRecording();
-                          } else {
-                            void discardVideoRecording();
                           }
                         }}
                       />

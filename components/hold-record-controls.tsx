@@ -23,7 +23,6 @@ const FAB = 44;
 const LOCK_SIZE = 40;
 const LOCK_LIFT = 72;
 const LOCK_DRAG_PX = 56;
-const DELETE_SIZE = 38;
 
 export type HoldRecordControlsHandle = {
   /** Snap FAB / lock / pulse animations back after cancel or layout drift. */
@@ -42,7 +41,6 @@ type HoldRecordControlsProps = {
   hideFloatingTimer?: boolean;
   panHandlers: PanResponderInstance["panHandlers"];
   onSendLocked: () => void;
-  onCancelLocked: () => void;
   accentColor?: string;
   iconColor?: string;
 };
@@ -72,7 +70,6 @@ export const HoldRecordControls = forwardRef<
     hideFloatingTimer = false,
     panHandlers,
     onSendLocked,
-    onCancelLocked,
     accentColor = "#C4F542",
     iconColor = "#ffffff",
   },
@@ -195,22 +192,6 @@ export const HoldRecordControls = forwardRef<
         </View>
       ) : null}
 
-      {locked ? (
-        <Pressable
-          style={[
-            styles.cancelBtn,
-            {
-              backgroundColor: colors.error,
-              borderColor: `${colors.surfaceElevated}CC`,
-            },
-          ]}
-          onPress={onCancelLocked}
-          accessibilityLabel="Cancel recording"
-        >
-          <MaterialIcons name="delete" size={20} color="#FFFFFF" />
-        </Pressable>
-      ) : null}
-
       {lockVisible || locked ? (
         <Animated.View
           style={[
@@ -272,7 +253,7 @@ export const HoldRecordControls = forwardRef<
 const styles = StyleSheet.create({
   root: {
     width: 260,
-    height: FAB + LOCK_LIFT + DELETE_SIZE + 12,
+    height: FAB + LOCK_LIFT + 12,
     alignItems: "flex-end",
     justifyContent: "flex-end",
   },
@@ -316,21 +297,6 @@ const styles = StyleSheet.create({
     fontVariant: ["tabular-nums"],
     fontWeight: "600",
     marginTop: 1,
-  },
-  cancelBtn: {
-    position: "absolute",
-    bottom: FAB + 18 + LOCK_SIZE + 10,
-    width: DELETE_SIZE,
-    height: DELETE_SIZE,
-    borderRadius: DELETE_SIZE / 2,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 2,
-    shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 5,
   },
   lockTarget: {
     position: "absolute",
