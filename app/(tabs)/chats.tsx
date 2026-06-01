@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { FlatList, StyleSheet, View } from "react-native";
+import { ActivityIndicator, FlatList, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import Animated, { FadeIn } from "react-native-reanimated";
@@ -9,64 +9,33 @@ import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { ScalePressable } from "@/components/ui/scale-pressable";
+import { useConversations } from "@/hooks/use-conversations";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 
 const ROW_HEIGHT = 56;
 const AVATAR = 46;
 
-const MOCK_CHATS = [
-  {
-    id: "1",
-    name: "Alice",
-    lastMessage: "Hey, how are you?",
-    time: "10:30 AM",
-    unread: 2,
-  },
-  {
-    id: "2",
-    name: "Bob",
-    lastMessage: "Did you see the latest update?",
-    time: "Yesterday",
-    unread: 0,
-  },
-  {
-    id: "3",
-    name: "Charlie",
-    lastMessage: "Meeting at 5?",
-    time: "Yesterday",
-    unread: 1,
-  },
-  {
-    id: "4",
-    name: "Diana",
-    lastMessage: "Sent the files.",
-    time: "Mon",
-    unread: 0,
-  },
-  {
-    id: "5",
-    name: "Eve",
-    lastMessage: "Call me when free.",
-    time: "Sun",
-    unread: 3,
-  },
-];
+function formatTime(epochMs: number): string {
+  const d = new Date(epochMs);
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
 
 export default function ChatsScreen() {
   const colorScheme = useColorScheme() ?? "light";
   const isDark = colorScheme === "dark";
   const router = useRouter();
   const [query, setQuery] = useState("");
+  const { conversations, loading } = useConversations();
 
   const filteredChats = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return MOCK_CHATS;
-    return MOCK_CHATS.filter(
+    if (!q) return conversations;
+    return conversations.filter(
       (c) =>
-        c.name.toLowerCase().includes(q) ||
-        c.lastMessage.toLowerCase().includes(q),
+        c.peerUsername.toLowerCase().includes(q) ||
+        c.lastMessagePreview.toLowerCase().includes(q),
     );
-  }, [query]);
+  }, [conversations, query]);
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
@@ -93,70 +62,87 @@ export default function ChatsScreen() {
         isDark={isDark}
       />
 
-      <FlatList
-        style={styles.list}
-        data={filteredChats}
-        keyExtractor={(item) => item.id}
-        keyboardShouldPersistTaps="handled"
-        renderItem={({ item }) => (
-          <ScalePressable
-            style={styles.chatRow}
-            onPress={() =>
-              router.push({
-                pathname: "/ChatRoom",
-                params: { id: item.id, name: item.name },
-              })
-            }
-          >
+      {loading ? (
+        <ActivityIndicator style={styles.loader} />
+      ) : (
+        <FlatList
+          style={styles.list}
+          data={filteredChats}
+          keyExtractor={(item) => item.id}
+          keyboardShouldPersistTaps="handled"
+          renderItem={({ item }) => (
+            <ScalePressable
+              style={styles.chatRow}
+              onPress={() =>
+                router.push({
+                  pathname: "/ChatRoom",
+                  params: {
+                    id: item.id,
+                    name: item.peerUsername,
+                    peerUserId: item.peerUserId,
+                    peerDeviceId: item.peerDeviceId,
+                  },
+                })
+              }
+            >
+              <View
+                style={[
+                  styles.avatar,
+                  { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
+                ]}
+              >
+                <ThemedText style={styles.avatarText}>
+                  {item.peerUsername[0] ?? "?"}
+                </ThemedText>
+              </View>
+
+              <View style={styles.chatBody}>
+                <View style={styles.topLine}>
+                  <ThemedText
+                    type="defaultSemiBold"
+                    numberOfLines={1}
+                    style={styles.name}
+                  >
+                    {item.peerUsername}
+                  </ThemedText>
+                  <ThemedText style={styles.timeText}>
+                    {item.lastMessageAt
+                      ? formatTime(item.lastMessageAt)
+                      : ""}
+                  </ThemedText>
+                </View>
+                <View style={styles.bottomLine}>
+                  <ThemedText numberOfLines={1} style={styles.lastMessage}>
+                    {item.lastMessagePreview || "No messages yet"}
+                  </ThemedText>
+                  {item.unreadCount > 0 ? (
+                    <View style={styles.unreadBadge}>
+                      <ThemedText style={styles.unreadText}>
+                        {item.unreadCount}
+                      </ThemedText>
+                    </View>
+                  ) : null}
+                </View>
+              </View>
+            </ScalePressable>
+          )}
+          ItemSeparatorComponent={() => (
             <View
               style={[
-                styles.avatar,
-                { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
+                styles.separator,
+                { backgroundColor: isDark ? "#334155" : "#E2E8F0" },
               ]}
-            >
-              <ThemedText style={styles.avatarText}>{item.name[0]}</ThemedText>
-            </View>
-
-            <View style={styles.chatBody}>
-              <View style={styles.topLine}>
-                <ThemedText
-                  type="defaultSemiBold"
-                  numberOfLines={1}
-                  style={styles.name}
-                >
-                  {item.name}
-                </ThemedText>
-                <ThemedText style={styles.timeText}>{item.time}</ThemedText>
-              </View>
-              <View style={styles.bottomLine}>
-                <ThemedText numberOfLines={1} style={styles.lastMessage}>
-                  {item.lastMessage}
-                </ThemedText>
-                {item.unread > 0 ? (
-                  <View style={styles.unreadBadge}>
-                    <ThemedText style={styles.unreadText}>
-                      {item.unread}
-                    </ThemedText>
-                  </View>
-                ) : null}
-              </View>
-            </View>
-          </ScalePressable>
-        )}
-        ItemSeparatorComponent={() => (
-          <View
-            style={[
-              styles.separator,
-              { backgroundColor: isDark ? "#334155" : "#E2E8F0" },
-            ]}
-          />
-        )}
-        ListEmptyComponent={
-          <Animated.View entering={FadeIn.duration(180)} style={styles.empty}>
-            <ThemedText style={styles.emptyText}>No chats found</ThemedText>
-          </Animated.View>
-        }
-      />
+            />
+          )}
+          ListEmptyComponent={
+            <Animated.View entering={FadeIn.duration(180)} style={styles.empty}>
+              <ThemedText style={styles.emptyText}>
+                No chats yet — add a contact
+              </ThemedText>
+            </Animated.View>
+          }
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -178,6 +164,9 @@ const styles = StyleSheet.create({
   },
   iconButton: {
     padding: 6,
+  },
+  loader: {
+    marginTop: 40,
   },
   list: {
     flex: 1,

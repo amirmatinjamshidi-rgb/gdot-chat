@@ -1,31 +1,91 @@
 import { Stack, useRouter } from "expo-router";
-import React from "react";
-import { FlatList, StyleSheet, View } from "react-native";
+import React, { useState } from "react";
+import {
+  ActivityIndicator,
+  FlatList,
+  StyleSheet,
+  TextInput,
+  View,
+} from "react-native";
 import Animated, { FadeInLeft } from "react-native-reanimated";
 
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { ScalePressable } from "@/components/ui/scale-pressable";
+import { ensureConversation } from "@/lib/auth/start-conversation";
+import type { UserSummaryDto } from "@/lib/api/api-types";
+import { useAppServices } from "@/lib/services/app-services-context";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-
-const MOCK_CONTACTS = [
-  { id: "1", name: "بابات", status: "Online" },
-  { id: "2", name: "Bob", status: "Away" },
-  { id: "3", name: "Charlie", status: "Offline" },
-  { id: "4", name: "David", status: "Online" },
-];
 
 export default function ContactsScreen() {
   const colorScheme = useColorScheme() ?? "light";
   const isDark = colorScheme === "dark";
   const router = useRouter();
+  const { usersApi, conversationStore } = useAppServices();
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<UserSummaryDto[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const onSearch = async () => {
+    const q = query.trim();
+    if (!q) return;
+    setLoading(true);
+    try {
+      const users = await usersApi.search(q);
+      setResults(users);
+    } catch {
+      setResults([
+        {
+          id: crypto.randomUUID(),
+          username: q,
+        },
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const startChat = async (user: UserSummaryDto) => {
+    const conversation = await ensureConversation({
+      conversationStore,
+      peerUserId: user.id,
+      peerUsername: user.username,
+      peerDeviceId: user.id,
+    });
+    router.push({
+      pathname: "/ChatRoom",
+      params: {
+        id: conversation.id,
+        name: user.username,
+        peerUserId: user.id,
+        peerDeviceId: user.id,
+      },
+    });
+  };
 
   return (
     <ThemedView style={styles.container}>
       <Stack.Screen options={{ title: "Contacts" }} />
+      <View style={styles.searchRow}>
+        <TextInput
+          style={[
+            styles.searchInput,
+            { borderColor: isDark ? "#475569" : "#cbd5e1" },
+          ]}
+          placeholder="Search username"
+          value={query}
+          onChangeText={setQuery}
+          onSubmitEditing={() => void onSearch()}
+          autoCapitalize="none"
+        />
+        <ScalePressable style={styles.searchBtn} onPress={() => void onSearch()}>
+          <ThemedText style={styles.searchBtnText}>Search</ThemedText>
+        </ScalePressable>
+      </View>
+      {loading ? <ActivityIndicator style={{ marginTop: 20 }} /> : null}
       <FlatList
         style={styles.list}
-        data={MOCK_CONTACTS}
+        data={results}
         keyExtractor={(item) => item.id}
         renderItem={({ item, index }) => (
           <Animated.View
@@ -33,12 +93,7 @@ export default function ContactsScreen() {
           >
             <ScalePressable
               style={styles.contactItem}
-              onPress={() =>
-                router.push({
-                  pathname: "/ChatRoom",
-                  params: { id: item.id, name: item.name },
-                })
-              }
+              onPress={() => void startChat(item)}
             >
               <View
                 style={[
@@ -46,46 +101,51 @@ export default function ContactsScreen() {
                   { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
                 ]}
               >
-                <ThemedText>{item.name[0]}</ThemedText>
+                <ThemedText>{item.username[0]?.toUpperCase() ?? "?"}</ThemedText>
               </View>
               <View>
-                <ThemedText type="defaultSemiBold">{item.name}</ThemedText>
-                <ThemedText
-                  style={[
-                    styles.statusText,
-                    { color: item.status === "Online" ? "#10B981" : "#6B7280" },
-                  ]}
-                >
-                  {item.status}
-                </ThemedText>
+                <ThemedText type="defaultSemiBold">{item.username}</ThemedText>
               </View>
             </ScalePressable>
           </Animated.View>
         )}
-        ItemSeparatorComponent={() => (
-          <View
-            style={[
-              styles.separator,
-              { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
-            ]}
-          />
-        )}
+        ListEmptyComponent={
+          <ThemedText style={styles.hint}>
+            Search for a user to start an encrypted chat
+          </ThemedText>
+        }
       />
     </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
+  container: { flex: 1 },
+  searchRow: {
+    flexDirection: "row",
+    padding: 12,
+    gap: 8,
+    alignItems: "center",
   },
-  list: {
+  searchInput: {
     flex: 1,
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 10,
+    fontSize: 16,
   },
+  searchBtn: {
+    backgroundColor: "#3B82F6",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  searchBtnText: { color: "#fff", fontWeight: "600" },
+  list: { flex: 1 },
   contactItem: {
     flexDirection: "row",
-    padding: 16,
     alignItems: "center",
+    padding: 14,
     gap: 12,
   },
   avatar: {
@@ -95,11 +155,5 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  statusText: {
-    fontSize: 12,
-  },
-  separator: {
-    height: 1,
-    marginLeft: 72,
-  },
+  hint: { padding: 20, opacity: 0.6, textAlign: "center" },
 });

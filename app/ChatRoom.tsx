@@ -53,6 +53,8 @@ import {
 import { VideoMessageBubble } from "@/components/video-message-bubble";
 import { VoiceMessageBubble } from "@/components/voice-message-bubble";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import { useMessages } from "@/hooks/use-messages";
+import { useAppServices } from "@/lib/services/app-services-context";
 
 const LIME = "#C4F542";
 const MIN_RECORD_MS = 1000;
@@ -72,23 +74,12 @@ type MessageRow = {
   mediaUri?: string;
 };
 
-const MOCK_MESSAGES: MessageRow[] = [
-  { id: "1", text: "Hey Alice!", sender: "me", time: "10:30 AM", kind: "text" },
-  {
-    id: "2",
-    text: "Hi! How is the project going?",
-    sender: "Alice",
-    time: "10:31 AM",
-    kind: "text",
-  },
-  {
-    id: "3",
-    text: "It is going great! Just setting up the routes.",
-    sender: "me",
-    time: "10:32 AM",
-    kind: "text",
-  },
-];
+function formatMessageTime(epochMs: number): string {
+  return new Date(epochMs).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 function formatDuration(ms: number) {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -163,9 +154,31 @@ function ComposerFab({
 }
 
 export default function ChatRoomScreen() {
-  const { name } = useLocalSearchParams<{ id: string; name: string }>();
+  const { id: conversationId, name } = useLocalSearchParams<{
+    id: string;
+    name: string;
+  }>();
+  const { syncService } = useAppServices();
+  const { messages: dbMessages, reload: reloadMessages } = useMessages(
+    conversationId,
+  );
   const [message, setMessage] = useState("");
-  const [messages, setMessages] = useState<MessageRow[]>(MOCK_MESSAGES);
+  const [mediaMessages, setMediaMessages] = useState<MessageRow[]>([]);
+  const dbRows: MessageRow[] = useMemo(
+    () =>
+      dbMessages.map((m) => ({
+        id: m.id,
+        kind: "text" as const,
+        text: m.plaintext,
+        sender: m.direction === "outgoing" ? "me" : name || "Them",
+        time: formatMessageTime(m.createdAt),
+      })),
+    [dbMessages, name],
+  );
+  const messages = useMemo(
+    () => [...dbRows, ...mediaMessages],
+    [dbRows, mediaMessages],
+  );
   const [composerMode, setComposerMode] = useState<ComposerMode>("send");
   const [composerError, setComposerError] = useState<string | null>(null);
   const [videoSessionActive, setVideoSessionActive] = useState(false);
@@ -370,7 +383,7 @@ export default function ChatRoomScreen() {
 
   const appendMessage = useCallback(
     (row: Omit<MessageRow, "id" | "time"> & { id?: string; time?: string }) => {
-      setMessages((prev) => [
+      setMediaMessages((prev) => [
         ...prev,
         {
           id: row.id ?? `${Date.now()}`,
@@ -384,15 +397,14 @@ export default function ChatRoomScreen() {
 
   const sendTextMessage = useCallback(() => {
     const trimmedMessage = message.trim();
-    if (!trimmedMessage) return;
-    appendMessage({
-      kind: "text",
-      text: trimmedMessage,
-      sender: "me",
-    });
+    if (!trimmedMessage || !conversationId) return;
     setMessage("");
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  }, [appendMessage, message]);
+    void (async () => {
+      await syncService.sendOutgoing(conversationId, trimmedMessage);
+      await reloadMessages();
+    })();
+  }, [conversationId, message, reloadMessages, syncService]);
 
   const finishVoiceCapture = useCallback(async () => {
     if (!voiceRecordingLiveRef.current) return;
