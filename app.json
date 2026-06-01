@@ -19,7 +19,13 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ],
+      "package": "com.amirmatin.GDOTchat"
     },
     "web": {
       "output": "static",
@@ -49,6 +55,7 @@
       ],
       "expo-video",
       "expo-audio",
+<<<<<<< HEAD
       [
         "expo-sqlite",
         {
@@ -57,12 +64,22 @@
         }
       ],
       "expo-secure-store"
+=======
+      "expo-secure-store",
+      "expo-font"
+>>>>>>> 8a3a64b08492dd743e451fcadf379ca5ae2fbb2c
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true,
       "turbomoduleEnabled": true,
       "supportsBackgroundPlayback": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "2162f76d-9423-4d09-ae49-5018aeca2679"
+      }
     }
   }
 }

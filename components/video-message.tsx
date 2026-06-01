@@ -1,3 +1,9 @@
+import {
+  CameraView,
+  useCameraPermissions,
+  useMicrophonePermissions,
+} from "expo-camera";
+import { LinearGradient } from "expo-linear-gradient";
 import React, {
   forwardRef,
   useCallback,
@@ -7,16 +13,16 @@ import React, {
   useState,
 } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
-import {
-  CameraView,
-  useCameraPermissions,
-  useMicrophonePermissions,
-} from "expo-camera";
+import Animated, { Easing, FadeIn } from "react-native-reanimated";
 
 import { CircularProgressRing } from "@/components/circular-progress-ring";
+import { useThemePalette } from "@/providers/theme-palette-provider";
 
 export const VIDEO_RECORD_MAX_MS = 90_000;
-const CIRCLE = 220;
+/** Visible camera disc */
+const CIRCLE = 212;
+const RING_INSET = 10;
+const ORB_MARGIN = 36;
 const READY_TIMEOUT_MS = 8000;
 
 export type VideoMessageHandle = {
@@ -41,6 +47,7 @@ function formatDuration(ms: number) {
 
 export const VideoMessage = forwardRef<VideoMessageHandle, VideoMessageProps>(
   function VideoMessage({ active, elapsedMs = 0 }, ref) {
+    const { colors } = useThemePalette();
     const cameraRef = useRef<CameraViewRef>(null);
     const [cameraPermission, requestCameraPermission] = useCameraPermissions();
     const [micPermission, requestMicPermission] = useMicrophonePermissions();
@@ -154,44 +161,89 @@ export const VideoMessage = forwardRef<VideoMessageHandle, VideoMessageProps>(
     if (!active) return null;
 
     const recordProgress = Math.min(1, elapsedMs / VIDEO_RECORD_MAX_MS);
-    const ringSize = CIRCLE + 14;
+    const ringSize = CIRCLE + RING_INSET;
+    const orbSize = ringSize + ORB_MARGIN * 2;
+    const remainingMs = Math.max(0, VIDEO_RECORD_MAX_MS - elapsedMs);
+    const trackRing = `${colors.textMuted}55`;
 
     return (
-      <View style={styles.overlayContent} pointerEvents="box-none">
-        <View style={styles.circularPanel}>
-          <View style={styles.centerStack}>
-            <View style={styles.ringWrap}>
-              <CircularProgressRing
-                size={ringSize}
-                stroke={5}
-                progress={recordProgress}
-                fillColor="#c4f542"
-                trackColor="rgba(255,255,255,0.2)"
-              />
-              <View style={styles.ring}>
-                {!cameraReady ? (
-                  <ActivityIndicator
-                    color="#fff"
-                    style={StyleSheet.absoluteFill}
-                  />
-                ) : null}
-                <CameraView
-                  ref={cameraRef}
-                  style={styles.camera}
-                  facing="front"
-                  mode="video"
-                  mirror
-                  onCameraReady={onCameraReady}
+      <Animated.View
+        entering={FadeIn.duration(280).easing(Easing.out(Easing.cubic))}
+        style={styles.overlayContent}
+        pointerEvents="box-none"
+      >
+        <View style={styles.column}>
+          <Text style={[styles.hint, { color: colors.textMuted }]}>
+            Swipe up on the button to lock · swipe the record button left to
+            cancel · tap send when done
+          </Text>
+
+          <View
+            style={[
+              styles.orb,
+              {
+                width: orbSize,
+                height: orbSize,
+                borderRadius: orbSize,
+                backgroundColor: `${colors.surfaceElevated}F0`,
+                // borderColor: `${colors.surfaceBorder}CC`,
+
+                shadowColor: colors.text,
+              },
+            ]}
+          >
+            <View style={styles.orbInner}>
+              <View style={styles.ringWrap}>
+                <CircularProgressRing
+                  size={ringSize}
+                  stroke={4}
+                  progress={recordProgress}
+                  fillColor={colors.primary}
+                  trackColor={trackRing}
                 />
+                <View
+                  style={[
+                    styles.cameraDisc,
+                    {
+                      borderColor: `${colors.primary}CC`,
+                      backgroundColor: "#000",
+                    },
+                  ]}
+                >
+                  {!cameraReady ? (
+                    <ActivityIndicator
+                      color={colors.primary}
+                      style={StyleSheet.absoluteFill}
+                    />
+                  ) : null}
+                  <CameraView
+                    ref={cameraRef}
+                    style={styles.camera}
+                    facing="front"
+                    mode="video"
+                    mirror
+                    onCameraReady={onCameraReady}
+                  />
+                  <LinearGradient
+                    pointerEvents="none"
+                    colors={["transparent", "rgba(0,0,0,0.78)"]}
+                    locations={[0.35, 1]}
+                    style={styles.bottomScrim}
+                  />
+                  <View style={styles.timerStack} pointerEvents="none">
+                    <Text style={styles.timerMain}>
+                      {formatDuration(elapsedMs)}
+                    </Text>
+                    <Text style={styles.timerSub}>
+                      {formatDuration(remainingMs)} left
+                    </Text>
+                  </View>
+                </View>
               </View>
             </View>
-            <Text style={styles.timer}>
-              {formatDuration(elapsedMs)} /{" "}
-              {formatDuration(VIDEO_RECORD_MAX_MS)}
-            </Text>
           </View>
         </View>
-      </View>
+      </Animated.View>
     );
   },
 );
@@ -205,46 +257,78 @@ const styles = StyleSheet.create({
     zIndex: 10,
     elevation: 10,
   },
-  circularPanel: {
-    width: CIRCLE + 96,
-    height: CIRCLE + 96,
-    borderRadius: (CIRCLE + 96) / 2,
-    backgroundColor: "rgba(15,23,42,0.88)",
+  column: {
+    alignItems: "center",
+    gap: 16,
+    paddingHorizontal: 20,
+  },
+  hint: {
+    fontSize: 12,
+    fontWeight: "600",
+    textAlign: "center",
+    lineHeight: 16,
+    maxWidth: 300,
+    letterSpacing: 0.2,
+    opacity: 0.92,
+  },
+  orb: {
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.35,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    shadowOpacity: 0.12,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 14,
   },
-  centerStack: {
+  orbInner: {
+    flex: 1,
+    width: "100%",
     alignItems: "center",
-    gap: 12,
+    justifyContent: "center",
   },
   ringWrap: {
-    width: CIRCLE + 14,
-    height: CIRCLE + 14,
     alignItems: "center",
     justifyContent: "center",
   },
-  ring: {
+  cameraDisc: {
     width: CIRCLE,
     height: CIRCLE,
     borderRadius: CIRCLE / 2,
     overflow: "hidden",
-    borderWidth: 3,
-    borderColor: "#c4f542",
-    backgroundColor: "#000",
+    borderWidth: 2.5,
   },
   camera: {
     width: CIRCLE,
     height: CIRCLE,
   },
-  timer: {
-    color: "#f8fafc",
-    fontSize: 15,
+  bottomScrim: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 88,
+    zIndex: 2,
+  },
+  timerStack: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 14,
+    alignItems: "center",
+    zIndex: 3,
+    gap: 2,
+  },
+  timerMain: {
+    fontSize: 20,
     fontVariant: ["tabular-nums"],
-    fontWeight: "700",
+    fontWeight: "800",
+    letterSpacing: 0.4,
+    color: "#FFFFFF",
+  },
+  timerSub: {
+    fontSize: 11,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "600",
+    color: "rgba(255,255,255,0.78)",
   },
 });

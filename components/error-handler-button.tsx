@@ -1,57 +1,147 @@
 import React, { useEffect } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
-import Animated, { FadeInDown } from "react-native-reanimated";
+import {
+  Modal,
+  Pressable,
+  StyleSheet,
+  View,
+  useWindowDimensions,
+} from "react-native";
+import Animated, { Easing, FadeIn, FadeOut } from "react-native-reanimated";
 
 import { ThemedText } from "@/components/themed-text";
+import { useThemePalette } from "@/providers/theme-palette-provider";
 
 type ErrorHandlerButtonProps = {
-  /** Shown above the composer when a gesture was too short (e.g. under one second). */
+  /** Shown when a gesture was too short (e.g. under one second). */
   message: string | null;
   /** Called after auto-dismiss or when the user taps the banner. */
   onDismiss: () => void;
 };
 
 /**
- * Small inline error surface for the chat composer (short hold, wrong gesture, etc.).
+ * Modal-style error surface for the chat composer with backdrop and card fade.
  */
 export function ErrorHandlerButton({ message, onDismiss }: ErrorHandlerButtonProps) {
+  const { colors } = useThemePalette();
+  const { width } = useWindowDimensions();
+  const cardMax = Math.min(360, width - 48);
+
   useEffect(() => {
     if (!message) return;
     const t = setTimeout(onDismiss, 4500);
     return () => clearTimeout(t);
   }, [message, onDismiss]);
 
-  if (!message) {
-    return null;
-  }
-
   return (
-    <Animated.View entering={FadeInDown.springify()} style={styles.wrap}>
-      <Pressable onPress={onDismiss} accessibilityRole="alert">
-        <View style={styles.inner}>
-          <ThemedText style={styles.text}>{message}</ThemedText>
+    <Modal
+      visible={!!message}
+      transparent
+      animationType="none"
+      onRequestClose={onDismiss}
+      statusBarTranslucent
+    >
+      <Animated.View
+        entering={FadeIn.duration(180)}
+        exiting={FadeOut.duration(140)}
+        style={StyleSheet.absoluteFill}
+      >
+        <Pressable
+          style={[styles.backdrop, { backgroundColor: "rgba(0,0,0,0.45)" }]}
+          onPress={onDismiss}
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss error"
+        />
+        <View style={styles.centerWrap} pointerEvents="box-none">
+          <Animated.View
+            entering={FadeIn.duration(200).easing(Easing.out(Easing.cubic))}
+            exiting={FadeOut.duration(120)}
+            style={[
+              styles.card,
+              {
+                maxWidth: cardMax,
+                backgroundColor: colors.surfaceElevated,
+                borderColor: colors.surfaceBorder,
+                shadowColor: colors.text,
+              },
+            ]}
+          >
+            <View
+              style={[styles.accentBar, { backgroundColor: colors.error }]}
+            />
+            <Pressable
+              onPress={onDismiss}
+              accessibilityRole="alert"
+              style={styles.cardInner}
+            >
+              <ThemedText
+                style={[styles.title, { color: colors.text }]}
+                lightColor={colors.text}
+                darkColor={colors.text}
+              >
+                Heads up
+              </ThemedText>
+              <ThemedText
+                style={[styles.body, { color: colors.textSecondary }]}
+                lightColor={colors.textSecondary}
+                darkColor={colors.textSecondary}
+              >
+                {message ?? ""}
+              </ThemedText>
+              <ThemedText
+                style={[styles.tapHint, { color: colors.tint }]}
+                lightColor={colors.tint}
+                darkColor={colors.tint}
+              >
+                Tap anywhere to dismiss
+              </ThemedText>
+            </Pressable>
+          </Animated.View>
         </View>
-      </Pressable>
-    </Animated.View>
+      </Animated.View>
+    </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: {
-    alignSelf: "stretch",
-    marginBottom: 6,
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
   },
-  inner: {
-    alignSelf: "center",
-    maxWidth: "92%",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 12,
-    backgroundColor: "rgba(0,0,0,0.78)",
+  centerWrap: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 24,
   },
-  text: {
-    color: "#fff",
+  card: {
+    width: "100%",
+    borderRadius: 20,
+    borderWidth: 1,
+    overflow: "hidden",
+    shadowOpacity: 0.12,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 8,
+  },
+  accentBar: {
+    height: 4,
+    width: "100%",
+  },
+  cardInner: {
+    paddingHorizontal: 20,
+    paddingVertical: 18,
+  },
+  title: {
+    fontSize: 17,
+    fontWeight: "700",
+    marginBottom: 8,
+  },
+  body: {
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  tapHint: {
+    marginTop: 14,
     fontSize: 13,
-    textAlign: "center",
+    fontWeight: "600",
   },
 });

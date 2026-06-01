@@ -1,28 +1,25 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
-import { BlurView } from "expo-blur";
 import {
   setAudioModeAsync,
   useAudioPlayer,
   useAudioPlayerStatus,
 } from "expo-audio";
-import React, { useCallback, useEffect } from "react";
-import {
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
+import { BlurView } from "expo-blur";
+import React, { useCallback, useEffect, useLayoutEffect } from "react";
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import Animated, {
+  Easing,
   useAnimatedStyle,
   useSharedValue,
   withSequence,
   withTiming,
 } from "react-native-reanimated";
 
-import { VoiceWaveform } from "@/components/voice-waveform";
+import { VoiceWaveformSkia } from "@/components/voice-waveform-skia";
+import { useThemePalette } from "@/providers/theme-palette-provider";
 
 const ICON_MS = 200;
+const ICON_EASE = Easing.out(Easing.cubic);
 
 type VoiceMessageBubbleProps = {
   uri: string;
@@ -52,28 +49,34 @@ export function VoiceMessageBubble({
   onActivate,
   onDeactivate,
 }: VoiceMessageBubbleProps) {
-  const player = useAudioPlayer(uri, { updateInterval: 100 });
+  const { colors, mode } = useThemePalette();
+  const player = useAudioPlayer(uri, { updateInterval: 20 });
   const status = useAudioPlayerStatus(player);
+
+  const waveformProgressSV = useSharedValue(0);
 
   const playOpacity = useSharedValue(1);
   const pauseOpacity = useSharedValue(0);
   const buttonScale = useSharedValue(1);
 
   const durationSec =
-    status.duration > 0
-      ? status.duration
-      : durationMs
-        ? durationMs / 1000
-        : 0;
+    status.duration > 0 ? status.duration : durationMs ? durationMs / 1000 : 0;
   const progress =
     durationSec > 0 ? Math.min(1, status.currentTime / durationSec) : 0;
   const playing = status.playing;
 
+  useLayoutEffect(() => {
+    waveformProgressSV.value = progress;
+  }, [progress, waveformProgressSV]);
+
   const resetPlayback = useCallback(() => {
     player.pause();
     player.seekTo(0);
-    playOpacity.value = withTiming(1, { duration: ICON_MS });
-    pauseOpacity.value = withTiming(0, { duration: ICON_MS });
+    playOpacity.value = withTiming(1, { duration: ICON_MS, easing: ICON_EASE });
+    pauseOpacity.value = withTiming(0, {
+      duration: ICON_MS,
+      easing: ICON_EASE,
+    });
   }, [pauseOpacity, playOpacity, player]);
 
   useEffect(() => {
@@ -91,18 +94,27 @@ export function VoiceMessageBubble({
 
   useEffect(() => {
     if (playing) {
-      playOpacity.value = withTiming(0, { duration: ICON_MS });
-      pauseOpacity.value = withTiming(1, { duration: ICON_MS });
+      playOpacity.value = withTiming(0, {
+        duration: ICON_MS,
+        easing: ICON_EASE,
+      });
+      pauseOpacity.value = withTiming(1, {
+        duration: ICON_MS,
+        easing: ICON_EASE,
+      });
       return;
     }
-    playOpacity.value = withTiming(1, { duration: ICON_MS });
-    pauseOpacity.value = withTiming(0, { duration: ICON_MS });
+    playOpacity.value = withTiming(1, { duration: ICON_MS, easing: ICON_EASE });
+    pauseOpacity.value = withTiming(0, {
+      duration: ICON_MS,
+      easing: ICON_EASE,
+    });
   }, [pauseOpacity, playOpacity, playing]);
 
   const togglePlayback = useCallback(async () => {
     buttonScale.value = withSequence(
-      withTiming(0.9, { duration: 90 }),
-      withTiming(1, { duration: 120 }),
+      withTiming(0.94, { duration: 70, easing: ICON_EASE }),
+      withTiming(1, { duration: 130, easing: ICON_EASE }),
     );
 
     if (playing) {
@@ -115,6 +127,9 @@ export function VoiceMessageBubble({
     await setAudioModeAsync({
       allowsRecording: false,
       playsInSilentMode: true,
+      interruptionMode: "mixWithOthers",
+      shouldPlayInBackground: false,
+      shouldRouteThroughEarpiece: false,
     });
     player.play();
   }, [buttonScale, onActivate, onDeactivate, player, playing]);
@@ -128,6 +143,9 @@ export function VoiceMessageBubble({
         void setAudioModeAsync({
           allowsRecording: false,
           playsInSilentMode: true,
+          interruptionMode: "mixWithOthers",
+          shouldPlayInBackground: false,
+          shouldRouteThroughEarpiece: false,
         }).then(() => player.play());
       }
     },
@@ -153,8 +171,12 @@ export function VoiceMessageBubble({
       ? status.currentTime * 1000
       : playing
         ? 0
-        : durationMs ?? 0;
-  const displayMs = playing ? elapsedMs : durationMs ?? elapsedMs;
+        : (durationMs ?? 0);
+  const displayMs = playing ? elapsedMs : (durationMs ?? elapsedMs);
+
+  const shellBorder = isMine
+    ? `${colors.primary}66`
+    : `${colors.surfaceBorder}CC`;
 
   const glass = (
     <View style={styles.content}>
@@ -162,34 +184,70 @@ export function VoiceMessageBubble({
         <Pressable
           onPress={() => void togglePlayback()}
           accessibilityRole="button"
-          accessibilityLabel={playing ? "Pause voice message" : "Play voice message"}
-          style={styles.playButton}
+          accessibilityLabel={
+            playing ? "Pause voice message" : "Play voice message"
+          }
+          style={[
+            styles.playButton,
+            {
+              backgroundColor: colors.primary,
+              shadowColor: colors.primary,
+            },
+          ]}
         >
           <Animated.View style={[styles.iconLayer, playIconStyle]}>
-            <MaterialIcons name="play-arrow" size={22} color="#fff" />
+            <MaterialIcons
+              name="play-arrow"
+              size={22}
+              color={colors.onPrimary}
+            />
           </Animated.View>
           <Animated.View style={[styles.iconLayer, pauseIconStyle]}>
-            <MaterialIcons name="pause" size={22} color="#fff" />
+            <MaterialIcons name="pause" size={22} color={colors.onPrimary} />
           </Animated.View>
         </Pressable>
       </Animated.View>
 
-      <VoiceWaveform
+      <VoiceWaveformSkia
         seed={seed}
-        progress={progress}
+        progressSV={waveformProgressSV}
+        playedColor={`${colors.tint}D9`}
+        unplayedColor={`${colors.textMuted}66`}
         onSeek={seekToProgress}
       />
 
-      <Text style={styles.duration}>{formatDuration(displayMs)}</Text>
+      <Text style={[styles.duration, { color: colors.textSecondary }]}>
+        {formatDuration(displayMs)}
+      </Text>
     </View>
   );
 
   return (
-    <View style={[styles.shell, isMine ? styles.shellMine : styles.shellTheirs]}>
+    <View
+      style={[
+        styles.shell,
+        { borderColor: shellBorder },
+        {
+          shadowColor: colors.text,
+          shadowOpacity: 0.08,
+          shadowRadius: 12,
+          shadowOffset: { width: 0, height: 4 },
+          elevation: 3,
+        },
+      ]}
+    >
       {Platform.OS === "web" ? (
-        <View style={styles.webGlass}>{glass}</View>
+        <View
+          style={[styles.webGlass, { backgroundColor: colors.surfaceElevated }]}
+        >
+          {glass}
+        </View>
       ) : (
-        <BlurView intensity={42} tint="dark" style={styles.blur}>
+        <BlurView
+          intensity={mode === "dark" ? 48 : 56}
+          // tint={blurTint}
+          style={[styles.blur, { backgroundColor: `${colors.background}B3` }]}
+        >
           {glass}
         </BlurView>
       )}
@@ -204,20 +262,12 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     borderWidth: 1,
   },
-  shellMine: {
-    borderColor: "rgba(96,165,250,0.35)",
-  },
-  shellTheirs: {
-    borderColor: "rgba(148,163,184,0.28)",
-  },
   blur: {
     borderRadius: 18,
     overflow: "hidden",
-    backgroundColor: "rgba(15,23,42,0.28)",
   },
   webGlass: {
     borderRadius: 18,
-    backgroundColor: "rgba(15,23,42,0.62)",
   },
   content: {
     flexDirection: "row",
@@ -230,11 +280,9 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#3B82F6",
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#2563EB",
-    shadowOpacity: 0.45,
+    shadowOpacity: 0.35,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
     elevation: 4,
@@ -246,7 +294,6 @@ const styles = StyleSheet.create({
   },
   duration: {
     minWidth: 36,
-    color: "rgba(226,232,240,0.92)",
     fontSize: 12,
     fontVariant: ["tabular-nums"],
     fontWeight: "600",

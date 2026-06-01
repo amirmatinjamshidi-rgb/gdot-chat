@@ -1,10 +1,16 @@
 import React, { useMemo } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 
-const BAR_COUNT = 44;
-const BAR_WIDTH = 2.5;
-const BAR_GAP = 2;
-const MAX_BAR_HEIGHT = 26;
+import { useThemePalette } from "@/providers/theme-palette-provider";
+
+export const BAR_COUNT = 44;
+export const BAR_WIDTH = 2.5;
+export const BAR_GAP = 2;
+export const MAX_BAR_HEIGHT = 26;
+
+/** Total width of the waveform strip (fixed bar geometry). */
+export const VOICE_WAVEFORM_TOTAL_WIDTH =
+  BAR_COUNT * (BAR_WIDTH + BAR_GAP) - BAR_GAP;
 
 function hashSeed(seed: string) {
   let hash = 0;
@@ -32,15 +38,14 @@ type VoiceWaveformProps = {
 };
 
 export function VoiceWaveform({ seed, progress, onSeek }: VoiceWaveformProps) {
+  const { colors } = useThemePalette();
   const bars = useMemo(() => buildWaveform(seed), [seed]);
   const clamped = Math.min(1, Math.max(0, progress));
   const playedBars = clamped * bars.length;
 
-  const onPress = (event: {
-    nativeEvent: { locationX: number };
-  }) => {
+  const onPress = (event: { nativeEvent: { locationX: number } }) => {
     if (!onSeek) return;
-    const width = BAR_COUNT * (BAR_WIDTH + BAR_GAP) - BAR_GAP;
+    const width = VOICE_WAVEFORM_TOTAL_WIDTH;
     const next = Math.min(1, Math.max(0, event.nativeEvent.locationX / width));
     onSeek(next);
   };
@@ -55,6 +60,8 @@ export function VoiceWaveform({ seed, progress, onSeek }: VoiceWaveformProps) {
       {bars.map((height, index) => {
         const barHeight = height * MAX_BAR_HEIGHT;
         const isPlayed = index < playedBars;
+        const played = `${colors.tint}D9`;
+        const unplayed = `${colors.textMuted}66`;
         return (
           <View
             key={index}
@@ -62,9 +69,7 @@ export function VoiceWaveform({ seed, progress, onSeek }: VoiceWaveformProps) {
               styles.bar,
               {
                 height: barHeight,
-                backgroundColor: isPlayed
-                  ? "rgba(203,213,225,0.95)"
-                  : "rgba(100,116,139,0.55)",
+                backgroundColor: isPlayed ? played : unplayed,
               },
             ]}
           />
