@@ -6,10 +6,9 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
-import Animated, { Easing, FadeIn, FadeOut } from "react-native-reanimated";
 
 import { ThemedText } from "@/components/themed-text";
-import { useThemePalette } from "@/providers/theme-palette-provider";
+import { useThemeStore, useColors } from "@/stores/theme-store";
 
 type ErrorHandlerButtonProps = {
   /** Shown when a gesture was too short (e.g. under one second). */
@@ -19,10 +18,10 @@ type ErrorHandlerButtonProps = {
 };
 
 /**
- * Modal-style error surface for the chat composer with backdrop and card fade.
+ * Modal-style error surface for the chat composer (backdrop + card).
  */
 export function ErrorHandlerButton({ message, onDismiss }: ErrorHandlerButtonProps) {
-  const { colors } = useThemePalette();
+  const colors = useColors();
   const { width } = useWindowDimensions();
   const cardMax = Math.min(360, width - 48);
 
@@ -40,11 +39,7 @@ export function ErrorHandlerButton({ message, onDismiss }: ErrorHandlerButtonPro
       onRequestClose={onDismiss}
       statusBarTranslucent
     >
-      <Animated.View
-        entering={FadeIn.duration(180)}
-        exiting={FadeOut.duration(140)}
-        style={StyleSheet.absoluteFill}
-      >
+      <View style={StyleSheet.absoluteFill}>
         <Pressable
           style={[styles.backdrop, { backgroundColor: "rgba(0,0,0,0.45)" }]}
           onPress={onDismiss}
@@ -52,9 +47,7 @@ export function ErrorHandlerButton({ message, onDismiss }: ErrorHandlerButtonPro
           accessibilityLabel="Dismiss error"
         />
         <View style={styles.centerWrap} pointerEvents="box-none">
-          <Animated.View
-            entering={FadeIn.duration(200).easing(Easing.out(Easing.cubic))}
-            exiting={FadeOut.duration(120)}
+          <View
             style={[
               styles.card,
               {
@@ -95,9 +88,9 @@ export function ErrorHandlerButton({ message, onDismiss }: ErrorHandlerButtonPro
                 Tap anywhere to dismiss
               </ThemedText>
             </Pressable>
-          </Animated.View>
+          </View>
         </View>
-      </Animated.View>
+      </View>
     </Modal>
   );
 }

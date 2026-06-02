@@ -1,42 +1,58 @@
-import { StyleSheet } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
-import Animated, { FadeInDown, ZoomIn } from 'react-native-reanimated';
+import { Stack, useRouter } from "expo-router";
+import { StyleSheet, View } from "react-native";
 
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { ScalePressable } from '@/components/ui/scale-pressable';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { ThemedText } from "@/components/themed-text";
+import { ThemedView } from "@/components/themed-view";
+import { ScalePressable } from "@/components/ui/scale-pressable";
+import { useThemeStore, useColors } from "@/stores/theme-store";
 
 export default function ModalScreen() {
   const router = useRouter();
-  const colorScheme = useColorScheme() ?? 'light';
-  const isDark = colorScheme === 'dark';
+  const colors = useColors();
 
   return (
     <ThemedView style={styles.container}>
-      <Stack.Screen options={{ title: 'Quick Action' }} />
-      <Animated.View entering={FadeInDown.springify()} style={styles.cardWrap}>
-        <Animated.View
-          entering={ZoomIn.springify()}
+      <Stack.Screen options={{ title: "Quick action" }} />
+      <View style={styles.cardWrap}>
+        <View
           style={[
             styles.card,
             {
-              backgroundColor: isDark ? '#1F2937' : '#FFFFFF',
-              borderColor: isDark ? '#2F3A4A' : '#E8EEF8',
+              backgroundColor: colors.surfaceElevated,
+              borderColor: colors.surfaceBorder,
             },
-          ]}>
-          <ThemedText type="title" style={styles.title}>
-            Coming soon
+          ]}
+        >
+          <ThemedText
+            type="title"
+            style={[styles.title, { color: colors.text }]}
+            lightColor={colors.text}
+            darkColor={colors.text}
+          >
+            Not available yet
           </ThemedText>
-          <ThemedText style={styles.copy} lightColor="#64748B" darkColor="#AAB4C3">
-            This modal is restored so the Home quick action has a valid route. It can become a
-            compose menu, QR scanner, or invite flow later.
+          <ThemedText
+            style={[styles.copy, { color: colors.textMuted }]}
+            lightColor={colors.textMuted}
+            darkColor={colors.textMuted}
+          >
+            This screen is a route stub from the home quick action. It can be
+            replaced with compose, QR scan, or invites when those flows exist.
           </ThemedText>
-          <ScalePressable style={styles.button} onPress={() => router.back()}>
-            <ThemedText style={styles.buttonText}>Close</ThemedText>
+          <ScalePressable
+            style={[styles.button, { backgroundColor: colors.tint }]}
+            onPress={() => router.back()}
+          >
+            <ThemedText
+              style={styles.buttonText}
+              lightColor={colors.onPrimary}
+              darkColor={colors.onPrimary}
+            >
+              Close
+            </ThemedText>
           </ScalePressable>
-        </Animated.View>
-      </Animated.View>
+        </View>
+      </View>
     </ThemedView>
   );
 }
@@ -47,7 +63,7 @@ const styles = StyleSheet.create({
   },
   cardWrap: {
     flex: 1,
-    justifyContent: 'center',
+    justifyContent: "center",
     padding: 24,
   },
   card: {
@@ -57,7 +73,8 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   title: {
-    fontSize: 30,
+    fontSize: 28,
+    lineHeight: 34,
   },
   copy: {
     fontSize: 15,
@@ -65,13 +82,12 @@ const styles = StyleSheet.create({
   },
   button: {
     height: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     borderRadius: 16,
-    backgroundColor: '#3B82F6',
   },
   buttonText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
+    fontWeight: "700",
+    fontSize: 16,
   },
 });

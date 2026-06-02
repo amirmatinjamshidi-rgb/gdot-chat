@@ -15,7 +15,7 @@ import Animated, {
 } from "react-native-reanimated";
 
 import { CircularProgressRing } from "@/components/circular-progress-ring";
-import { useThemePalette } from "@/providers/theme-palette-provider";
+import { useThemeStore, useColors } from "@/stores/theme-store";
 
 export const VIDEO_BUBBLE_SIZE = 160;
 const PLAY_SCALE = 1.7;
@@ -41,7 +41,7 @@ export function VideoMessageBubble({
   onActivate,
   onDeactivate,
 }: VideoMessageBubbleProps) {
-  const { colors } = useThemePalette();
+  const colors = useColors();
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const scale = useSharedValue(1);

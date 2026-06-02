@@ -9,8 +9,13 @@ import React from "react";
 import { ActivityIndicator, View } from "react-native";
 
 import { SwipeTabBar } from "@/components/swipe-tab-bar";
+<<<<<<< HEAD
 import { useAuth } from "@/lib/providers/auth-provider";
 import { useThemePalette } from "@/providers/theme-palette-provider";
+=======
+import { useAuthStore } from "@/stores/auth-store";
+import { useThemeStore, useColors, useLegacyColors } from "@/stores/theme-store";
+>>>>>>> 5e2230b503428a5691d3fc1ad90a70ebac58c20d
 
 const { Navigator } = createMaterialTopTabNavigator();
 
@@ -22,8 +27,14 @@ const MaterialTopTabs = withLayoutContext<
 >(Navigator);
 
 export default function TabLayout() {
+<<<<<<< HEAD
   const { legacyColors, colors } = useThemePalette();
   const { isLoading, isLoggedIn } = useAuth();
+=======
+  const legacyColors = useLegacyColors();
+  const colors = useColors();
+  const { isReady, isAuthenticated } = useAuthStore();
+>>>>>>> 5e2230b503428a5691d3fc1ad90a70ebac58c20d
 
   if (isLoading) {
     return (

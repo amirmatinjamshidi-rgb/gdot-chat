@@ -13,10 +13,9 @@ import React, {
   useState,
 } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
-import Animated, { Easing, FadeIn } from "react-native-reanimated";
 
 import { CircularProgressRing } from "@/components/circular-progress-ring";
-import { useThemePalette } from "@/providers/theme-palette-provider";
+import { useThemeStore, useColors } from "@/stores/theme-store";
 
 export const VIDEO_RECORD_MAX_MS = 90_000;
 /** Visible camera disc */
@@ -47,7 +46,7 @@ function formatDuration(ms: number) {
 
 export const VideoMessage = forwardRef<VideoMessageHandle, VideoMessageProps>(
   function VideoMessage({ active, elapsedMs = 0 }, ref) {
-    const { colors } = useThemePalette();
+    const colors = useColors();
     const cameraRef = useRef<CameraViewRef>(null);
     const [cameraPermission, requestCameraPermission] = useCameraPermissions();
     const [micPermission, requestMicPermission] = useMicrophonePermissions();
@@ -167,11 +166,7 @@ export const VideoMessage = forwardRef<VideoMessageHandle, VideoMessageProps>(
     const trackRing = `${colors.textMuted}55`;
 
     return (
-      <Animated.View
-        entering={FadeIn.duration(280).easing(Easing.out(Easing.cubic))}
-        style={styles.overlayContent}
-        pointerEvents="box-none"
-      >
+      <View style={styles.overlayContent} pointerEvents="box-none">
         <View style={styles.column}>
           <Text style={[styles.hint, { color: colors.textMuted }]}>
             Swipe up on the button to lock · swipe the record button left to
@@ -243,7 +238,7 @@ export const VideoMessage = forwardRef<VideoMessageHandle, VideoMessageProps>(
             </View>
           </View>
         </View>
-      </Animated.View>
+      </View>
     );
   },
 );

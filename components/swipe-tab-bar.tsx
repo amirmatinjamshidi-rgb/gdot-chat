@@ -1,18 +1,22 @@
 import type { MaterialTopTabBarProps } from "@react-navigation/material-top-tabs";
-import { PlatformPressable } from "@react-navigation/elements";
 import * as Haptics from "expo-haptics";
 import React from "react";
-import { Platform, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { IconSymbol } from "@/components/ui/icon-symbol";
-import { useThemePalette } from "@/providers/theme-palette-provider";
+import { useThemeStore, useColors, useLegacyColors } from "@/stores/theme-store";
 
-const ICONS = ["house.fill", "bubble.left.and.bubble.right.fill", "person.crop.circle.fill"] as const;
+const ICONS = [
+  "house.fill",
+  "bubble.left.and.bubble.right.fill",
+  "person.crop.circle.fill",
+] as const;
 
 export function SwipeTabBar({ state, descriptors, navigation }: MaterialTopTabBarProps) {
   const insets = useSafeAreaInsets();
-  const { colors, legacyColors } = useThemePalette();
+  const colors = useColors();
+  const legacyColors = useLegacyColors();
   const bottomPad = Math.max(insets.bottom, Platform.OS === "ios" ? 20 : 14);
   const barHeight = Platform.OS === "ios" ? 104 + bottomPad * 0.12 : 84;
 
@@ -39,12 +43,14 @@ export function SwipeTabBar({ state, descriptors, navigation }: MaterialTopTabBa
           ? legacyColors.tabIconSelected
           : legacyColors.tabIconDefault;
 
+        const iconName = ICONS[Math.min(index, ICONS.length - 1)]!;
+
         return (
-          <PlatformPressable
+          <Pressable
             key={route.key}
             accessibilityRole="tab"
             accessibilityState={{ selected: focused }}
-            style={styles.tab}
+            style={({ pressed }) => [styles.tab, pressed && styles.tabPressed]}
             onPressIn={(ev) => {
               if (process.env.EXPO_OS === "ios") {
                 void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -61,9 +67,9 @@ export function SwipeTabBar({ state, descriptors, navigation }: MaterialTopTabBa
               }
             }}
           >
-            <IconSymbol name={ICONS[index] ?? "circle.fill"} size={28} color={color} />
+            <IconSymbol name={iconName} size={26} color={color} />
             <Text style={[styles.label, { color }]}>{label}</Text>
-          </PlatformPressable>
+          </Pressable>
         );
       })}
     </View>
@@ -87,6 +93,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 4,
     paddingVertical: 4,
+  },
+  tabPressed: {
+    opacity: 0.72,
   },
   label: {
     fontSize: 11,

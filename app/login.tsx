@@ -1,8 +1,8 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { BlurView } from "expo-blur";
-import { LinearGradient } from "expo-linear-gradient";
+
 import { Redirect, useRouter } from "expo-router";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import {
   KeyboardAvoidingView,
@@ -12,37 +12,44 @@ import {
   TextInput,
   View,
 } from "react-native";
-import Animated, { FadeInDown, FadeInUp } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { LoginAmbientBackground } from "@/components/login-ambient-background";
 import { ThemedText } from "@/components/themed-text";
 import {
-  formatPhoneAsYouType,
-  getPhoneCountryInfo,
-  normalizePhone,
+  buildE164FromParts,
+  formatNationalAsYouType,
+  getCountryInfoFromCallingCodeDigits,
+  sanitizeCallingCodeDigits,
+  shouldAdvanceToNationalNumber,
 } from "@/lib/auth/phone";
 import {
   emailSchema,
-  phoneSchema,
+  phonePartsSchema,
   type EmailInput,
-  type PhoneInput,
+  type PhonePartsInput,
 } from "@/lib/auth/schemas";
-import { useAuth } from "@/providers/auth-provider";
-import { useThemePalette } from "@/providers/theme-palette-provider";
+import { useAuthStore } from "@/stores/auth-store";
+import { useThemeStore, useColors } from "@/stores/theme-store";
 
 type LoginMode = "phone" | "email";
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { isAuthenticated, isReady } = useAuth();
-  const { colors, mode } = useThemePalette();
+  const { isAuthenticated, isReady } = useAuthStore();
+  const colors = useColors();
+  const mode = useThemeStore((state) => state.mode);
   const [loginMode, setLoginMode] = useState<LoginMode>("phone");
-  const [phoneFocused, setPhoneFocused] = useState(false);
+  const [callingFocused, setCallingFocused] = useState(false);
+  const [nationalFocused, setNationalFocused] = useState(false);
   const [emailFocused, setEmailFocused] = useState(false);
+  const nationalInputRef = useRef<TextInput>(null);
+  const callingInputRef = useRef<TextInput>(null);
+  const wasCallingCompleteRef = useRef(false);
 
-  const phoneForm = useForm<PhoneInput>({
-    resolver: zodResolver(phoneSchema),
-    defaultValues: { phone: "" },
+  const phoneForm = useForm<PhonePartsInput>({
+    resolver: zodResolver(phonePartsSchema),
+    defaultValues: { callingCodeDigits: "", nationalNumber: "" },
     mode: "onTouched",
   });
 
@@ -52,22 +59,46 @@ export default function LoginScreen() {
     mode: "onTouched",
   });
 
-  const phoneValue = phoneForm.watch("phone");
+  const callingDigits = phoneForm.watch("callingCodeDigits");
   const countryInfo = useMemo(
-    () => getPhoneCountryInfo(phoneValue),
-    [phoneValue],
+    () => getCountryInfoFromCallingCodeDigits(callingDigits),
+    [callingDigits],
   );
+
+  const prevCountryIsoRef = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    const clean = sanitizeCallingCodeDigits(callingDigits);
+    if (!clean) {
+      prevCountryIsoRef.current = undefined;
+      wasCallingCompleteRef.current = false;
+      phoneForm.setValue("nationalNumber", "");
+      return;
+    }
+    const info = getCountryInfoFromCallingCodeDigits(clean);
+    if (!info) return;
+    const iso = info.countryCode;
+    if (prevCountryIsoRef.current && prevCountryIsoRef.current !== iso) {
+      phoneForm.setValue("nationalNumber", "");
+    }
+    prevCountryIsoRef.current = iso;
+  }, [callingDigits, phoneForm]);
 
   if (isReady && isAuthenticated) {
     return <Redirect href="/(tabs)/chats" />;
   }
 
   const onSubmitPhone = phoneForm.handleSubmit((data) => {
+    const e164 = buildE164FromParts(
+      data.callingCodeDigits,
+      data.nationalNumber,
+    );
+    if (!e164) return;
     router.push({
       pathname: "/verify-otp",
       params: {
         method: "phone",
-        value: normalizePhone(data.phone),
+        value: e164,
       },
     });
   });
@@ -85,37 +116,18 @@ export default function LoginScreen() {
   const blurTint = mode === "dark" ? "dark" : "light";
 
   return (
-    <View style={styles.root}>
-      <LinearGradient
-        colors={[colors.gradientStart, colors.gradientMid, colors.gradientEnd]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={StyleSheet.absoluteFill}
-      />
-      {/* Soft orbs */}
-      <View
-        pointerEvents="none"
-        style={[
-          styles.orb,
-          {
-            backgroundColor: colors.primary,
-            opacity: mode === "dark" ? 0.12 : 0.18,
-            top: "8%",
-            right: "-12%",
-          },
-        ]}
-      />
-      <View
-        pointerEvents="none"
-        style={[
-          styles.orb,
-          {
-            backgroundColor: colors.tint,
-            opacity: mode === "dark" ? 0.1 : 0.14,
-            bottom: "12%",
-            left: "-18%",
-          },
-        ]}
+    <View style={[styles.root, { backgroundColor: colors.background }]}>
+      <LoginAmbientBackground
+        colors={{
+          background: colors.background,
+          backgroundSecondary: colors.backgroundSecondary,
+          gradientStart: colors.gradientStart,
+          gradientMid: colors.gradientMid,
+          gradientEnd: colors.gradientEnd,
+          primary: colors.primary,
+          tint: colors.tint,
+          accentGlow: colors.accentGlow,
+        }}
       />
 
       <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
@@ -124,215 +136,367 @@ export default function LoginScreen() {
           style={styles.flex}
         >
           <View style={styles.container}>
-            <Animated.View entering={FadeInDown.duration(420).springify()}>
-              <View style={styles.hero}>
-                <View
-                  style={[
-                    styles.blockAccent,
-                    { backgroundColor: colors.primary },
-                  ]}
-                />
-                <ThemedText
-                  type="title"
-                  style={[styles.wordmark, { color: colors.text }]}
-                  lightColor={colors.text}
-                  darkColor={colors.text}
-                >
-                  Smash
-                </ThemedText>
-                <ThemedText
-                  style={[styles.tagline, { color: colors.textSecondary }]}
-                  lightColor={colors.textSecondary}
-                  darkColor={colors.textSecondary}
-                >
-                  Messages that feel alive — sign in to continue.
-                </ThemedText>
-              </View>
-            </Animated.View>
-
-            <Animated.View entering={FadeInUp.delay(90).duration(380)}>
-              <BlurView
-                intensity={mode === "dark" ? 42 : 56}
-                tint={blurTint}
-                style={styles.blurShell}
+            <View style={styles.hero}>
+              <View
+                style={[
+                  styles.blockAccent,
+                  { backgroundColor: colors.primary },
+                ]}
+              />
+              <ThemedText
+                type="title"
+                style={[styles.wordmark, { color: colors.text }]}
+                lightColor={colors.text}
+                darkColor={colors.text}
               >
-                <View
-                  style={[
-                    styles.cardInner,
-                    {
-                      borderColor: colors.surfaceBorder,
-                      backgroundColor:
-                        Platform.OS === "ios"
-                          ? "transparent"
-                          : colors.surface,
-                    },
-                  ]}
-                >
-                  {loginMode === "phone" ? (
-                    <>
+                Smash
+              </ThemedText>
+              <ThemedText
+                style={[styles.tagline, { color: colors.textSecondary }]}
+                lightColor={colors.textSecondary}
+                darkColor={colors.textSecondary}
+              >
+                Sign in with your phone number or email. We will send a one-time
+                code.
+              </ThemedText>
+            </View>
+
+            <BlurView
+              intensity={mode === "dark" ? 48 : 62}
+              tint={blurTint}
+              style={styles.blurShell}
+            >
+              <View
+                style={[
+                  styles.cardInner,
+                  {
+                    borderColor: colors.surfaceBorder,
+                    backgroundColor:
+                      Platform.OS === "ios" ? "transparent" : colors.surface,
+                  },
+                ]}
+              >
+                {loginMode === "phone" ? (
+                  <>
+                    <ThemedText
+                      style={[styles.fieldLabel, { color: colors.textMuted }]}
+                      lightColor={colors.textMuted}
+                      darkColor={colors.textMuted}
+                    >
+                      Country code
+                    </ThemedText>
+                    <View style={styles.phoneSplitRow}>
+                      <View
+                        style={[
+                          styles.callingShell,
+                          {
+                            borderColor: phoneForm.formState.errors
+                              .callingCodeDigits
+                              ? colors.error
+                              : callingFocused
+                                ? colors.inputBorderFocus
+                                : colors.inputBorder,
+                            backgroundColor: colors.inputFill,
+                          },
+                        ]}
+                      >
+                        <ThemedText
+                          type="defaultSemiBold"
+                          style={[styles.callingPlus, { color: colors.text }]}
+                          lightColor={colors.text}
+                          darkColor={colors.text}
+                        >
+                          +
+                        </ThemedText>
+                        <Controller
+                          control={phoneForm.control}
+                          name="callingCodeDigits"
+                          render={({ field: { onChange, onBlur, value } }) => (
+                            <TextInput
+                              ref={callingInputRef}
+                              keyboardType="number-pad"
+                              autoComplete="tel-country-code"
+                              textContentType="none"
+                              maxLength={4}
+                              accessibilityLabel="Country calling code"
+                              placeholder="1"
+                              placeholderTextColor={colors.textMuted}
+                              value={value}
+                              onFocus={() => setCallingFocused(true)}
+                              onBlur={() => {
+                                setCallingFocused(false);
+                                onBlur();
+                              }}
+                              onChangeText={(text) => {
+                                const prev = value;
+                                const newDigits =
+                                  sanitizeCallingCodeDigits(text);
+                                const prevInfo =
+                                  getCountryInfoFromCallingCodeDigits(prev);
+                                const nextInfo =
+                                  getCountryInfoFromCallingCodeDigits(
+                                    newDigits,
+                                  );
+                                if (
+                                  newDigits.length < prev.length &&
+                                  prevInfo &&
+                                  !nextInfo
+                                ) {
+                                  phoneForm.setValue("nationalNumber", "");
+                                }
+                                onChange(newDigits);
+                                const complete =
+                                  shouldAdvanceToNationalNumber(newDigits);
+                                if (
+                                  complete &&
+                                  !wasCallingCompleteRef.current
+                                ) {
+                                  wasCallingCompleteRef.current = true;
+                                  requestAnimationFrame(() => {
+                                    nationalInputRef.current?.focus();
+                                  });
+                                } else if (!complete) {
+                                  wasCallingCompleteRef.current = false;
+                                }
+                              }}
+                              returnKeyType={
+                                shouldAdvanceToNationalNumber(value)
+                                  ? "next"
+                                  : "done"
+                              }
+                              onSubmitEditing={() => {
+                                if (shouldAdvanceToNationalNumber(value)) {
+                                  nationalInputRef.current?.focus();
+                                }
+                              }}
+                              style={[
+                                styles.callingInput,
+                                { color: colors.text },
+                              ]}
+                            />
+                          )}
+                        />
+                      </View>
                       {countryInfo ? (
-                        <View style={styles.countryRow}>
-                          <ThemedText style={styles.countryFlag}>
+                        <Pressable
+                          onPress={() => callingInputRef.current?.focus()}
+                          accessibilityRole="button"
+                          accessibilityLabel="Change country code"
+                          hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+                          style={({ pressed }) => [
+                            styles.countryMetaPressable,
+                            {
+                              backgroundColor: colors.inputFill,
+                              borderColor: colors.inputBorder,
+                              opacity: pressed ? 0.88 : 1,
+                            },
+                          ]}
+                        >
+                          <ThemedText
+                            style={[styles.flagEmoji, { color: colors.text }]}
+                            lightColor={colors.text}
+                            darkColor={colors.text}
+                          >
                             {countryInfo.flag}
                           </ThemedText>
                           <ThemedText
-                            style={[styles.countryText, { color: colors.textMuted }]}
-                            lightColor={colors.textMuted}
-                            darkColor={colors.textMuted}
+                            type="defaultSemiBold"
+                            numberOfLines={1}
+                            ellipsizeMode="tail"
+                            style={[
+                              styles.countryMetaName,
+                              { color: colors.textSecondary },
+                            ]}
+                            lightColor={colors.textSecondary}
+                            darkColor={colors.textSecondary}
                           >
                             {countryInfo.name}
-                            {countryInfo.callingCode
-                              ? ` (+${countryInfo.callingCode})`
-                              : ""}
                           </ThemedText>
-                        </View>
-                      ) : null}
-                      <Controller
-                        control={phoneForm.control}
-                        name="phone"
-                        render={({ field: { onChange, onBlur, value } }) => (
-                          <TextInput
-                            keyboardType="phone-pad"
-                            autoComplete="tel"
-                            textContentType="telephoneNumber"
-                            placeholder="+1 202 555 0101"
-                            placeholderTextColor={colors.textMuted}
-                            value={value}
-                            onFocus={() => setPhoneFocused(true)}
-                            onBlur={() => {
-                              setPhoneFocused(false);
-                              onBlur();
-                            }}
-                            onChangeText={(text) =>
-                              onChange(formatPhoneAsYouType(text))
-                            }
-                            style={[
-                              styles.input,
-                              {
-                                color: colors.text,
-                                borderBottomColor: phoneForm.formState.errors.phone
-                                  ? colors.error
-                                  : phoneFocused
-                                    ? colors.inputBorderFocus
-                                    : colors.inputBorder,
-                                backgroundColor: colors.inputFill,
-                              },
-                            ]}
-                          />
-                        )}
-                      />
+                        </Pressable>
+                      ) : (
+                        <View
+                          style={[
+                            styles.countryMetaPlaceholder,
+                            { borderColor: colors.inputBorder },
+                          ]}
+                        />
+                      )}
+                    </View>
+                    <ThemedText
+                      style={[styles.fieldLabel, styles.fieldLabelSecond, { color: colors.textMuted }]}
+                      lightColor={colors.textMuted}
+                      darkColor={colors.textMuted}
+                    >
+                      Phone number
+                    </ThemedText>
+                    <Controller
+                      control={phoneForm.control}
+                      name="nationalNumber"
+                      render={({ field: { onChange, onBlur, value } }) => (
+                        <TextInput
+                          ref={nationalInputRef}
+                          keyboardType="phone-pad"
+                          autoComplete="tel-national"
+                          textContentType="telephoneNumber"
+                          editable={Boolean(countryInfo)}
+                          accessibilityLabel="Phone number"
+                          placeholder={
+                            countryInfo
+                              ? "Enter your number"
+                              : "Enter country code first"
+                          }
+                          placeholderTextColor={colors.textMuted}
+                          value={value}
+                          onFocus={() => setNationalFocused(true)}
+                          onBlur={() => {
+                            setNationalFocused(false);
+                            onBlur();
+                          }}
+                          onChangeText={(text) => {
+                            const iso = countryInfo?.countryCode;
+                            if (!iso) return;
+                            onChange(formatNationalAsYouType(iso, text));
+                          }}
+                          returnKeyType="done"
+                          onSubmitEditing={onSubmitPhone}
+                          style={[
+                            styles.nationalInput,
+                            {
+                              color: colors.text,
+                              borderBottomColor: phoneForm.formState.errors
+                                .nationalNumber
+                                ? colors.error
+                                : nationalFocused
+                                  ? colors.inputBorderFocus
+                                  : colors.inputBorder,
+                              backgroundColor: colors.inputFill,
+                              opacity: countryInfo ? 1 : 0.55,
+                            },
+                          ]}
+                        />
+                      )}
+                    />
+                    <ThemedText
+                      style={styles.errorText}
+                      lightColor={colors.error}
+                      darkColor={colors.error}
+                    >
+                      {phoneForm.formState.errors.callingCodeDigits
+                        ?.message ??
+                        phoneForm.formState.errors.nationalNumber?.message ??
+                        " "}
+                    </ThemedText>
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.primaryBtn,
+                        { backgroundColor: colors.primary },
+                        pressed && styles.pressedFade,
+                      ]}
+                      onPress={onSubmitPhone}
+                    >
                       <ThemedText
-                        style={styles.errorText}
-                        lightColor={colors.error}
-                        darkColor={colors.error}
-                      >
-                        {phoneForm.formState.errors.phone?.message ?? " "}
-                      </ThemedText>
-                      <Pressable
-                        style={({ pressed }) => [
-                          styles.primaryBtn,
-                          { backgroundColor: colors.primary },
-                          pressed && styles.pressedFade,
+                        style={[
+                          styles.primaryBtnText,
+                          { color: colors.onPrimary },
                         ]}
-                        onPress={onSubmitPhone}
+                        lightColor={colors.onPrimary}
+                        darkColor={colors.onPrimary}
                       >
-                        <ThemedText
-                          style={[styles.primaryBtnText, { color: colors.onPrimary }]}
-                          lightColor={colors.onPrimary}
-                          darkColor={colors.onPrimary}
-                        >
-                          Send OTP
-                        </ThemedText>
-                      </Pressable>
-                      <Pressable
-                        style={({ pressed }) => [pressed && styles.pressedFade]}
-                        onPress={() => setLoginMode("email")}
-                      >
-                        <ThemedText
-                          type="link"
-                          style={[styles.switchLink, { color: colors.link }]}
-                          lightColor={colors.link}
-                          darkColor={colors.link}
-                        >
-                          Login with email instead
-                        </ThemedText>
-                      </Pressable>
-                    </>
-                  ) : (
-                    <>
-                      <Controller
-                        control={emailForm.control}
-                        name="email"
-                        render={({ field: { onChange, onBlur, value } }) => (
-                          <TextInput
-                            keyboardType="email-address"
-                            autoComplete="email"
-                            autoCapitalize="none"
-                            placeholder="you@example.com"
-                            placeholderTextColor={colors.textMuted}
-                            value={value}
-                            onFocus={() => setEmailFocused(true)}
-                            onBlur={() => {
-                              setEmailFocused(false);
-                              onBlur();
-                            }}
-                            onChangeText={onChange}
-                            style={[
-                              styles.input,
-                              {
-                                color: colors.text,
-                                borderBottomColor: emailForm.formState.errors.email
-                                  ? colors.error
-                                  : emailFocused
-                                    ? colors.inputBorderFocus
-                                    : colors.inputBorder,
-                                backgroundColor: colors.inputFill,
-                              },
-                            ]}
-                          />
-                        )}
-                      />
+                        Send OTP
+                      </ThemedText>
+                    </Pressable>
+                    <Pressable
+                      style={({ pressed }) => [pressed && styles.pressedFade]}
+                      onPress={() => setLoginMode("email")}
+                    >
                       <ThemedText
-                        style={styles.errorText}
-                        lightColor={colors.error}
-                        darkColor={colors.error}
+                        type="link"
+                        style={[styles.switchLink, { color: colors.link }]}
+                        lightColor={colors.link}
+                        darkColor={colors.link}
                       >
-                        {emailForm.formState.errors.email?.message ?? " "}
+                        Login with email instead
                       </ThemedText>
-                      <Pressable
-                        style={({ pressed }) => [
-                          styles.primaryBtn,
-                          { backgroundColor: colors.primary },
-                          pressed && styles.pressedFade,
+                    </Pressable>
+                  </>
+                ) : (
+                  <>
+                    <Controller
+                      control={emailForm.control}
+                      name="email"
+                      render={({ field: { onChange, onBlur, value } }) => (
+                        <TextInput
+                          keyboardType="email-address"
+                          autoComplete="email"
+                          autoCapitalize="none"
+                          placeholder="you@example.com"
+                          placeholderTextColor={colors.textMuted}
+                          value={value}
+                          onFocus={() => setEmailFocused(true)}
+                          onBlur={() => {
+                            setEmailFocused(false);
+                            onBlur();
+                          }}
+                          onChangeText={onChange}
+                          style={[
+                            styles.input,
+                            {
+                              color: colors.text,
+                              borderBottomColor: emailForm.formState.errors
+                                .email
+                                ? colors.error
+                                : emailFocused
+                                  ? colors.inputBorderFocus
+                                  : colors.inputBorder,
+                              backgroundColor: colors.inputFill,
+                            },
+                          ]}
+                        />
+                      )}
+                    />
+                    <ThemedText
+                      style={styles.errorText}
+                      lightColor={colors.error}
+                      darkColor={colors.error}
+                    >
+                      {emailForm.formState.errors.email?.message ?? " "}
+                    </ThemedText>
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.primaryBtn,
+                        { backgroundColor: colors.primary },
+                        pressed && styles.pressedFade,
+                      ]}
+                      onPress={onSubmitEmail}
+                    >
+                      <ThemedText
+                        style={[
+                          styles.primaryBtnText,
+                          { color: colors.onPrimary },
                         ]}
-                        onPress={onSubmitEmail}
+                        lightColor={colors.onPrimary}
+                        darkColor={colors.onPrimary}
                       >
-                        <ThemedText
-                          style={[styles.primaryBtnText, { color: colors.onPrimary }]}
-                          lightColor={colors.onPrimary}
-                          darkColor={colors.onPrimary}
-                        >
-                          Send OTP
-                        </ThemedText>
-                      </Pressable>
-                      <Pressable
-                        style={({ pressed }) => [pressed && styles.pressedFade]}
-                        onPress={() => setLoginMode("phone")}
+                        Send OTP
+                      </ThemedText>
+                    </Pressable>
+                    <Pressable
+                      style={({ pressed }) => [pressed && styles.pressedFade]}
+                      onPress={() => setLoginMode("phone")}
+                    >
+                      <ThemedText
+                        type="link"
+                        style={[styles.switchLink, { color: colors.link }]}
+                        lightColor={colors.link}
+                        darkColor={colors.link}
                       >
-                        <ThemedText
-                          type="link"
-                          style={[styles.switchLink, { color: colors.link }]}
-                          lightColor={colors.link}
-                          darkColor={colors.link}
-                        >
-                          Login with phone instead
-                        </ThemedText>
-                      </Pressable>
-                    </>
-                  )}
-                </View>
-              </BlurView>
-            </Animated.View>
+                        Login with phone instead
+                      </ThemedText>
+                    </Pressable>
+                  </>
+                )}
+              </View>
+            </BlurView>
           </View>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -392,18 +556,81 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     gap: 10,
   },
-  countryRow: {
+  fieldLabel: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "600",
+    letterSpacing: 0.35,
+    textTransform: "uppercase",
+    marginBottom: 6,
+  },
+  fieldLabelSecond: {
+    marginTop: 14,
+  },
+  phoneSplitRow: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    gap: 10,
+  },
+  callingShell: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingLeft: 12,
+    paddingRight: 8,
+    minHeight: 48,
+    width: 108,
+  },
+  callingPlus: {
+    fontSize: 17,
+    marginRight: 2,
+  },
+  callingInput: {
+    flex: 1,
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: "600",
+    paddingVertical: 0,
+    paddingHorizontal: 0,
+    minWidth: 36,
+  },
+  countryMetaPressable: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    marginBottom: 2,
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    minHeight: 48,
   },
-  countryFlag: {
-    fontSize: 18,
-    lineHeight: 24,
+  flagEmoji: {
+    fontSize: 22,
+    lineHeight: 26,
   },
-  countryText: {
-    fontSize: 13,
+  countryMetaName: {
+    flex: 1,
+    fontSize: 14,
+    lineHeight: 18,
+  },
+  countryMetaPlaceholder: {
+    flex: 1,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    minHeight: 48,
+    opacity: 0.35,
+  },
+  nationalInput: {
+    borderBottomWidth: 2,
+    borderRadius: 12,
+    fontSize: 22,
+    lineHeight: 28,
+    paddingVertical: 16,
+    paddingHorizontal: 14,
+    letterSpacing: 0.15,
+    marginTop: 2,
   },
   input: {
     borderBottomWidth: 2,
@@ -446,11 +673,5 @@ const styles = StyleSheet.create({
   pressedFade: {
     opacity: 0.78,
     transform: [{ scale: 0.99 }],
-  },
-  orb: {
-    position: "absolute",
-    width: 280,
-    height: 280,
-    borderRadius: 140,
   },
 });
