@@ -1,12 +1,13 @@
 import { ThemeProvider } from "@react-navigation/native";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import React, { useEffect } from "react";
+import React, { useEffect, useMemo } from "react";
 import { Platform } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "react-native-reanimated";
 
-import { useThemeStore } from "@/stores/theme-store";
+import { buildNavigationTheme } from "@/constants/theme";
+import { useThemeStore, useColors } from "@/stores/theme-store";
 import { useAuthStore } from "@/stores/auth-store";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 
@@ -32,9 +33,12 @@ function ThemeInitializer({ children }: { children: React.ReactNode }) {
 }
 
 function RootNavigation() {
-  const navigationTheme = useThemeStore((state) => state.navigationTheme);
-  const colors = useThemeStore((state) => state.colors);
   const mode = useThemeStore((state) => state.mode);
+  const colors = useColors();
+  const navigationTheme = useMemo(
+    () => buildNavigationTheme(mode, colors),
+    [mode, colors],
+  );
 
   return (
     <ThemeProvider value={navigationTheme}>
