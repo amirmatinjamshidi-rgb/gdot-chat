@@ -916,6 +916,18 @@ Another Postgres is using the port. Stop it or change the port in `server/docker
 
 This project **requires a development build**, not Expo Go.
 
+### Android build: TLS handshake / `asm-7.0.jar` / Maven Central
+
+Error like `Remote host terminated the handshake` when downloading from `repo.maven.apache.org` is a **network/TLS** issue (antivirus HTTPS scanning, firewall, or regional blocking).
+
+The project adds **Maven mirrors** (`repo1.maven.org`) in `android/build.gradle` and patches `react-native-pager-view` to avoid an obsolete AGP 4.2.1 download.
+
+If it still fails:
+
+1. Temporarily disable antivirus **HTTPS/SSL scanning**
+2. Use Android Studio's JDK: set `JAVA_HOME` to `C:\Program Files\Android\Android Studio\jbr`
+3. Retry: `cd android` then `.\gradlew.bat --stop` and `npx expo run:android`
+
 ### Android build: `Could not find manifest-merger-31.5.0.jar`
 
 Gradle downloaded Android build-tool **metadata** but failed to download the actual **JAR** file, leaving a broken cache entry.
