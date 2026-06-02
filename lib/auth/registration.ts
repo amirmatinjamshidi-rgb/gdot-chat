@@ -5,7 +5,7 @@ import type { AuthApi } from "@/lib/api/auth-api";
 import type { LocalIdentity } from "@/lib/db/types";
 import type { IIdentityStore } from "@/lib/db/identity-store";
 import type { IKekManager } from "@/lib/db/kek-manager";
-import type { IDatabase } from "@/lib/db/database";
+import type { IDatabase } from "@/lib/db/database-types";
 import type { AuthStore } from "@/lib/session/auth-store";
 import { ApiError } from "@/lib/api/api-client";
 

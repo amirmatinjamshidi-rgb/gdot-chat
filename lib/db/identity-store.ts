@@ -1,5 +1,5 @@
 import type { LocalIdentity, RemoteIdentity } from "./types";
-import type { IDatabase } from "./database";
+import type { IDatabase } from "./database-types";
 
 export interface IIdentityStore {
   getLocalIdentity(): Promise<LocalIdentity | null>;

@@ -1,25 +1,11 @@
 import * as SQLite from "expo-sqlite";
 
 import { DB_NAME } from "./constants";
-
-type SqlParams = SQLite.SQLiteBindValue[];
+import type { IDatabase, RunResult, SqlParams } from "./database-types";
 import { MigrationRunner } from "./migration-runner";
 import { escapeSqlString } from "./sql-utils";
 
-export interface RunResult {
-  changes: number;
-  lastInsertRowId: number;
-}
-
-export interface IDatabase {
-  open(passphrase: string): Promise<void>;
-  close(): Promise<void>;
-  isOpen(): boolean;
-  run(sql: string, params?: SqlParams): Promise<RunResult>;
-  getFirst<T>(sql: string, params?: SqlParams): Promise<T | null>;
-  getAll<T>(sql: string, params?: SqlParams): Promise<T[]>;
-  withTransaction<T>(fn: () => Promise<T>): Promise<T>;
-}
+export type { IDatabase, RunResult, SqlParams } from "./database-types";
 
 export class SqlCipherDatabase implements IDatabase {
   private db: SQLite.SQLiteDatabase | null = null;

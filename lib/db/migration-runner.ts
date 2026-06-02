@@ -1,5 +1,5 @@
 import { MIGRATIONS_TABLE } from "./constants";
-import type { IDatabase } from "./database";
+import type { IDatabase } from "./database-types";
 import { MIGRATION_001_SQL } from "./migrations/001-initial";
 import { splitStatements } from "./sql-utils";
 

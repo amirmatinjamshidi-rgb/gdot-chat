@@ -1,6 +1,6 @@
 import type { SessionRecord } from "@/lib/crypto/types";
 
-import type { IDatabase } from "./database";
+import type { IDatabase } from "./database-types";
 
 export interface ISessionStore {
   get(peerDeviceId: string): Promise<SessionRecord | null>;

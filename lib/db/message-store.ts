@@ -1,4 +1,4 @@
-import type { IDatabase } from "./database";
+import type { IDatabase } from "./database-types";
 import type { LocalMessage, MessageStatus } from "./types";
 
 export interface IMessageStore {

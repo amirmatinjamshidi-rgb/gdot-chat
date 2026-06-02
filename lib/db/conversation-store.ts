@@ -1,4 +1,4 @@
-import type { IDatabase } from "./database";
+import type { IDatabase } from "./database-types";
 import type { Conversation } from "./types";
 
 export interface IConversationStore {
