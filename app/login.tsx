@@ -29,14 +29,14 @@ import {
   type EmailInput,
   type PhonePartsInput,
 } from "@/lib/auth/schemas";
-import { useAuth } from "@/providers/auth-provider";
+import { useAuthStore } from "@/stores/auth-store";
 import { useThemePalette } from "@/providers/theme-palette-provider";
 
 type LoginMode = "phone" | "email";
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { isAuthenticated, isReady } = useAuth();
+  const { isAuthenticated, isReady } = useAuthStore();
   const { colors, mode } = useThemePalette();
   const [loginMode, setLoginMode] = useState<LoginMode>("phone");
   const [callingFocused, setCallingFocused] = useState(false);

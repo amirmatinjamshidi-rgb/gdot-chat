@@ -1,12 +1,13 @@
 import { ThemeProvider } from "@react-navigation/native";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import React, { useEffect } from "react";
 import { Platform } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "react-native-reanimated";
 
 import { ThemePaletteProvider, useThemePalette } from "@/providers/theme-palette-provider";
-import { AuthProvider } from "@/providers/auth-provider";
+import { useAuthStore } from "@/stores/auth-store";
 
 export const unstable_settings = {
   anchor: "(tabs)",
@@ -45,13 +46,23 @@ function RootNavigation() {
   );
 }
 
+function AuthInitializer({ children }: { children: React.ReactNode }) {
+  const initializeAuth = useAuthStore((state) => state.initializeAuth);
+
+  useEffect(() => {
+    void initializeAuth();
+  }, [initializeAuth]);
+
+  return <>{children}</>;
+}
+
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ThemePaletteProvider>
-        <AuthProvider>
+        <AuthInitializer>
           <RootNavigation />
-        </AuthProvider>
+        </AuthInitializer>
       </ThemePaletteProvider>
     </GestureHandlerRootView>
   );

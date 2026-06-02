@@ -19,13 +19,13 @@ import {
   type SettingsSection as SettingsSectionType,
 } from "@/constants/profile-data";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import { useAuth } from "@/providers/auth-provider";
+import { useAuthStore } from "@/stores/auth-store";
 import { useThemePalette } from "@/providers/theme-palette-provider";
 
 export default function ProfileScreen() {
   const colorScheme = useColorScheme() ?? "light";
   const isDark = colorScheme === "dark";
-  const { signOut } = useAuth();
+  const signOut = useAuthStore((state) => state.signOut);
   const { themeId, setThemeId, colors } = useThemePalette();
   const [toggleState, setToggleState] = useState(
     Object.fromEntries(
