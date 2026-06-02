@@ -20,6 +20,8 @@ dotnet run --project GdotChat.Api
 - REST base: `https://localhost:5067/v1`
 - SignalR hub: `https://localhost:5067/hubs/messages`
 
+The API binds to `0.0.0.0` so it is reachable on your LAN IP (e.g. `http://192.168.x.x:5066/swagger`). Restart the server after changing `launchSettings.json`.
+
 PostgreSQL is exposed on **port 5433** (avoids conflict with a local Postgres on 5432).
 
 Default connection string (see `GdotChat.Api/appsettings.json`):
