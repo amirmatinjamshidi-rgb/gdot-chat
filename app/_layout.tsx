@@ -30,6 +30,7 @@ function RootNavigation() {
         <Stack.Screen name="ChatRoom" options={{ title: "Chat" }} />
         <Stack.Screen name="Contacts" options={{ title: "Contacts" }} />
         <Stack.Screen name="CreateGroup" options={{ title: "Create Group" }} />
+        <Stack.Screen name="profile-themes" options={{ title: "Themes" }} />
         <Stack.Screen
           name="modal"
           options={{

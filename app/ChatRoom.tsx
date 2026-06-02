@@ -7,7 +7,6 @@ import {
   type AudioRecorder,
 } from "expo-audio";
 import * as Haptics from "expo-haptics";
-import { LinearGradient } from "expo-linear-gradient";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import React, {
   useCallback,
@@ -31,7 +30,6 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   cancelAnimation,
   Easing,
-  FadeInDown,
   interpolate,
   runOnJS,
   useAnimatedStyle,
@@ -48,6 +46,7 @@ import {
   LOCK_DRAG_PX,
   type HoldRecordControlsHandle,
 } from "@/components/hold-record-controls";
+import { ScreenTopAccent } from "@/components/screen-top-accent";
 import { ThemedText } from "@/components/themed-text";
 import {
   VIDEO_RECORD_MAX_MS,
@@ -819,17 +818,7 @@ export default function ChatRoomScreen() {
     >
       <GestureDetector gesture={swipeBackGesture}>
         <View style={styles.gestureFill}>
-          <LinearGradient
-            colors={[
-              colors.gradientEnd,
-              colors.background,
-              colors.backgroundSecondary,
-            ]}
-            locations={[0, 0.45, 1]}
-            start={{ x: 0.5, y: 0 }}
-            end={{ x: 0.5, y: 1 }}
-            style={StyleSheet.absoluteFill}
-          />
+          <ScreenTopAccent />
           <KeyboardAvoidingView
             style={styles.keyboardRoot}
             behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -893,10 +882,7 @@ export default function ChatRoomScreen() {
                         : "rgba(0,0,0,0.5)";
 
                   return (
-                    <Animated.View
-                      entering={FadeInDown.duration(200).easing(
-                        Easing.out(Easing.cubic),
-                      )}
+                    <View
                       style={[
                         styles.messageBubble,
                         item.sender === "me"
@@ -972,7 +958,7 @@ export default function ChatRoomScreen() {
                       >
                         {item.time}
                       </ThemedText>
-                    </Animated.View>
+                    </View>
                   );
                 }}
               />

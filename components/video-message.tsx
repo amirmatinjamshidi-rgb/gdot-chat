@@ -13,7 +13,6 @@ import React, {
   useState,
 } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
-import Animated, { Easing, FadeIn } from "react-native-reanimated";
 
 import { CircularProgressRing } from "@/components/circular-progress-ring";
 import { useThemePalette } from "@/providers/theme-palette-provider";
@@ -167,11 +166,7 @@ export const VideoMessage = forwardRef<VideoMessageHandle, VideoMessageProps>(
     const trackRing = `${colors.textMuted}55`;
 
     return (
-      <Animated.View
-        entering={FadeIn.duration(280).easing(Easing.out(Easing.cubic))}
-        style={styles.overlayContent}
-        pointerEvents="box-none"
-      >
+      <View style={styles.overlayContent} pointerEvents="box-none">
         <View style={styles.column}>
           <Text style={[styles.hint, { color: colors.textMuted }]}>
             Swipe up on the button to lock · swipe the record button left to
@@ -243,7 +238,7 @@ export const VideoMessage = forwardRef<VideoMessageHandle, VideoMessageProps>(
             </View>
           </View>
         </View>
-      </Animated.View>
+      </View>
     );
   },
 );

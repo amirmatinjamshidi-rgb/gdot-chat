@@ -1,11 +1,11 @@
-import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import React, { useMemo, useState } from "react";
 import { FlatList, StyleSheet, View } from "react-native";
-import Animated, { FadeIn } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ChatSearchBar } from "@/components/chat-search-bar";
+
+import { ScreenTopAccent } from "@/components/screen-top-accent";
 import { ThemedText } from "@/components/themed-text";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { ScalePressable } from "@/components/ui/scale-pressable";
@@ -70,13 +70,7 @@ export default function ChatsScreen() {
 
   return (
     <View style={styles.root}>
-      <LinearGradient
-        colors={[colors.gradientEnd, colors.background, colors.backgroundSecondary]}
-        locations={[0, 0.45, 1]}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 1 }}
-        style={StyleSheet.absoluteFill}
-      />
+      <ScreenTopAccent />
       <SafeAreaView style={styles.safe} edges={["top"]}>
         <View style={styles.header}>
           <View>
@@ -93,7 +87,7 @@ export default function ChatsScreen() {
               lightColor={colors.textMuted}
               darkColor={colors.textMuted}
             >
-              Your conversations, elevated.
+              Search by name or last message. Tap a row to open the chat.
             </ThemedText>
           </View>
           <ScalePressable
@@ -133,9 +127,7 @@ export default function ChatsScreen() {
               style={[
                 styles.chatRow,
                 {
-                  backgroundColor: isDark
-                    ? "rgba(255,255,255,0.03)"
-                    : "rgba(255,255,255,0.35)",
+                  backgroundColor: colors.surfaceElevated,
                   borderColor: colors.surfaceBorder,
                 },
               ]}
@@ -189,7 +181,10 @@ export default function ChatsScreen() {
                 <View style={styles.bottomLine}>
                   <ThemedText
                     numberOfLines={1}
-                    style={[styles.lastMessage, { color: colors.textSecondary }]}
+                    style={[
+                      styles.lastMessage,
+                      { color: colors.textSecondary },
+                    ]}
                     lightColor={colors.textSecondary}
                     darkColor={colors.textSecondary}
                   >
@@ -217,15 +212,25 @@ export default function ChatsScreen() {
           )}
           ItemSeparatorComponent={() => <View style={styles.separatorGhost} />}
           ListEmptyComponent={
-            <Animated.View entering={FadeIn.duration(180)} style={styles.empty}>
+            <View style={styles.empty}>
               <ThemedText
-                style={{ color: colors.textMuted }}
+                type="defaultSemiBold"
+                style={{ color: colors.text }}
+                lightColor={colors.text}
+                darkColor={colors.text}
+              >
+                {query.trim() ? "No matching chats" : "No chats yet"}
+              </ThemedText>
+              <ThemedText
+                style={[styles.emptyHint, { color: colors.textMuted }]}
                 lightColor={colors.textMuted}
                 darkColor={colors.textMuted}
               >
-                No chats found
+                {query.trim()
+                  ? "Try a different search."
+                  : "Start a chat from your contacts when available."}
               </ThemedText>
-            </Animated.View>
+            </View>
           }
         />
       </SafeAreaView>
@@ -315,12 +320,10 @@ const styles = StyleSheet.create({
   },
   timeText: {
     fontSize: 11,
-    opacity: 0.85,
   },
   lastMessage: {
     flex: 1,
     fontSize: 13,
-    opacity: 0.88,
   },
   unreadBadge: {
     borderRadius: 10,
@@ -339,6 +342,13 @@ const styles = StyleSheet.create({
   },
   empty: {
     paddingTop: 48,
+    paddingHorizontal: 24,
     alignItems: "center",
+    gap: 8,
+  },
+  emptyHint: {
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: "center",
   },
 });

@@ -1,11 +1,12 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { useMemo, useState } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, View } from "react-native";
-import Animated, { FadeInDown } from "react-native-reanimated";
+import { Alert, ScrollView, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ProfileActionCard } from "@/components/profile-action-card";
 import { ProfileAvatar } from "@/components/profile-avatar";
+import { ThemesCard } from "@/components/profile-themes-card";
+import { ScreenTopAccent } from "@/components/screen-top-accent";
 import { SecuritySummaryCard } from "@/components/security-summary-card";
 import { SettingsSection } from "@/components/settings-section";
 import { StorageSummaryCard } from "@/components/storage-summary-card";
@@ -17,7 +18,6 @@ import {
   settingsSections,
   type SettingsSection as SettingsSectionType,
 } from "@/constants/profile-data";
-import { APP_THEMES, type ThemeId } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useAuth } from "@/providers/auth-provider";
 import { useThemePalette } from "@/providers/theme-palette-provider";
@@ -72,11 +72,12 @@ export default function ProfileScreen() {
     <SafeAreaView
       style={[styles.safeArea, { backgroundColor: colors.background }]}
     >
+      <ScreenTopAccent />
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        <Animated.View entering={FadeInDown.springify()}>
+        <View>
           <View style={styles.headerRow}>
             <View>
               <ThemedText type="title" style={styles.screenTitle}>
@@ -90,6 +91,7 @@ export default function ProfileScreen() {
                 Account, safety, storage, and preferences
               </ThemedText>
             </View>
+
             <ScalePressable
               onPress={() =>
                 Alert.alert(
@@ -102,100 +104,32 @@ export default function ProfileScreen() {
                 {
                   backgroundColor: colors.surfaceElevated,
                   borderColor: colors.surfaceBorder,
-                  borderWidth: 1,
+                  borderWidth: 0,
                 },
               ]}
             >
               <MaterialIcons
                 name="qr-code-scanner"
-                size={23}
+                size={30}
                 color={colors.text}
+                style={[styles.iconqr]}
               />
             </ScalePressable>
           </View>
-        </Animated.View>
+        </View>
 
-        <Animated.View entering={FadeInDown.delay(70).springify()}>
+        <View>
           <ThemedText
             type="subtitle"
             style={[styles.sectionLabel, { color: colors.text }]}
             lightColor={colors.text}
             darkColor={colors.text}
           >
-            Signature look
+            Theme
           </ThemedText>
-          <ThemedText
-            style={[styles.sectionHint, { color: colors.textMuted }]}
-            lightColor={colors.textMuted}
-            darkColor={colors.textMuted}
-          >
-            Curated palettes — saved on this device.
-          </ThemedText>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.themeScroll}
-          >
-            {APP_THEMES.map((t) => {
-              const active = themeId === t.id;
-              const swatch = isDark ? t.dark : t.light;
-              return (
-                <Pressable
-                  key={t.id}
-                  onPress={() => setThemeId(t.id as ThemeId)}
-                  style={({ pressed }) => [
-                    styles.themeCard,
-                    {
-                      borderColor: active ? swatch.tint : colors.surfaceBorder,
-                      backgroundColor: colors.surfaceElevated,
-                      opacity: pressed ? 0.88 : 1,
-                    },
-                    active && { shadowColor: swatch.tint, shadowOpacity: 0.35 },
-                  ]}
-                >
-                  <View style={styles.themeSwatches}>
-                    <View
-                      style={[
-                        styles.swatchDot,
-                        { backgroundColor: swatch.primary },
-                      ]}
-                    />
-                    <View
-                      style={[
-                        styles.swatchDot,
-                        { backgroundColor: swatch.tint },
-                      ]}
-                    />
-                    <View
-                      style={[
-                        styles.swatchDot,
-                        { backgroundColor: swatch.gradientMid },
-                      ]}
-                    />
-                  </View>
-                  <ThemedText
-                    type="defaultSemiBold"
-                    style={[styles.themeTitle, { color: colors.text }]}
-                    lightColor={colors.text}
-                    darkColor={colors.text}
-                  >
-                    {t.label}
-                  </ThemedText>
-                  <ThemedText
-                    numberOfLines={2}
-                    style={[styles.themeTag, { color: colors.textMuted }]}
-                    lightColor={colors.textMuted}
-                    darkColor={colors.textMuted}
-                  >
-                    {t.tagline}
-                  </ThemedText>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-        </Animated.View>
+        </View>
 
-        <Animated.View entering={FadeInDown.delay(90).springify()}>
+        <View>
           <View
             style={[
               styles.profileCard,
@@ -246,71 +180,53 @@ export default function ProfileScreen() {
                     { backgroundColor: colors.surfaceBorder },
                   ]}
                 />
-                {/* <ThemedText
-                style={styles.metaText}
-                lightColor={colors.textMuted}
-                darkColor={colors.textMuted}
-              >
-                {profile.joinedAt}
-              </ThemedText> */}
               </View>
             </View>
           </View>
-        </Animated.View>
+        </View>
 
-        <Animated.View entering={FadeInDown.delay(140).springify()}>
-          <View style={styles.actionsGrid}>
-            {profileActions.map((action) => (
-              <View key={action.id} style={styles.actionCell}>
-                <ProfileActionCard action={action} />
-              </View>
-            ))}
-          </View>
-        </Animated.View>
+        <View style={styles.actionsGrid}>
+          {profileActions.map((action) => (
+            <View key={action.id} style={styles.actionCell}>
+              <ProfileActionCard action={action} />
+            </View>
+          ))}
+        </View>
+        <ThemesCard />
+        <SecuritySummaryCard />
+        <StorageSummaryCard />
 
-        <Animated.View entering={FadeInDown.delay(200).springify()}>
-          <SecuritySummaryCard />
-        </Animated.View>
-        <Animated.View entering={FadeInDown.delay(240).springify()}>
-          <StorageSummaryCard />
-        </Animated.View>
-
-        {sections.map((section, index) => (
-          <Animated.View
-            key={section.id}
-            entering={FadeInDown.delay(300 + index * 55).springify()}
-          >
+        {sections.map((section) => (
+          <View key={section.id}>
             <SettingsSection section={section} onToggle={handleToggle} />
-          </Animated.View>
+          </View>
         ))}
 
-        <Animated.View entering={FadeInDown.delay(560).springify()}>
-          <ScalePressable
-            accessibilityRole="button"
-            accessibilityLabel="Log out"
-            onPress={handleLogoutPress}
-            style={[
-              styles.logoutRow,
-              {
-                backgroundColor: isDark
-                  ? "rgba(239,68,68,0.12)"
-                  : "rgba(239,68,68,0.08)",
-                borderColor: isDark
-                  ? "rgba(248,113,113,0.35)"
-                  : "rgba(239,68,68,0.22)",
-              },
-            ]}
+        <ScalePressable
+          accessibilityRole="button"
+          accessibilityLabel="Log out"
+          onPress={handleLogoutPress}
+          style={[
+            styles.logoutRow,
+            {
+              backgroundColor: isDark
+                ? "rgba(239,68,68,0.12)"
+                : "rgba(239,68,68,0.08)",
+              borderColor: isDark
+                ? "rgba(248,113,113,0.35)"
+                : "rgba(239,68,68,0.22)",
+            },
+          ]}
+        >
+          <MaterialIcons name="logout" size={20} color="#EF4444" />
+          <ThemedText
+            style={styles.logoutText}
+            lightColor="#DC2626"
+            darkColor="#F87171"
           >
-            <MaterialIcons name="logout" size={20} color="#EF4444" />
-            <ThemedText
-              style={styles.logoutText}
-              lightColor="#DC2626"
-              darkColor="#F87171"
-            >
-              Log out
-            </ThemedText>
-          </ScalePressable>
-        </Animated.View>
+            Log out
+          </ThemedText>
+        </ScalePressable>
       </ScrollView>
     </SafeAreaView>
   );
@@ -334,7 +250,7 @@ const styles = StyleSheet.create({
   },
   screenTitle: {
     fontSize: 34,
-    lineHeight: 38,
+    lineHeight: 42,
   },
   screenSubtitle: {
     marginTop: 4,
@@ -348,6 +264,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1,
     borderRadius: 18,
+  },
+  iconqr: {
+    marginLeft: 8,
   },
   profileCard: {
     flexDirection: "row",
@@ -363,10 +282,12 @@ const styles = StyleSheet.create({
   },
   name: {
     fontSize: 23,
+    lineHeight: 28,
   },
   handle: {
     fontSize: 15,
     fontWeight: "700",
+    lineHeight: 20,
   },
   status: {
     fontSize: 14,
@@ -381,6 +302,7 @@ const styles = StyleSheet.create({
   },
   metaText: {
     fontSize: 12,
+    lineHeight: 16,
   },
   metaDivider: {
     width: 4,
@@ -414,23 +336,27 @@ const styles = StyleSheet.create({
   sectionLabel: {
     fontSize: 18,
     marginBottom: 4,
+    lineHeight: 24,
   },
   sectionHint: {
     fontSize: 13,
     lineHeight: 18,
     marginBottom: 12,
   },
-  themeScroll: {
+  themeGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: 12,
-    paddingRight: 18,
     paddingBottom: 4,
   },
   themeCard: {
-    width: 156,
+    width: "47.5%",
+    minWidth: 140,
+    maxWidth: "100%",
+    flexGrow: 1,
     borderRadius: 20,
     borderWidth: 2,
     padding: 14,
-    marginRight: 4,
     shadowOffset: { width: 0, height: 6 },
     shadowRadius: 14,
     elevation: 4,
@@ -448,6 +374,7 @@ const styles = StyleSheet.create({
   themeTitle: {
     fontSize: 15,
     marginBottom: 4,
+    lineHeight: 20,
   },
   themeTag: {
     fontSize: 12,

@@ -1,5 +1,4 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { LinearGradient } from "expo-linear-gradient";
 import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useMemo, useRef, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
@@ -20,6 +19,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { ScreenTopAccent } from "@/components/screen-top-accent";
 import { ThemedText } from "@/components/themed-text";
 import { otpSchema, type OtpInput } from "@/lib/auth/schemas";
 import { useAuth } from "@/providers/auth-provider";
@@ -217,12 +217,7 @@ export default function VerifyOtpScreen() {
 
   return (
     <View style={styles.root}>
-      <LinearGradient
-        colors={[colors.gradientStart, colors.background, colors.gradientEnd]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={StyleSheet.absoluteFill}
-      />
+      <ScreenTopAccent />
       <SafeAreaView style={styles.safeArea}>
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : undefined}

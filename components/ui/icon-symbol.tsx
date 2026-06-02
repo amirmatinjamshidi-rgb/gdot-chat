@@ -1,42 +1,48 @@
-// Fallback for using MaterialIcons on Android and web.
+// Fallback: Material Icons on Android / web. iOS uses `icon-symbol.ios.tsx` (SF Symbols).
 
-import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { SymbolWeight, SymbolViewProps } from 'expo-symbols';
-import { ComponentProps } from 'react';
-import { OpaqueColorValue, type StyleProp, type TextStyle } from 'react-native';
+import MaterialIcons from "@expo/vector-icons/MaterialIcons";
+import { SymbolWeight, SymbolViewProps } from "expo-symbols";
+import { ComponentProps } from "react";
+import { OpaqueColorValue, type StyleProp, type TextStyle } from "react-native";
 
-type IconMapping = Record<SymbolViewProps['name'], ComponentProps<typeof MaterialIcons>['name']>;
+type IconMapping = Record<
+  SymbolViewProps["name"],
+  ComponentProps<typeof MaterialIcons>["name"]
+>;
 type IconSymbolName = keyof typeof MAPPING;
 
 /**
- * Add your SF Symbols to Material Icons mappings here.
- * - see Material Icons in the [Icons Directory](https://icons.expo.fyi).
- * - see SF Symbols in the [SF Symbols](https://developer.apple.com/sf-symbols/) app.
+ * SF Symbol name → Material icon. Pick **filled** Material names where possible so stroke
+ * weight feels closer to SF Symbols at the same grid size.
+ *
+ * **Size grid (dp):** 20 (inline / dense), 24 (default rows, buttons), 26–28 (tab bar).
  */
 const MAPPING = {
-  'bubble.left.and.bubble.right.fill': 'forum',
-  'house.fill': 'home',
-  'mic.fill': 'mic',
-  'paperplane.fill': 'send',
-  'video.fill': 'videocam',
-  'person.2.fill': 'group',
-  'person.3.fill': 'groups',
-  'person.badge.plus': 'person-add',
-  'person.crop.circle.fill': 'account-circle',
-  'chevron.left.forwardslash.chevron.right': 'code',
-  'chevron.right': 'chevron-right',
+  "bubble.left.and.bubble.right.fill": "forum",
+  "house.fill": "home",
+  "mic.fill": "mic",
+  "paperplane.fill": "send",
+  "video.fill": "videocam",
+  "person.2.fill": "group",
+  "person.3.fill": "groups",
+  "person.badge.plus": "person-add",
+  "person.crop.circle.fill": "account-circle",
+  "chevron.left.forwardslash.chevron.right": "code",
+  "chevron.right": "chevron-right",
+  /** Safe fallback when route index exceeds the tab icon list */
+  "circle.fill": "lens",
 } as IconMapping;
 
 /**
- * An icon component that uses native SF Symbols on iOS, and Material Icons on Android and web.
- * This ensures a consistent look across platforms, and optimal resource usage.
- * Icon `name`s are based on SF Symbols and require manual mapping to Material Icons.
+ * SF Symbols on iOS (`icon-symbol.ios.tsx`); mapped Material Icons here. New `name` values
+ * must exist in `MAPPING`. `weight` applies on iOS only.
  */
 export function IconSymbol({
   name,
   size = 24,
   color,
   style,
+  weight: _weight,
 }: {
   name: IconSymbolName;
   size?: number;
@@ -44,5 +50,7 @@ export function IconSymbol({
   style?: StyleProp<TextStyle>;
   weight?: SymbolWeight;
 }) {
-  return <MaterialIcons color={color} size={size} name={MAPPING[name]} style={style} />;
+  return (
+    <MaterialIcons color={color} size={size} name={MAPPING[name]} style={style} />
+  );
 }

@@ -1,14 +1,18 @@
-import { SymbolView, SymbolViewProps, SymbolWeight } from 'expo-symbols';
-import { StyleProp, ViewStyle } from 'react-native';
+import { SymbolView, SymbolViewProps, SymbolWeight } from "expo-symbols";
+import { StyleProp, ViewStyle } from "react-native";
 
+/**
+ * SF Symbols on iOS. Prefer **medium** weight at size ≥26 (e.g. tab bar) so glyphs match
+ * the visual weight of filled Material icons on Android/web at the same grid.
+ */
 export function IconSymbol({
   name,
   size = 24,
   color,
   style,
-  weight = 'regular',
+  weight = size >= 26 ? "medium" : "regular",
 }: {
-  name: SymbolViewProps['name'];
+  name: SymbolViewProps["name"];
   size?: number;
   color: string;
   style?: StyleProp<ViewStyle>;
