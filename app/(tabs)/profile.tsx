@@ -1,5 +1,5 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Alert, ScrollView, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -20,6 +20,7 @@ import {
 } from "@/constants/profile-data";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useAuthStore } from "@/stores/auth-store";
+import { useSettingsStore } from "@/stores/settings-store";
 import { useThemeStore, useColors } from "@/stores/theme-store";
 
 export default function ProfileScreen() {
@@ -29,29 +30,30 @@ export default function ProfileScreen() {
   const themeId = useThemeStore((state) => state.themeId);
   const setThemeId = useThemeStore((state) => state.setThemeId);
   const colors = useColors();
-  const [toggleState, setToggleState] = useState(
-    Object.fromEntries(
-      settingsSections.flatMap((section) =>
-        section.items
-          .filter((item) => item.hasToggle)
-          .map((item) => [item.id, Boolean(item.enabled)]),
-      ),
-    ),
-  );
+  const toggles = useSettingsStore((state) => state.toggles);
+  const setToggle = useSettingsStore((state) => state.setToggle);
 
   const sections = useMemo<SettingsSectionType[]>(
     () =>
       settingsSections.map((section) => ({
         ...section,
         items: section.items.map((item) =>
-          item.hasToggle ? { ...item, enabled: toggleState[item.id] } : item,
+          item.hasToggle
+            ? {
+                ...item,
+                enabled:
+                  typeof toggles[item.id] === "boolean"
+                    ? toggles[item.id]
+                    : Boolean(item.enabled),
+              }
+            : item,
         ),
       })),
-    [toggleState],
+    [toggles],
   );
 
   const handleToggle = (id: string, enabled: boolean) => {
-    setToggleState((current) => ({ ...current, [id]: enabled }));
+    setToggle(id, enabled);
   };
 
   const handleLogoutPress = () => {

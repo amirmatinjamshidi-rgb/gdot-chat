@@ -1,4 +1,4 @@
-# Smash State Management Migration
+<!-- # Smash State Management Migration
 
 ## ✅ Level 1: Auth Store - COMPLETED
 
@@ -101,15 +101,47 @@
 - `getDraft(chatId)` / `setDraft(chatId, text)` / `clearDraft(chatId)` - Draft management
 - `getComposerMode(chatId)` / `setComposerMode(chatId, mode)` / `cycleComposerMode(chatId)` - Composer mode
 - `setFocusedChat(chatId)` - Track focused chat
-- `startRecording(chatId)` / `stopRecording()` / `cancelRecording()` - Recording state
-- `updateRecordingTime(elapsedMs)` / `lockRecording()` - Recording controls
-- `isRecording(chatId?)` - Check recording status
+
+Recording lives in **`recording-store`** (see below).
+
+---
+
+## ✅ Level 6: Contacts Store - COMPLETED
+
+**Files**: `stores/contacts-store.ts`
+**Wired**: `app/Contacts.tsx` — list, search, mock init, navigate to chat.
+
+---
+
+## ✅ Level 7: Media Preferences Store - COMPLETED
+
+**Files**: `stores/media-store.ts`
+**Purpose**: Persisted media-related preferences (`autoDownloadPolicy`, `videoAutoplayInChat`, `imageSendQuality`, `videoRecordingQuality`). Wire into pickers/screens as you build them.
+
+---
+
+## ✅ Level 8: Recording Store - COMPLETED
+
+**Files**: `stores/recording-store.ts`
+**Wired**: `app/ChatRoom.tsx` — hold-to-record session synced with native voice/video capture.
+**Removed from**: `input-store` (drafts + composer only).
+
+**Store API**:
+- `startRecording(chatId)` / `stopRecording()` / `cancelRecording()`
+- `updateRecordingTime(elapsedMs)` / `lockRecording()` / `isRecording(chatId?)`
+
+---
+
+## ✅ Level 9: Settings Store - COMPLETED
+
+**Files**: `stores/settings-store.ts`
+**Wired**: `app/(tabs)/profile.tsx` — persisted toggles for settings rows with `hasToggle` (e.g. notifications, fast-mode).
 
 ---
 
 ## 📊 Migration Summary
 
-**Total Stores Created**: 5 (Auth, Theme, Chats, Messages, Input)
+**Total Stores Created**: 9 (Auth, Theme, Chats, Messages, Input, Contacts, Media, Recording, Settings)
 **Total Files Modified**: 22+
 **Old Providers Deprecated**: 2 (auth-provider, theme-palette-provider)
 
@@ -193,9 +225,8 @@ const colors = useThemeStore(selectColors); // Infinite re-renders!
 
 ## 🎯 Next Steps
 
-### Future Levels (6-10):
-6. Contacts Store (user contacts with search/filter)
-7. Settings Store (app preferences beyond theme)
-8. UI/UX State (modals, bottom sheets, toast notifications)
-9. Keyboard State (visibility, height tracking)
-10. Network State (connection status, sync queue)
+### Future Levels (10+):
+- UI/UX State (modals, bottom sheets, toast notifications)
+- Keyboard State (visibility, height tracking)
+- Network State (connection status, sync queue)
+- Wire **media-store** into profile “Media and storage” / composer quality UI -->

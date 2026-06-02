@@ -8,9 +8,6 @@ type InputState = {
   draftsByChatId: Record<string, string>;
   composerModesByChatId: Record<string, ComposerMode>;
   focusedChatId: string | null;
-  recordingChatId: string | null;
-  recordingElapsedMs: number;
-  recordingLocked: boolean;
 };
 
 type InputActions = {
@@ -23,14 +20,6 @@ type InputActions = {
   cycleComposerMode: (chatId: string) => void;
   
   setFocusedChat: (chatId: string | null) => void;
-  
-  startRecording: (chatId: string) => void;
-  updateRecordingTime: (elapsedMs: number) => void;
-  lockRecording: () => void;
-  stopRecording: () => void;
-  cancelRecording: () => void;
-  
-  isRecording: (chatId?: string) => boolean;
 };
 
 type InputStore = InputState & InputActions;
@@ -41,9 +30,6 @@ export const useInputStore = create<InputStore>()(
       draftsByChatId: {},
       composerModesByChatId: {},
       focusedChatId: null,
-      recordingChatId: null,
-      recordingElapsedMs: 0,
-      recordingLocked: false,
 
       getDraft: (chatId: string) => {
         return get().draftsByChatId[chatId] || "";
@@ -88,43 +74,6 @@ export const useInputStore = create<InputStore>()(
 
       setFocusedChat: (chatId: string | null) => {
         set({ focusedChatId: chatId });
-      },
-
-      startRecording: (chatId: string) => {
-        set({
-          recordingChatId: chatId,
-          recordingElapsedMs: 0,
-          recordingLocked: false,
-        });
-      },
-
-      updateRecordingTime: (elapsedMs: number) => {
-        set({ recordingElapsedMs: elapsedMs });
-      },
-
-      lockRecording: () => {
-        set({ recordingLocked: true });
-      },
-
-      stopRecording: () => {
-        set({
-          recordingChatId: null,
-          recordingElapsedMs: 0,
-          recordingLocked: false,
-        });
-      },
-
-      cancelRecording: () => {
-        set({
-          recordingChatId: null,
-          recordingElapsedMs: 0,
-          recordingLocked: false,
-        });
-      },
-
-      isRecording: (chatId?: string) => {
-        const { recordingChatId } = get();
-        return chatId ? recordingChatId === chatId : recordingChatId !== null;
       },
     }),
     {
