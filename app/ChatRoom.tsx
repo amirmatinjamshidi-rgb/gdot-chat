@@ -60,7 +60,7 @@ import {
 } from "@/components/video-message-bubble";
 import { VoiceMessageBubble } from "@/components/voice-message-bubble";
 import { RecordingSlideMeter } from "@/components/recording-slide-meter";
-import { useThemePalette } from "@/providers/theme-palette-provider";
+import { useThemeStore } from "@/stores/theme-store";
 const MIN_RECORD_MS = 1000;
 const HOLD_MS = 320;
 const TAP_MAX_MS = 260;
@@ -185,7 +185,8 @@ export default function ChatRoomScreen() {
   const neonVisible = useSharedValue(0);
 
   const router = useRouter();
-  const { colors, mode } = useThemePalette();
+  const colors = useThemeStore((state) => state.colors);
+  const mode = useThemeStore((state) => state.mode);
   const isDark = mode === "dark";
   const contactName = useMemo(() => name || "Chat", [name]);
 

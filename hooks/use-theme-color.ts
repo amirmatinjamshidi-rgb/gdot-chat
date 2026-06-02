@@ -3,13 +3,14 @@
  */
 
 import type { ThemeColorName } from "@/constants/theme";
-import { useThemePalette } from "@/providers/theme-palette-provider";
+import { useThemeStore } from "@/stores/theme-store";
 
 export function useThemeColor(
   props: { light?: string; dark?: string },
   colorName: ThemeColorName,
 ) {
-  const { mode, legacyColors } = useThemePalette();
+  const mode = useThemeStore((state) => state.mode);
+  const legacyColors = useThemeStore((state) => state.legacyColors);
   const colorFromProps = props[mode];
 
   if (colorFromProps) {

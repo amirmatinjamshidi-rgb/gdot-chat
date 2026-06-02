@@ -20,13 +20,15 @@ import {
 } from "@/constants/profile-data";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useAuthStore } from "@/stores/auth-store";
-import { useThemePalette } from "@/providers/theme-palette-provider";
+import { useThemeStore } from "@/stores/theme-store";
 
 export default function ProfileScreen() {
   const colorScheme = useColorScheme() ?? "light";
   const isDark = colorScheme === "dark";
   const signOut = useAuthStore((state) => state.signOut);
-  const { themeId, setThemeId, colors } = useThemePalette();
+  const themeId = useThemeStore((state) => state.themeId);
+  const setThemeId = useThemeStore((state) => state.setThemeId);
+  const colors = useThemeStore((state) => state.colors);
   const [toggleState, setToggleState] = useState(
     Object.fromEntries(
       settingsSections.flatMap((section) =>

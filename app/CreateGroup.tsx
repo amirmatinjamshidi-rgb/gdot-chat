@@ -12,12 +12,12 @@ import { ScreenTopAccent } from "@/components/screen-top-accent";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { ScalePressable } from "@/components/ui/scale-pressable";
-import { useThemePalette } from "@/providers/theme-palette-provider";
+import { useThemeStore } from "@/stores/theme-store";
 
 export default function CreateGroupScreen() {
   const [groupName, setGroupName] = useState("");
   const router = useRouter();
-  const { colors } = useThemePalette();
+  const colors = useThemeStore((state) => state.colors);
   const canSubmit = groupName.trim().length > 0;
   const submitPulse = useSharedValue(0);
 

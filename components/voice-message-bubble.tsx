@@ -16,7 +16,7 @@ import Animated, {
 } from "react-native-reanimated";
 
 import { VoiceWaveformSkia } from "@/components/voice-waveform-skia";
-import { useThemePalette } from "@/providers/theme-palette-provider";
+import { useThemeStore } from "@/stores/theme-store";
 
 const ICON_MS = 200;
 const ICON_EASE = Easing.out(Easing.cubic);
@@ -49,7 +49,8 @@ export function VoiceMessageBubble({
   onActivate,
   onDeactivate,
 }: VoiceMessageBubbleProps) {
-  const { colors, mode } = useThemePalette();
+  const colors = useThemeStore((state) => state.colors);
+  const mode = useThemeStore((state) => state.mode);
   const player = useAudioPlayer(uri, { updateInterval: 20 });
   const status = useAudioPlayerStatus(player);
 

@@ -5,7 +5,7 @@ import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { IconSymbol } from "@/components/ui/icon-symbol";
-import { useThemePalette } from "@/providers/theme-palette-provider";
+import { useThemeStore } from "@/stores/theme-store";
 
 const ICONS = [
   "house.fill",
@@ -15,7 +15,8 @@ const ICONS = [
 
 export function SwipeTabBar({ state, descriptors, navigation }: MaterialTopTabBarProps) {
   const insets = useSafeAreaInsets();
-  const { colors, legacyColors } = useThemePalette();
+  const colors = useThemeStore((state) => state.colors);
+  const legacyColors = useThemeStore((state) => state.legacyColors);
   const bottomPad = Math.max(insets.bottom, Platform.OS === "ios" ? 20 : 14);
   const barHeight = Platform.OS === "ios" ? 104 + bottomPad * 0.12 : 84;
 
