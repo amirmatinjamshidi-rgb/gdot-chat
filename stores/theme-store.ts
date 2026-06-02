@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { Theme } from "@react-navigation/native";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import { useShallow } from "zustand/react/shallow";
 
 import {
   APP_THEMES,
@@ -18,14 +19,7 @@ const STORAGE_KEY = "smash_theme_palette_v1";
 type ThemeState = {
   themeId: ThemeId;
   ready: boolean;
-  _systemMode: "light" | "dark";
-};
-
-type ThemeComputed = {
   mode: "light" | "dark";
-  colors: AppColorScheme;
-  legacyColors: ReturnType<typeof toLegacyColors>;
-  navigationTheme: Theme;
 };
 
 type ThemeActions = {
@@ -34,32 +28,14 @@ type ThemeActions = {
   setSystemMode: (mode: "light" | "dark") => void;
 };
 
-type ThemeStore = ThemeState & ThemeComputed & ThemeActions;
+type ThemeStore = ThemeState & ThemeActions;
 
 export const useThemeStore = create<ThemeStore>()(
   persist(
     (set, get) => ({
       themeId: DEFAULT_THEME_ID,
       ready: false,
-      _systemMode: "dark",
-
-      get mode() {
-        return get()._systemMode;
-      },
-
-      get colors() {
-        const { themeId, _systemMode } = get();
-        return resolveThemeColors(themeId, _systemMode);
-      },
-
-      get legacyColors() {
-        return toLegacyColors(get().colors);
-      },
-
-      get navigationTheme() {
-        const { _systemMode, colors } = get();
-        return buildNavigationTheme(_systemMode, colors);
-      },
+      mode: "light",
 
       initializeTheme: async () => {
         try {
@@ -80,7 +56,7 @@ export const useThemeStore = create<ThemeStore>()(
       },
 
       setSystemMode: (mode: "light" | "dark") => {
-        set({ _systemMode: mode });
+        set({ mode });
       },
     }),
     {
@@ -92,3 +68,22 @@ export const useThemeStore = create<ThemeStore>()(
     },
   ),
 );
+
+// Selector functions to compute derived values
+export const selectColors = (state: ThemeStore): AppColorScheme => {
+  return resolveThemeColors(state.themeId, state.mode);
+};
+
+export const selectLegacyColors = (state: ThemeStore) => {
+  return toLegacyColors(selectColors(state));
+};
+
+export const selectNavigationTheme = (state: ThemeStore): Theme => {
+  return buildNavigationTheme(state.mode, selectColors(state));
+};
+
+// Hooks with shallow comparison for object selectors (prevents infinite re-renders)
+export const useColors = () => useThemeStore(useShallow(selectColors));
+export const useLegacyColors = () => useThemeStore(useShallow(selectLegacyColors));
+/** Prefer `useMemo(() => buildNavigationTheme(mode, colors), [mode, colors])` in UI: `Theme` has nested objects so `useShallow(selectNavigationTheme)` does not stabilize snapshots. */
+export const useNavigationTheme = () => useThemeStore(useShallow(selectNavigationTheme));
