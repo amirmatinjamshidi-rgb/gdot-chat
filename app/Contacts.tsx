@@ -1,27 +1,33 @@
 import { Stack, useRouter } from "expo-router";
-import React from "react";
+import React, { useEffect } from "react";
 import { FlatList, StyleSheet, View } from "react-native";
 
+import { ChatSearchBar } from "@/components/chat-search-bar";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { ScalePressable } from "@/components/ui/scale-pressable";
-import { useThemePalette } from "@/providers/theme-palette-provider";
+import { useThemeStore, useColors } from "@/stores/theme-store";
+import { useContactsStore, type Contact } from "@/stores/contacts-store";
 
 const AVATAR = 46;
 
-const MOCK_CONTACTS = [
-  { id: "1", name: "بابات", status: "Online" as const },
-  { id: "2", name: "Bob", status: "Away" as const },
-  { id: "3", name: "Charlie", status: "Offline" as const },
-  { id: "4", name: "David", status: "Online" as const },
-];
-
 export default function ContactsScreen() {
-  const { colors, mode } = useThemePalette();
+  const colors = useColors();
+  const mode = useThemeStore((state) => state.mode);
   const isDark = mode === "dark";
   const router = useRouter();
 
-  const statusColor = (status: (typeof MOCK_CONTACTS)[number]["status"]) => {
+  const searchQuery = useContactsStore((state) => state.searchQuery);
+  const setSearchQuery = useContactsStore((state) => state.setSearchQuery);
+  const getFilteredContacts = useContactsStore((state) => state.getFilteredContacts);
+  const initializeMockData = useContactsStore((state) => state.initializeMockData);
+  const filteredContacts = getFilteredContacts();
+
+  useEffect(() => {
+    initializeMockData();
+  }, [initializeMockData]);
+
+  const statusColor = (status: Contact["status"]) => {
     if (status === "Online") return colors.success;
     if (status === "Away") return colors.tintMuted;
     return colors.textMuted;
@@ -30,9 +36,17 @@ export default function ContactsScreen() {
   return (
     <ThemedView style={styles.container}>
       <Stack.Screen options={{ title: "Contacts" }} />
+      <ChatSearchBar
+        value={searchQuery}
+        onChangeText={setSearchQuery}
+        visible
+        isDark={isDark}
+        accentHex={colors.tint}
+        glowHex={colors.accentGlow}
+      />
       <FlatList
         style={styles.list}
-        data={MOCK_CONTACTS}
+        data={filteredContacts}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
@@ -74,9 +88,7 @@ export default function ContactsScreen() {
               style={[
                 styles.avatar,
                 {
-                  backgroundColor: isDark
-                    ? colors.backgroundSecondary
-                    : colors.backgroundSecondary,
+                  backgroundColor: colors.backgroundSecondary,
                   borderWidth: 1,
                   borderColor: colors.surfaceBorder,
                 },

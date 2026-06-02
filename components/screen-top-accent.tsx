@@ -2,7 +2,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import React from "react";
 import { StyleSheet, View } from "react-native";
 
-import { useThemePalette } from "@/providers/theme-palette-provider";
+import { useThemeStore, useColors } from "@/stores/theme-store";
 
 const ACCENT_HEIGHT = 112;
 
@@ -10,7 +10,7 @@ const ACCENT_HEIGHT = 112;
  * Solid screen base with a short top gradient band (accent, not full wallpaper).
  */
 export function ScreenTopAccent() {
-  const { colors } = useThemePalette();
+  const colors = useColors();
   return (
     <View
       pointerEvents="none"

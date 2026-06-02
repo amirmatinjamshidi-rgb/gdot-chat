@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import React, { useMemo, useState } from "react";
+import React, { useEffect } from "react";
 import { FlatList, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -9,64 +9,27 @@ import { ScreenTopAccent } from "@/components/screen-top-accent";
 import { ThemedText } from "@/components/themed-text";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { ScalePressable } from "@/components/ui/scale-pressable";
-import { useThemePalette } from "@/providers/theme-palette-provider";
+import { useThemeStore, useColors } from "@/stores/theme-store";
+import { useChatsStore } from "@/stores/chats-store";
 
 const ROW_HEIGHT = 56;
 const AVATAR = 46;
 
-const MOCK_CHATS = [
-  {
-    id: "1",
-    name: "Alice",
-    lastMessage: "Hey, how are you?",
-    time: "10:30 AM",
-    unread: 2,
-  },
-  {
-    id: "2",
-    name: "Bob",
-    lastMessage: "Did you see the latest update?",
-    time: "Yesterday",
-    unread: 0,
-  },
-  {
-    id: "3",
-    name: "Charlie",
-    lastMessage: "Meeting at 5?",
-    time: "Yesterday",
-    unread: 1,
-  },
-  {
-    id: "4",
-    name: "Diana",
-    lastMessage: "Sent the files.",
-    time: "Mon",
-    unread: 0,
-  },
-  {
-    id: "5",
-    name: "Eve",
-    lastMessage: "Call me when free.",
-    time: "Sun",
-    unread: 3,
-  },
-];
-
 export default function ChatsScreen() {
-  const { colors, mode } = useThemePalette();
+  const colors = useColors();
+  const mode = useThemeStore((state) => state.mode);
   const isDark = mode === "dark";
   const router = useRouter();
-  const [query, setQuery] = useState("");
+  
+  const searchQuery = useChatsStore((state) => state.searchQuery);
+  const setSearchQuery = useChatsStore((state) => state.setSearchQuery);
+  const getFilteredChats = useChatsStore((state) => state.getFilteredChats);
+  const initializeMockData = useChatsStore((state) => state.initializeMockData);
+  const filteredChats = getFilteredChats();
 
-  const filteredChats = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return MOCK_CHATS;
-    return MOCK_CHATS.filter(
-      (c) =>
-        c.name.toLowerCase().includes(q) ||
-        c.lastMessage.toLowerCase().includes(q),
-    );
-  }, [query]);
+  useEffect(() => {
+    initializeMockData();
+  }, [initializeMockData]);
 
   return (
     <View style={styles.root}>
@@ -109,8 +72,8 @@ export default function ChatsScreen() {
         </View>
 
         <ChatSearchBar
-          value={query}
-          onChangeText={setQuery}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
           visible
           isDark={isDark}
           accentHex={colors.tint}
@@ -219,14 +182,14 @@ export default function ChatsScreen() {
                 lightColor={colors.text}
                 darkColor={colors.text}
               >
-                {query.trim() ? "No matching chats" : "No chats yet"}
+                {searchQuery.trim() ? "No matching chats" : "No chats yet"}
               </ThemedText>
               <ThemedText
                 style={[styles.emptyHint, { color: colors.textMuted }]}
                 lightColor={colors.textMuted}
                 darkColor={colors.textMuted}
               >
-                {query.trim()
+                {searchQuery.trim()
                   ? "Try a different search."
                   : "Start a chat from your contacts when available."}
               </ThemedText>

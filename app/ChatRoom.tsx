@@ -46,6 +46,7 @@ import {
   LOCK_DRAG_PX,
   type HoldRecordControlsHandle,
 } from "@/components/hold-record-controls";
+import { RecordingSlideMeter } from "@/components/recording-slide-meter";
 import { ScreenTopAccent } from "@/components/screen-top-accent";
 import { ThemedText } from "@/components/themed-text";
 import {
@@ -59,8 +60,13 @@ import {
   VideoMessageBubble,
 } from "@/components/video-message-bubble";
 import { VoiceMessageBubble } from "@/components/voice-message-bubble";
-import { RecordingSlideMeter } from "@/components/recording-slide-meter";
-import { useThemePalette } from "@/providers/theme-palette-provider";
+import {
+  useInputStore,
+  type ComposerMode as StoreComposerMode,
+} from "@/stores/input-store";
+import { useMessagesStore, type Message } from "@/stores/messages-store";
+import { useRecordingStore } from "@/stores/recording-store";
+import { useColors, useThemeStore } from "@/stores/theme-store";
 const MIN_RECORD_MS = 1000;
 const HOLD_MS = 320;
 const TAP_MAX_MS = 260;
@@ -70,39 +76,11 @@ const FAB_CANCEL_DRAG_PX = 100;
 
 /** Min row height when a video bubble is scaled up during playback (avoids clip / layout jump). */
 const VIDEO_BUBBLE_PLAYING_MIN_HEIGHT = Math.max(
-  260,
-  Math.ceil(VIDEO_BUBBLE_SIZE * VIDEO_BUBBLE_PLAY_SCALE) + 48,
+  160,
+  Math.ceil(VIDEO_BUBBLE_SIZE * VIDEO_BUBBLE_PLAY_SCALE) + 28,
 );
 
-type ComposerMode = "send" | "voice" | "video";
-
-type MessageRow = {
-  id: string;
-  sender: string;
-  time: string;
-  kind: "text" | "voice" | "video";
-  text?: string;
-  durationMs?: number;
-  mediaUri?: string;
-};
-
-const MOCK_MESSAGES: MessageRow[] = [
-  { id: "1", text: "Hey Alice!", sender: "me", time: "10:30 AM", kind: "text" },
-  {
-    id: "2",
-    text: "Hi! How is the project going?",
-    sender: "Alice",
-    time: "10:31 AM",
-    kind: "text",
-  },
-  {
-    id: "3",
-    text: "It is going great! Just setting up the routes.",
-    sender: "me",
-    time: "10:32 AM",
-    kind: "text",
-  },
-];
+type ComposerMode = StoreComposerMode;
 
 function formatDuration(ms: number) {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -160,23 +138,40 @@ function ComposerFab({
 }
 
 export default function ChatRoomScreen() {
-  const { name } = useLocalSearchParams<{ id: string; name: string }>();
-  const [message, setMessage] = useState("");
-  const [messages, setMessages] = useState<MessageRow[]>(MOCK_MESSAGES);
-  const [composerMode, setComposerMode] = useState<ComposerMode>("send");
+  const { id, name } = useLocalSearchParams<{ id: string; name: string }>();
+  const chatId = id || "default";
+
   const [composerError, setComposerError] = useState<string | null>(null);
   const [videoSessionActive, setVideoSessionActive] = useState(false);
   const [voiceRecordingActive, setVoiceRecordingActive] = useState(false);
+
+  const initializeMockMessages = useMessagesStore(
+    (state) => state.initializeMockMessages,
+  );
+  const getMessagesForChat = useMessagesStore(
+    (state) => state.getMessagesForChat,
+  );
+  const addMessage = useMessagesStore((state) => state.addMessage);
+  const activePlaybackId = useMessagesStore((state) => state.activePlaybackId);
+  const setActivePlayback = useMessagesStore(
+    (state) => state.setActivePlayback,
+  );
+
+  const draft = useInputStore((state) => state.getDraft(chatId));
+  const setDraft = useInputStore((state) => state.setDraft);
+  const clearDraft = useInputStore((state) => state.clearDraft);
+  const composerMode = useInputStore((state) => state.getComposerMode(chatId));
+  const setComposerMode = useInputStore((state) => state.setComposerMode);
+  const cycleComposerMode = useInputStore((state) => state.cycleComposerMode);
+  const messages = getMessagesForChat(chatId);
   const [voiceLocked, setVoiceLocked] = useState(false);
   const [videoLocked, setVideoLocked] = useState(false);
   const [videoRecordingActive, setVideoRecordingActive] = useState(false);
   const recordingLive = voiceRecordingActive || videoRecordingActive;
   const [dragY, setDragY] = useState(0);
   const [recordHudTick, setRecordHudTick] = useState(0);
-  const [playingVideoId, setPlayingVideoId] = useState<string | null>(null);
-  const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
   const [inputFocused, setInputFocused] = useState(false);
-  const listRef = useRef<FlatList<MessageRow>>(null);
+  const listRef = useRef<FlatList<Message>>(null);
   const inputRef = useRef<TextInput>(null);
   const holdRecordControlsRef = useRef<HoldRecordControlsHandle>(null);
   const slideCancelFabX = useSharedValue(0);
@@ -185,7 +180,8 @@ export default function ChatRoomScreen() {
   const neonVisible = useSharedValue(0);
 
   const router = useRouter();
-  const { colors, mode } = useThemePalette();
+  const colors = useColors();
+  const mode = useThemeStore((state) => state.mode);
   const isDark = mode === "dark";
   const contactName = useMemo(() => name || "Chat", [name]);
 
@@ -202,6 +198,10 @@ export default function ChatRoomScreen() {
         }),
     [router, recordingLive],
   );
+
+  useEffect(() => {
+    initializeMockMessages(chatId);
+  }, [chatId, initializeMockMessages]);
 
   useEffect(() => {
     const id = requestAnimationFrame(() => {
@@ -307,7 +307,7 @@ export default function ChatRoomScreen() {
 
   const resetComposerAfterSend = useCallback(() => {
     holdRecordControlsRef.current?.resetLayout();
-    setComposerMode("send");
+    setComposerMode(chatId, "send");
     setDragY(0);
     setVoiceLocked(false);
     setVideoLocked(false);
@@ -317,7 +317,8 @@ export default function ChatRoomScreen() {
     holdArmedRef.current = false;
     recordingLiveRef.current = false;
     voiceRecordingLiveRef.current = false;
-  }, []);
+    useRecordingStore.getState().cancelRecording();
+  }, [chatId, setComposerMode]);
 
   const clearHoldTimer = useCallback(() => {
     if (holdTimerRef.current) {
@@ -354,6 +355,7 @@ export default function ChatRoomScreen() {
       return () => {
         voiceStartGenRef.current += 1;
         clearHoldTimer();
+        useRecordingStore.getState().cancelRecording();
         if (voiceRecordingLiveRef.current) {
           voiceRecordingLiveRef.current = false;
           void safeStopVoiceRecording();
@@ -365,6 +367,7 @@ export default function ChatRoomScreen() {
   useEffect(() => {
     return () => {
       clearHoldTimer();
+      useRecordingStore.getState().cancelRecording();
       voiceStartGenRef.current += 1;
       if (videoSessionActiveRef.current) {
         void Promise.resolve(videoRef.current?.stopRecording()).catch(() => {});
@@ -383,30 +386,41 @@ export default function ChatRoomScreen() {
   }, [messages.length]);
 
   const appendMessage = useCallback(
-    (row: Omit<MessageRow, "id" | "time"> & { id?: string; time?: string }) => {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: row.id ?? `${Date.now()}`,
-          time: row.time ?? "Now",
-          ...row,
-        },
-      ]);
+    (row: {
+      kind: "text" | "voice" | "video";
+      text?: string;
+      durationMs?: number;
+      mediaUri?: string;
+      sender: string;
+      id?: string;
+      time?: string;
+    }) => {
+      addMessage(chatId, {
+        id: row.id ?? `${Date.now()}`,
+        chatId,
+        time: row.time ?? "Now",
+        kind: row.kind,
+        text: row.text,
+        durationMs: row.durationMs,
+        mediaUri: row.mediaUri,
+        sender: row.sender,
+        isMine: row.sender === "me",
+      });
     },
-    [],
+    [chatId, addMessage],
   );
 
   const sendTextMessage = useCallback(() => {
-    const trimmedMessage = message.trim();
+    const trimmedMessage = draft.trim();
     if (!trimmedMessage) return;
     appendMessage({
       kind: "text",
       text: trimmedMessage,
       sender: "me",
     });
-    setMessage("");
+    clearDraft(chatId);
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  }, [appendMessage, message]);
+  }, [appendMessage, draft, chatId, clearDraft]);
 
   const finishVoiceCapture = useCallback(async () => {
     if (!voiceRecordingLiveRef.current) return;
@@ -443,11 +457,13 @@ export default function ChatRoomScreen() {
     } finally {
       setVoiceRecordingActive(false);
       setVoiceLocked(false);
+      useRecordingStore.getState().stopRecording();
     }
   }, [appendMessage, resetComposerAfterSend, safeStopVoiceRecording]);
 
   const discardVoiceRecording = useCallback(async () => {
     voiceRecordingLiveRef.current = false;
+    useRecordingStore.getState().cancelRecording();
     await safeStopVoiceRecording();
     setVoiceRecordingActive(false);
     setVoiceLocked(false);
@@ -497,7 +513,8 @@ export default function ChatRoomScreen() {
     voiceRecordStartedAt.current = Date.now();
     setVoiceLocked(false);
     setVoiceRecordingActive(true);
-  }, [safeStopVoiceRecording]);
+    useRecordingStore.getState().startRecording(chatId);
+  }, [chatId, safeStopVoiceRecording]);
 
   const finishVideoCapture = useCallback(async () => {
     videoStartGenRef.current += 1;
@@ -517,18 +534,21 @@ export default function ChatRoomScreen() {
         mediaUri: file.uri,
         durationMs: dur,
         sender: "me" as const,
-        text: "Video message",
+        // text: "Video message",
       };
       appendMessage(payload);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       resetComposerAfterSend();
     } catch {
       setComposerError("Could not save the video message.");
+    } finally {
+      useRecordingStore.getState().stopRecording();
     }
   }, [appendMessage, resetComposerAfterSend]);
 
   const discardVideoRecording = useCallback(async () => {
     videoStartGenRef.current += 1;
+    useRecordingStore.getState().cancelRecording();
     try {
       await videoRef.current?.stopRecording();
     } catch {
@@ -588,9 +608,17 @@ export default function ChatRoomScreen() {
 
   useEffect(() => {
     if (!recordingLive) return;
-    const id = setInterval(() => setRecordHudTick((n) => n + 1), 200);
+    const id = setInterval(() => {
+      setRecordHudTick((n) => n + 1);
+      const ms = voiceRecordingActive
+        ? Date.now() - voiceRecordStartedAt.current
+        : videoRecordingActive
+          ? Date.now() - videoRecordStartedAt.current
+          : 0;
+      useRecordingStore.getState().updateRecordingTime(ms);
+    }, 200);
     return () => clearInterval(id);
-  }, [recordingLive]);
+  }, [recordingLive, voiceRecordingActive, videoRecordingActive]);
 
   useEffect(() => {
     if (!videoRecordingActive) return;
@@ -607,9 +635,11 @@ export default function ChatRoomScreen() {
     const mode = composerModeRef.current;
     if (mode === "voice" && !voiceLockedRef.current) {
       setVoiceLocked(true);
+      useRecordingStore.getState().lockRecording();
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     } else if (mode === "video" && !videoLockedRef.current) {
       setVideoLocked(true);
+      useRecordingStore.getState().lockRecording();
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
   }, []);
@@ -662,9 +692,9 @@ export default function ChatRoomScreen() {
 
     if (elapsed <= TAP_MAX_MS) {
       if (mode === "voice") {
-        setComposerMode("video");
+        setComposerMode(chatId, "video");
       } else if (mode === "video") {
-        setComposerMode("send");
+        setComposerMode(chatId, "send");
       }
     }
   }, [
@@ -706,6 +736,7 @@ export default function ChatRoomScreen() {
                   recordingLiveRef.current = true;
                   setVideoRecordingActive(true);
                   videoRecordingActiveRef.current = true;
+                  useRecordingStore.getState().startRecording(chatId);
                 }
               }
             } catch {
@@ -780,6 +811,7 @@ export default function ChatRoomScreen() {
         },
       }),
     [
+      chatId,
       clearHoldTimer,
       discardVideoRecording,
       discardVoiceRecording,
@@ -805,11 +837,9 @@ export default function ChatRoomScreen() {
     voiceRecordingActive && composerMode === "voice";
 
   const showVideoRecordingMeter =
-    Platform.OS !== "web" &&
-    videoRecordingActive &&
-    composerMode === "video";
+    Platform.OS !== "web" && videoRecordingActive && composerMode === "video";
 
-  const isSendOnly = message.trim().length > 0;
+  const isSendOnly = draft.trim().length > 0;
 
   return (
     <SafeAreaView
@@ -904,24 +934,23 @@ export default function ChatRoomScreen() {
                           uri={item.mediaUri}
                           seed={item.id}
                           durationMs={item.durationMs}
-                          isMine={item.sender === "me"}
-                          isActive={playingVoiceId === item.id}
+                          isMine={item.isMine ?? item.sender === "me"}
+                          isActive={activePlaybackId === item.id}
                           onActivate={() => {
-                            setPlayingVoiceId(item.id);
-                            if (playingVideoId) setPlayingVideoId(null);
+                            setActivePlayback(item.id);
                           }}
-                          onDeactivate={() =>
-                            setPlayingVoiceId((cur) =>
-                              cur === item.id ? null : cur,
-                            )
-                          }
+                          onDeactivate={() => {
+                            if (activePlaybackId === item.id) {
+                              setActivePlayback(null);
+                            }
+                          }}
                         />
                       ) : null}
                       {item.kind === "video" && item.mediaUri ? (
                         <View
                           style={[
                             styles.videoBubbleWrap,
-                            playingVideoId === item.id &&
+                            activePlaybackId === item.id &&
                               styles.videoBubbleWrapPlaying,
                           ]}
                         >
@@ -929,16 +958,15 @@ export default function ChatRoomScreen() {
                             uri={item.mediaUri}
                             isMine={item.sender === "me"}
                             durationMs={item.durationMs}
-                            isActive={playingVideoId === item.id}
+                            isActive={activePlaybackId === item.id}
                             onActivate={() => {
-                              setPlayingVideoId(item.id);
-                              if (playingVoiceId) setPlayingVoiceId(null);
+                              setActivePlayback(item.id);
                             }}
-                            onDeactivate={() =>
-                              setPlayingVideoId((cur) =>
-                                cur === item.id ? null : cur,
-                              )
-                            }
+                            onDeactivate={() => {
+                              if (activePlaybackId === item.id) {
+                                setActivePlayback(null);
+                              }
+                            }}
                           />
                         </View>
                       ) : null}
@@ -950,7 +978,7 @@ export default function ChatRoomScreen() {
                         <ThemedText
                           style={[styles.videoLabel, { color: timeColor }]}
                         >
-                          Video message
+                          {/* Video message */}
                         </ThemedText>
                       ) : null}
                       <ThemedText
@@ -1018,8 +1046,8 @@ export default function ChatRoomScreen() {
                           ]}
                           placeholder="Type a message..."
                           placeholderTextColor={colors.textMuted}
-                          value={message}
-                          onChangeText={setMessage}
+                          value={draft}
+                          onChangeText={(text) => setDraft(chatId, text)}
                           onFocus={() => setInputFocused(true)}
                           onBlur={() => setInputFocused(false)}
                         />
@@ -1032,7 +1060,9 @@ export default function ChatRoomScreen() {
                         isSendOnly={isSendOnly}
                         composerMode={composerMode}
                         onSendText={sendTextMessage}
-                        onCycleSendEmpty={() => setComposerMode("voice")}
+                        onCycleSendEmpty={() =>
+                          setComposerMode(chatId, "voice")
+                        }
                         fabColor={colors.primary}
                         iconColor={colors.onPrimary}
                       />
@@ -1113,12 +1143,12 @@ const styles = StyleSheet.create({
     overflow: "visible",
   },
   videoLabel: {
-    fontSize: 12,
-    marginTop: 2,
+    fontSize: 0,
+    marginTop: 1,
   },
   messageBubble: {
-    padding: 12,
-    borderRadius: 18,
+    padding: 4,
+    borderRadius: 10,
     maxWidth: "80%",
   },
   myMessage: {
@@ -1135,15 +1165,15 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   videoBubbleWrap: {
-    marginBottom: 8,
+    marginBottom: 12,
     alignItems: "center",
     backgroundColor: "transparent",
     overflow: "visible",
-    minHeight: VIDEO_BUBBLE_SIZE + 36,
+    minHeight: VIDEO_BUBBLE_SIZE + 16,
   },
   videoBubbleWrapPlaying: {
     minHeight: VIDEO_BUBBLE_PLAYING_MIN_HEIGHT,
-    marginVertical: 14,
+    marginVertical: 40,
   },
   composerShell: {
     borderTopWidth: 1,

@@ -15,7 +15,7 @@ import React, {
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
 import { CircularProgressRing } from "@/components/circular-progress-ring";
-import { useThemePalette } from "@/providers/theme-palette-provider";
+import { useThemeStore, useColors } from "@/stores/theme-store";
 
 export const VIDEO_RECORD_MAX_MS = 90_000;
 /** Visible camera disc */
@@ -46,7 +46,7 @@ function formatDuration(ms: number) {
 
 export const VideoMessage = forwardRef<VideoMessageHandle, VideoMessageProps>(
   function VideoMessage({ active, elapsedMs = 0 }, ref) {
-    const { colors } = useThemePalette();
+    const colors = useColors();
     const cameraRef = useRef<CameraViewRef>(null);
     const [cameraPermission, requestCameraPermission] = useCameraPermissions();
     const [micPermission, requestMicPermission] = useMicrophonePermissions();

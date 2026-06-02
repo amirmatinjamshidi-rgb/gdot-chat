@@ -2,12 +2,14 @@ import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { APP_THEMES, type ThemeId } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import { useThemePalette } from "@/providers/theme-palette-provider";
+import { useThemeStore, useColors } from "@/stores/theme-store";
 import { Stack } from "expo-router";
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 
 export default function ProfileThemesScreen() {
-  const { themeId, setThemeId, colors } = useThemePalette();
+  const themeId = useThemeStore((state) => state.themeId);
+  const setThemeId = useThemeStore((state) => state.setThemeId);
+  const colors = useColors();
   const colorScheme = useColorScheme() ?? "light";
   const isDark = colorScheme === "dark";
 

@@ -22,8 +22,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { ScreenTopAccent } from "@/components/screen-top-accent";
 import { ThemedText } from "@/components/themed-text";
 import { otpSchema, type OtpInput } from "@/lib/auth/schemas";
-import { useAuth } from "@/providers/auth-provider";
-import { useThemePalette } from "@/providers/theme-palette-provider";
+import { useAuthStore } from "@/stores/auth-store";
+import { useThemeStore, useColors } from "@/stores/theme-store";
 
 type Params = {
   method?: "phone" | "email";
@@ -35,8 +35,8 @@ const OTP_LEN = 6;
 export default function VerifyOtpScreen() {
   const router = useRouter();
   const { method = "phone", value = "" } = useLocalSearchParams<Params>();
-  const { signIn, isAuthenticated, isReady } = useAuth();
-  const { colors } = useThemePalette();
+  const { signIn, isAuthenticated, isReady } = useAuthStore();
+  const colors = useColors();
   const inputRef = useRef<TextInput>(null);
   const [status, setStatus] = useState<"idle" | "error" | "success">("idle");
   const [submitting, setSubmitting] = useState(false);
