@@ -1,4 +1,4 @@
-import { useThemeStore } from "@/stores/theme-store";
+import { useThemeStore, useColors } from "@/stores/theme-store";
 import React, { useEffect } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import Animated, {
@@ -37,7 +37,7 @@ export function RecordingSlideMeter({
   elapsedMs,
   onSlideCancel,
 }: RecordingSlideMeterProps) {
-  const colors = useThemeStore((state) => state.colors);
+  const colors = useColors();
   const glowOpacity = useSharedValue(0.7);
 
   useEffect(() => {

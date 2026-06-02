@@ -4,11 +4,11 @@ import { StyleSheet, View } from "react-native";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { ScalePressable } from "@/components/ui/scale-pressable";
-import { useThemeStore } from "@/stores/theme-store";
+import { useThemeStore, useColors } from "@/stores/theme-store";
 
 export default function ModalScreen() {
   const router = useRouter();
-  const colors = useThemeStore((state) => state.colors);
+  const colors = useColors();
 
   return (
     <ThemedView style={styles.container}>

@@ -1,7 +1,7 @@
 import React, { useMemo } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 
-import { useThemeStore } from "@/stores/theme-store";
+import { useThemeStore, useColors } from "@/stores/theme-store";
 
 export const BAR_COUNT = 44;
 export const BAR_WIDTH = 2.5;
@@ -38,7 +38,7 @@ type VoiceWaveformProps = {
 };
 
 export function VoiceWaveform({ seed, progress, onSeek }: VoiceWaveformProps) {
-  const colors = useThemeStore((state) => state.colors);
+  const colors = useColors();
   const bars = useMemo(() => buildWaveform(seed), [seed]);
   const clamped = Math.min(1, Math.max(0, progress));
   const playedBars = clamped * bars.length;

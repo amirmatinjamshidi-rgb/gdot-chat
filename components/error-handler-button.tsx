@@ -8,7 +8,7 @@ import {
 } from "react-native";
 
 import { ThemedText } from "@/components/themed-text";
-import { useThemeStore } from "@/stores/theme-store";
+import { useThemeStore, useColors } from "@/stores/theme-store";
 
 type ErrorHandlerButtonProps = {
   /** Shown when a gesture was too short (e.g. under one second). */
@@ -21,7 +21,7 @@ type ErrorHandlerButtonProps = {
  * Modal-style error surface for the chat composer (backdrop + card).
  */
 export function ErrorHandlerButton({ message, onDismiss }: ErrorHandlerButtonProps) {
-  const colors = useThemeStore((state) => state.colors);
+  const colors = useColors();
   const { width } = useWindowDimensions();
   const cardMax = Math.min(360, width - 48);
 

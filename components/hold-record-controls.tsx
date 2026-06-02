@@ -19,7 +19,7 @@ import Animated, {
   type SharedValue,
 } from "react-native-reanimated";
 
-import { useThemeStore } from "@/stores/theme-store";
+import { useThemeStore, useColors } from "@/stores/theme-store";
 
 const FAB = 44;
 const LOCK_SIZE = 40;
@@ -80,7 +80,7 @@ export const HoldRecordControls = forwardRef<
   },
   ref,
 ) {
-  const colors = useThemeStore((state) => state.colors);
+  const colors = useColors();
   const dragUp = Math.max(0, -dragY);
   const lockProgress = Math.min(1, dragUp / LOCK_DRAG_PX);
   const lockVisible = recording && !locked && lockProgress > 0.05;

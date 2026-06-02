@@ -5,7 +5,7 @@ import { FlatList, StyleSheet, View } from "react-native";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { ScalePressable } from "@/components/ui/scale-pressable";
-import { useThemeStore } from "@/stores/theme-store";
+import { useThemeStore, useColors } from "@/stores/theme-store";
 
 const AVATAR = 46;
 
@@ -17,7 +17,7 @@ const MOCK_CONTACTS = [
 ];
 
 export default function ContactsScreen() {
-  const colors = useThemeStore((state) => state.colors);
+  const colors = useColors();
   const mode = useThemeStore((state) => state.mode);
   const isDark = mode === "dark";
   const router = useRouter();
