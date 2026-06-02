@@ -53,11 +53,10 @@ export async function registerUser(params: {
   try {
     auth = await params.authApi.register(registerBody);
   } catch (e) {
-    if (e instanceof ApiError) {
-      auth = offlineAuthResult(username);
-    } else {
-      auth = offlineAuthResult(username);
+    if (e instanceof ApiError && e.status >= 400 && e.status < 500) {
+      throw e;
     }
+    auth = offlineAuthResult(username);
   }
 
   if (!(await params.kekManager.hasKek())) {

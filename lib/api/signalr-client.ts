@@ -21,12 +21,14 @@ export class SignalRClient {
     }
 
     const token = await this.authStore.getAccessToken();
-    if (!token) return;
+    if (!token || token.startsWith("offline.")) {
+      return;
+    }
 
     this.connection = new signalR.HubConnectionBuilder()
       .withUrl(`${SIGNALR_HUB_URL}?access_token=${encodeURIComponent(token)}`)
       .withAutomaticReconnect()
-      .configureLogging(signalR.LogLevel.Warning)
+      .configureLogging(signalR.LogLevel.None)
       .build();
 
     this.connection.on(
@@ -36,7 +38,11 @@ export class SignalRClient {
       },
     );
 
-    await this.connection.start();
+    try {
+      await this.connection.start();
+    } catch {
+      this.connection = null;
+    }
   }
 
   async disconnect(): Promise<void> {
