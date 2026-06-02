@@ -916,6 +916,40 @@ Another Postgres is using the port. Stop it or change the port in `server/docker
 
 This project **requires a development build**, not Expo Go.
 
+### Android build: `Could not find manifest-merger-31.5.0.jar`
+
+Gradle downloaded Android build-tool **metadata** but failed to download the actual **JAR** file, leaving a broken cache entry.
+
+**Fix (run from project root):**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\fix-android-gradle.ps1
+npx expo run:android
+```
+
+Or manually:
+
+```powershell
+cd android
+.\gradlew.bat --stop
+Remove-Item -Recurse -Force "$env:USERPROFILE\.gradle\caches\modules-2\files-2.1\com.android.tools.build" -ErrorAction SilentlyContinue
+cd ..
+npx expo run:android
+```
+
+**Also set Android SDK path** (if not already set):
+
+```powershell
+[System.Environment]::SetEnvironmentVariable("ANDROID_HOME", "$env:LOCALAPPDATA\Android\Sdk", "User")
+```
+
+Restart PowerShell after running that, then try again.
+
+**If it still fails:** your network may block `dl.google.com` (Google Maven). Try:
+
+1. A VPN, or disable antivirus web scanning temporarily
+2. Build in the cloud instead: `eas build --profile development --platform android`
+
 ### EAS build fails
 
 ```powershell
