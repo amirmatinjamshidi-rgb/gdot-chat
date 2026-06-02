@@ -1,29 +1,31 @@
-import React, { useEffect, useState } from "react";
-import { StyleSheet, TextInput } from "react-native";
 import { Stack, useRouter } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
+import React, { useEffect, useState } from "react";
+import { StyleSheet, TextInput, View } from "react-native";
 import Animated, {
-  FadeIn,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
 } from "react-native-reanimated";
+import { SafeAreaView } from "react-native-safe-area-context";
 
+import { ScreenTopAccent } from "@/components/screen-top-accent";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { ScalePressable } from "@/components/ui/scale-pressable";
-import { useColorScheme } from "@/hooks/use-color-scheme";
+import { useThemePalette } from "@/providers/theme-palette-provider";
 
 export default function CreateGroupScreen() {
-  const [groupName, setGroupName] = useState('');
+  const [groupName, setGroupName] = useState("");
   const router = useRouter();
-  const colorScheme = useColorScheme() ?? 'light';
-  const isDark = colorScheme === 'dark';
+  const { colors } = useThemePalette();
   const canSubmit = groupName.trim().length > 0;
   const submitPulse = useSharedValue(0);
 
   useEffect(() => {
-    submitPulse.value = withSpring(canSubmit ? 1 : 0, { damping: 14, stiffness: 220 });
+    submitPulse.value = withSpring(canSubmit ? 1 : 0, {
+      damping: 14,
+      stiffness: 220,
+    });
   }, [canSubmit, submitPulse]);
 
   const submitAnim = useAnimatedStyle(() => ({
@@ -40,24 +42,35 @@ export default function CreateGroupScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView
+      style={[styles.safeArea, { backgroundColor: colors.background }]}
+    >
+      <ScreenTopAccent />
       <ThemedView style={styles.container}>
-        <Stack.Screen options={{ title: 'Create Group' }} />
-        <Animated.View entering={FadeIn.duration(320)} style={styles.form}>
-          <ThemedText type="subtitle">Group Details</ThemedText>
-          <ThemedText style={styles.helperText} lightColor="#64748B" darkColor="#AAB4C3">
-            Name your group now. Member selection will plug into the contacts flow next.
+        <Stack.Screen options={{ title: "Create group" }} />
+        <View style={styles.form}>
+          <ThemedText type="subtitle" style={{ color: colors.text }}>
+            Group name
+          </ThemedText>
+          <ThemedText
+            style={[styles.helperText, { color: colors.textMuted }]}
+            lightColor={colors.textMuted}
+            darkColor={colors.textMuted}
+          >
+            Enter a name for this group. Member selection will use your contacts
+            list when that step is wired up.
           </ThemedText>
           <TextInput
             style={[
               styles.input,
               {
-                backgroundColor: isDark ? '#1F2937' : '#F3F4F6',
-                color: isDark ? 'white' : 'black',
+                backgroundColor: colors.inputFill,
+                color: colors.text,
+                borderColor: colors.inputBorder,
               },
             ]}
-            placeholder="Group Name"
-            placeholderTextColor={isDark ? '#9CA3AF' : '#6B7280'}
+            placeholder="Group name"
+            placeholderTextColor={colors.textMuted}
             value={groupName}
             onChangeText={setGroupName}
           />
@@ -65,14 +78,27 @@ export default function CreateGroupScreen() {
             <ScalePressable
               style={[
                 styles.button,
-                { backgroundColor: canSubmit ? '#3B82F6' : '#9CA3AF' },
+                canSubmit
+                  ? { backgroundColor: colors.tint }
+                  : {
+                      backgroundColor: colors.surfaceElevated,
+                      borderWidth: 1,
+                      borderColor: colors.surfaceBorder,
+                    },
               ]}
               disabled={!canSubmit}
-              onPress={createNewGroup}>
-              <ThemedText style={styles.buttonText}>Create Group</ThemedText>
+              onPress={createNewGroup}
+            >
+              <ThemedText
+                style={styles.buttonText}
+                lightColor={canSubmit ? colors.onPrimary : colors.textMuted}
+                darkColor={canSubmit ? colors.onPrimary : colors.textMuted}
+              >
+                Create group
+              </ThemedText>
             </ScalePressable>
           </Animated.View>
-        </Animated.View>
+        </View>
       </ThemedView>
     </SafeAreaView>
   );
@@ -85,6 +111,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 20,
+    backgroundColor: "transparent",
   },
   form: {
     gap: 16,
@@ -98,17 +125,17 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 16,
     fontSize: 16,
+    borderWidth: 1,
   },
   button: {
     height: 50,
     borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     marginTop: 8,
   },
   buttonText: {
-    color: 'white',
-    fontWeight: 'bold',
+    fontWeight: "700",
     fontSize: 16,
   },
 });

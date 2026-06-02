@@ -1,24 +1,31 @@
 import { Stack, useRouter } from "expo-router";
 import React from "react";
 import { FlatList, StyleSheet, View } from "react-native";
-import Animated, { FadeInLeft } from "react-native-reanimated";
 
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { ScalePressable } from "@/components/ui/scale-pressable";
-import { useColorScheme } from "@/hooks/use-color-scheme";
+import { useThemePalette } from "@/providers/theme-palette-provider";
+
+const AVATAR = 46;
 
 const MOCK_CONTACTS = [
-  { id: "1", name: "بابات", status: "Online" },
-  { id: "2", name: "Bob", status: "Away" },
-  { id: "3", name: "Charlie", status: "Offline" },
-  { id: "4", name: "David", status: "Online" },
+  { id: "1", name: "بابات", status: "Online" as const },
+  { id: "2", name: "Bob", status: "Away" as const },
+  { id: "3", name: "Charlie", status: "Offline" as const },
+  { id: "4", name: "David", status: "Online" as const },
 ];
 
 export default function ContactsScreen() {
-  const colorScheme = useColorScheme() ?? "light";
-  const isDark = colorScheme === "dark";
+  const { colors, mode } = useThemePalette();
+  const isDark = mode === "dark";
   const router = useRouter();
+
+  const statusColor = (status: (typeof MOCK_CONTACTS)[number]["status"]) => {
+    if (status === "Online") return colors.success;
+    if (status === "Away") return colors.tintMuted;
+    return colors.textMuted;
+  };
 
   return (
     <ThemedView style={styles.container}>
@@ -27,49 +34,81 @@ export default function ContactsScreen() {
         style={styles.list}
         data={MOCK_CONTACTS}
         keyExtractor={(item) => item.id}
-        renderItem={({ item, index }) => (
-          <Animated.View
-            entering={FadeInLeft.delay(Math.min(index, 10) * 40).springify()}
-          >
-            <ScalePressable
-              style={styles.contactItem}
-              onPress={() =>
-                router.push({
-                  pathname: "/ChatRoom",
-                  params: { id: item.id, name: item.name },
-                })
-              }
+        contentContainerStyle={styles.listContent}
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <ThemedText
+              type="defaultSemiBold"
+              style={{ color: colors.text }}
+              lightColor={colors.text}
+              darkColor={colors.text}
             >
-              <View
-                style={[
-                  styles.avatar,
-                  { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
-                ]}
-              >
-                <ThemedText>{item.name[0]}</ThemedText>
-              </View>
-              <View>
-                <ThemedText type="defaultSemiBold">{item.name}</ThemedText>
-                <ThemedText
-                  style={[
-                    styles.statusText,
-                    { color: item.status === "Online" ? "#10B981" : "#6B7280" },
-                  ]}
-                >
-                  {item.status}
-                </ThemedText>
-              </View>
-            </ScalePressable>
-          </Animated.View>
-        )}
-        ItemSeparatorComponent={() => (
-          <View
+              No contacts
+            </ThemedText>
+            <ThemedText
+              style={[styles.emptyHint, { color: colors.textMuted }]}
+              lightColor={colors.textMuted}
+              darkColor={colors.textMuted}
+            >
+              Sync or import contacts when that feature is enabled.
+            </ThemedText>
+          </View>
+        }
+        renderItem={({ item }) => (
+          <ScalePressable
             style={[
-              styles.separator,
-              { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
+              styles.row,
+              {
+                backgroundColor: colors.surfaceElevated,
+                borderColor: colors.surfaceBorder,
+              },
             ]}
-          />
+            onPress={() =>
+              router.push({
+                pathname: "/ChatRoom",
+                params: { id: item.id, name: item.name },
+              })
+            }
+          >
+            <View
+              style={[
+                styles.avatar,
+                {
+                  backgroundColor: isDark
+                    ? colors.backgroundSecondary
+                    : colors.backgroundSecondary,
+                  borderWidth: 1,
+                  borderColor: colors.surfaceBorder,
+                },
+              ]}
+            >
+              <ThemedText
+                style={[styles.avatarLetter, { color: colors.primary }]}
+                lightColor={colors.primary}
+                darkColor={colors.primary}
+              >
+                {item.name[0]}
+              </ThemedText>
+            </View>
+            <View style={styles.rowBody}>
+              <ThemedText
+                type="defaultSemiBold"
+                numberOfLines={1}
+                style={[styles.name, { color: colors.text }]}
+                lightColor={colors.text}
+                darkColor={colors.text}
+              >
+                {item.name}
+              </ThemedText>
+              <ThemedText
+                style={[styles.statusText, { color: statusColor(item.status) }]}
+              >
+                {item.status}
+              </ThemedText>
+            </View>
+          </ScalePressable>
         )}
+        ItemSeparatorComponent={() => <View style={styles.separatorGhost} />}
       />
     </ThemedView>
   );
@@ -82,24 +121,60 @@ const styles = StyleSheet.create({
   list: {
     flex: 1,
   },
-  contactItem: {
+  listContent: {
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 24,
+    flexGrow: 1,
+  },
+  row: {
     flexDirection: "row",
-    padding: 16,
     alignItems: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 14,
     gap: 12,
+    minHeight: 56,
+    borderRadius: 18,
+    borderWidth: 1,
+    marginVertical: 4,
+  },
+  rowBody: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+    justifyContent: "center",
   },
   avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: AVATAR,
+    height: AVATAR,
+    borderRadius: AVATAR / 2,
     justifyContent: "center",
     alignItems: "center",
   },
-  statusText: {
-    fontSize: 12,
+  avatarLetter: {
+    fontSize: 17,
+    fontWeight: "800",
   },
-  separator: {
-    height: 1,
-    marginLeft: 72,
+  name: {
+    fontSize: 16,
+    lineHeight: 22,
+  },
+  statusText: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  separatorGhost: {
+    height: 0,
+  },
+  empty: {
+    paddingTop: 48,
+    paddingHorizontal: 24,
+    alignItems: "center",
+    gap: 8,
+  },
+  emptyHint: {
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: "center",
   },
 });
