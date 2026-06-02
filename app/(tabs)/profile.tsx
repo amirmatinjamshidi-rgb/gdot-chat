@@ -19,7 +19,7 @@ import {
 } from "@/constants/profile-data";
 import { APP_THEMES, type ThemeId } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import { useAuth } from "@/providers/auth-provider";
+import { useAuth } from "@/lib/providers/auth-provider";
 import { useThemePalette } from "@/providers/theme-palette-provider";
 
 export default function ProfileScreen() {

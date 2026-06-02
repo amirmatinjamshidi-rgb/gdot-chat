@@ -9,7 +9,7 @@ import React from "react";
 import { ActivityIndicator, View } from "react-native";
 
 import { SwipeTabBar } from "@/components/swipe-tab-bar";
-import { useAuth } from "@/providers/auth-provider";
+import { useAuth } from "@/lib/providers/auth-provider";
 import { useThemePalette } from "@/providers/theme-palette-provider";
 
 const { Navigator } = createMaterialTopTabNavigator();
@@ -23,9 +23,9 @@ const MaterialTopTabs = withLayoutContext<
 
 export default function TabLayout() {
   const { legacyColors, colors } = useThemePalette();
-  const { isReady, isAuthenticated } = useAuth();
+  const { isLoading, isLoggedIn } = useAuth();
 
-  if (!isReady) {
+  if (isLoading) {
     return (
       <View
         style={{
@@ -40,8 +40,8 @@ export default function TabLayout() {
     );
   }
 
-  if (!isAuthenticated) {
-    return <Redirect href="/login" />;
+  if (!isLoggedIn) {
+    return <Redirect href="/(auth)/login" />;
   }
 
   return (

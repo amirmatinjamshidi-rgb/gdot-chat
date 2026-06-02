@@ -26,6 +26,7 @@ export class SignalRClient {
     this.connection = new signalR.HubConnectionBuilder()
       .withUrl(`${SIGNALR_HUB_URL}?access_token=${encodeURIComponent(token)}`)
       .withAutomaticReconnect()
+      .configureLogging(signalR.LogLevel.Warning)
       .build();
 
     this.connection.on(
