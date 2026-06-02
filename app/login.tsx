@@ -131,7 +131,7 @@ export default function LoginScreen() {
             </View>
 
             <BlurView
-              intensity={mode === "dark" ? 42 : 56}
+              intensity={mode === "dark" ? 48 : 62}
               tint={blurTint}
               style={styles.blurShell}
             >
