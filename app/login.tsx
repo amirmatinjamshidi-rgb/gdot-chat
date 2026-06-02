@@ -30,14 +30,14 @@ import {
   type PhonePartsInput,
 } from "@/lib/auth/schemas";
 import { useAuthStore } from "@/stores/auth-store";
-import { useThemeStore } from "@/stores/theme-store";
+import { useThemeStore, useColors } from "@/stores/theme-store";
 
 type LoginMode = "phone" | "email";
 
 export default function LoginScreen() {
   const router = useRouter();
   const { isAuthenticated, isReady } = useAuthStore();
-  const colors = useThemeStore((state) => state.colors);
+  const colors = useColors();
   const mode = useThemeStore((state) => state.mode);
   const [loginMode, setLoginMode] = useState<LoginMode>("phone");
   const [callingFocused, setCallingFocused] = useState(false);

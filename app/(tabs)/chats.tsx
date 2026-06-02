@@ -9,14 +9,14 @@ import { ScreenTopAccent } from "@/components/screen-top-accent";
 import { ThemedText } from "@/components/themed-text";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { ScalePressable } from "@/components/ui/scale-pressable";
-import { useThemeStore } from "@/stores/theme-store";
+import { useThemeStore, useColors } from "@/stores/theme-store";
 import { useChatsStore } from "@/stores/chats-store";
 
 const ROW_HEIGHT = 56;
 const AVATAR = 46;
 
 export default function ChatsScreen() {
-  const colors = useThemeStore((state) => state.colors);
+  const colors = useColors();
   const mode = useThemeStore((state) => state.mode);
   const isDark = mode === "dark";
   const router = useRouter();
