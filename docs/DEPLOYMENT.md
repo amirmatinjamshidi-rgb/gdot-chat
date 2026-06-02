@@ -343,6 +343,36 @@ npx expo start --dev-client
 
 Open the **Gdot Chat** development app on your phone (not Expo Go). It connects to Metro bundler and loads your JavaScript.
 
+### Step 5.4b — Phone shows "Socket timeout" / cannot load project
+
+Metro on your PC is fine if the terminal shows `Web Bundled`. The phone must reach **port 8081** on your PC.
+
+**Run once:**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-metro-device.ps1
+```
+
+**Then fix the most common causes:**
+
+| Cause | Fix |
+|-------|-----|
+| **VPN on phone** (key icon in status bar) | Turn VPN **off** while developing |
+| Windows Firewall | Script above allows port 8081 (or run PowerShell as Admin) |
+| Guest Wi‑Fi / different networks | Use same Wi‑Fi as PC, not guest isolation |
+| USB (most reliable) | Enable USB debugging, run script (uses `adb reverse`), open bundler URL `http://127.0.0.1:8081` in dev menu |
+
+**USB workflow:**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-metro-device.ps1
+npx expo start --dev-client --clear
+```
+
+On the phone: open the dev client → dev menu → set bundler to `http://127.0.0.1:8081` → Reload.
+
+**Alternative:** `npx expo start --dev-client --tunnel` (slower, works through some VPNs).
+
 ### Step 5.5 — Change server address later
 
 1. Edit `.env`

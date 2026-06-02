@@ -8,6 +8,7 @@ import type { IKekManager } from "@/lib/db/kek-manager";
 import type { IDatabase } from "@/lib/db/database-types";
 import type { AuthStore } from "@/lib/session/auth-store";
 import { ApiError } from "@/lib/api/api-client";
+import { randomUUID } from "@/lib/crypto/random-id";
 
 export async function registerUser(params: {
   username: string;
@@ -79,8 +80,8 @@ export async function registerUser(params: {
 }
 
 function offlineAuthResult(username: string): AuthResult {
-  const userId = crypto.randomUUID();
-  const deviceId = crypto.randomUUID();
+  const userId = randomUUID();
+  const deviceId = randomUUID();
   return {
     accessToken: `offline.${userId}`,
     refreshToken: `offline.refresh.${userId}`,
@@ -110,7 +111,7 @@ export async function loginUser(params: {
   let auth: AuthResult;
   try {
     const deviceId =
-      (await params.authStore.getDeviceId()) ?? local?.deviceId ?? crypto.randomUUID();
+      (await params.authStore.getDeviceId()) ?? local?.deviceId ?? randomUUID();
     auth = await params.authApi.login({
       username,
       password: params.password,

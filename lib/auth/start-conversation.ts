@@ -1,4 +1,5 @@
 import type { IConversationStore } from "@/lib/db/conversation-store";
+import { randomUUID } from "@/lib/crypto/random-id";
 import type { Conversation } from "@/lib/db/types";
 
 export async function ensureConversation(params: {
@@ -11,7 +12,7 @@ export async function ensureConversation(params: {
   if (existing) return existing;
 
   const conversation: Conversation = {
-    id: crypto.randomUUID(),
+    id: randomUUID(),
     peerUserId: params.peerUserId,
     peerUsername: params.peerUsername,
     peerDeviceId: params.peerDeviceId,

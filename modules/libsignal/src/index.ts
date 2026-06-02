@@ -3,6 +3,12 @@
  * Uses in-process placeholder crypto for development until prebuild + native ship.
  */
 
+import { getRandomBytes } from "expo-crypto";
+
+function randomBytes(length: number): Uint8Array {
+  return getRandomBytes(length);
+}
+
 export interface SignedPreKeyResult {
   keyId: number;
   publicKey: string;
@@ -34,14 +40,18 @@ function fromB64(b64: string): Uint8Array {
 
 export const LibSignalModule = {
   async generateIdentityKeyPair(): Promise<{ publicKey: string; privateKey: string }> {
-    const bytes = crypto.getRandomValues(new Uint8Array(33));
+    const bytes = randomBytes(33);
     bytes[0] = 5;
-    const priv = crypto.getRandomValues(new Uint8Array(32));
+    const priv = randomBytes(32);
     return { publicKey: toB64(bytes), privateKey: toB64(priv) };
   },
 
   async generateRegistrationId(): Promise<number> {
-    return crypto.getRandomValues(new Uint32Array(1))[0]! & 0x3fff;
+    const buf = randomBytes(4);
+    return (
+      ((buf[0]! << 24) | (buf[1]! << 16) | (buf[2]! << 8) | buf[3]!) &
+      0x3fff
+    );
   },
 
   async generateSignedPreKey(
@@ -50,17 +60,17 @@ export const LibSignalModule = {
   ): Promise<SignedPreKeyResult> {
     return {
       keyId,
-      publicKey: toB64(crypto.getRandomValues(new Uint8Array(32))),
-      privateKey: toB64(crypto.getRandomValues(new Uint8Array(32))),
-      signature: toB64(crypto.getRandomValues(new Uint8Array(64))),
+      publicKey: toB64(randomBytes(32)),
+      privateKey: toB64(randomBytes(32)),
+      signature: toB64(randomBytes(64)),
     };
   },
 
   async generatePreKeys(startId: number, count: number): Promise<PreKeyResult[]> {
     return Array.from({ length: count }, (_, i) => ({
       keyId: startId + i,
-      publicKey: toB64(crypto.getRandomValues(new Uint8Array(32))),
-      privateKey: toB64(crypto.getRandomValues(new Uint8Array(32))),
+      publicKey: toB64(randomBytes(32)),
+      privateKey: toB64(randomBytes(32)),
     }));
   },
 

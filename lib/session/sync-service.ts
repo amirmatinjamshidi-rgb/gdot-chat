@@ -3,6 +3,7 @@ import type { SignalRClient } from "@/lib/api/signalr-client";
 import { SYNC_POLL_INTERVAL_MS } from "@/lib/config";
 import type { SignalService } from "@/lib/crypto/signal-service";
 import { base64ToBytes } from "@/lib/crypto/encoding";
+import { randomUUID } from "@/lib/crypto/random-id";
 import type { IConversationStore } from "@/lib/db/conversation-store";
 import type { IIdentityStore } from "@/lib/db/identity-store";
 import type { IMessageStore } from "@/lib/db/message-store";
@@ -77,8 +78,8 @@ export class SyncService {
         }
 
         const msg: LocalMessage = {
-          id: crypto.randomUUID(),
-          clientId: crypto.randomUUID(),
+          id: randomUUID(),
+          clientId: randomUUID(),
           conversationId: conversation.id,
           direction: "incoming",
           plaintext,
@@ -108,8 +109,8 @@ export class SyncService {
 
     const local = await this.identityStore.getLocalIdentity();
     const deviceId = local?.deviceId ?? "local-device";
-    const clientId = crypto.randomUUID();
-    const id = crypto.randomUUID();
+    const clientId = randomUUID();
+    const id = randomUUID();
     const createdAt = Date.now();
 
     const optimistic: LocalMessage = {
@@ -164,7 +165,7 @@ export class SyncService {
     senderDeviceId: string,
   ): Promise<Conversation> {
     const c: Conversation = {
-      id: crypto.randomUUID(),
+      id: randomUUID(),
       peerUserId: senderDeviceId,
       peerUsername: "Unknown",
       peerDeviceId: senderDeviceId,

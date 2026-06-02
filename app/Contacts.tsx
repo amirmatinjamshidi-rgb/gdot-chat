@@ -13,6 +13,7 @@ import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { ScalePressable } from "@/components/ui/scale-pressable";
 import { ensureConversation } from "@/lib/auth/start-conversation";
+import { randomUUID } from "@/lib/crypto/random-id";
 import type { UserSummaryDto } from "@/lib/api/api-types";
 import { useAppServices } from "@/lib/services/app-services-context";
 import { useColorScheme } from "@/hooks/use-color-scheme";
@@ -36,7 +37,7 @@ export default function ContactsScreen() {
     } catch {
       setResults([
         {
-          id: crypto.randomUUID(),
+          id: randomUUID(),
           username: q,
         },
       ]);
