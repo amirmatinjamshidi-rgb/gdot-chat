@@ -1,17 +1,22 @@
+<<<<<<< HEAD:app/Contacts.tsx
 ﻿import { Stack, useRouter } from "expo-router";
+=======
+import { useRouter } from "expo-router";
+>>>>>>> 120f59a07c86f57a4f26460c84949f86ec5a9ccf:app/(tabs)/contacts.tsx
 import React, { useEffect } from "react";
 import { FlatList, StyleSheet, View } from "react-native";
 
 import { ChatSearchBar } from "@/components/chat-search-bar";
+import { ScreenTopAccent } from "@/components/screen-top-accent";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { ScalePressable } from "@/components/ui/scale-pressable";
-import { useThemeStore, useColors } from "@/stores/theme-store";
 import { useContactsStore, type Contact } from "@/stores/contacts-store";
+import { useColors, useThemeStore } from "@/stores/theme-store";
 
 const AVATAR = 46;
 
-export default function ContactsScreen() {
+export default function ContactsTabScreen() {
   const colors = useColors();
   const mode = useThemeStore((state) => state.mode);
   const isDark = mode === "dark";
@@ -19,8 +24,12 @@ export default function ContactsScreen() {
 
   const searchQuery = useContactsStore((state) => state.searchQuery);
   const setSearchQuery = useContactsStore((state) => state.setSearchQuery);
-  const getFilteredContacts = useContactsStore((state) => state.getFilteredContacts);
-  const initializeMockData = useContactsStore((state) => state.initializeMockData);
+  const getFilteredContacts = useContactsStore(
+    (state) => state.getFilteredContacts,
+  );
+  const initializeMockData = useContactsStore(
+    (state) => state.initializeMockData,
+  );
   const filteredContacts = getFilteredContacts();
 
   useEffect(() => {
@@ -35,15 +44,18 @@ export default function ContactsScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <Stack.Screen options={{ title: "Contacts" }} />
-      <ChatSearchBar
-        value={searchQuery}
-        onChangeText={setSearchQuery}
-        visible
-        isDark={isDark}
-        accentHex={colors.tint}
-        glowHex={colors.accentGlow}
-      />
+      <ScreenTopAccent />
+      <View style={styles.searchBarContainer}>
+        {" "}
+        <ChatSearchBar
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          visible
+          isDark={isDark}
+          accentHex={colors.tint}
+          glowHex={colors.accentGlow}
+        />
+      </View>
       <FlatList
         style={styles.list}
         data={filteredContacts}
@@ -133,10 +145,15 @@ const styles = StyleSheet.create({
   list: {
     flex: 1,
   },
+  searchBarContainer: {
+    paddingHorizontal: 12,
+    marginBottom: 12,
+    marginTop: 52,
+  },
   listContent: {
     paddingHorizontal: 12,
     paddingTop: 8,
-    paddingBottom: 24,
+    paddingBottom: 120,
     flexGrow: 1,
   },
   row: {

@@ -15,7 +15,7 @@ import Animated, {
 } from "react-native-reanimated";
 
 import { CircularProgressRing } from "@/components/circular-progress-ring";
-import { useThemeStore, useColors } from "@/stores/theme-store";
+import { useColors } from "@/stores/theme-store";
 
 export const VIDEO_BUBBLE_SIZE = 160;
 const PLAY_SCALE = 1.7;
@@ -140,20 +140,19 @@ export function VideoMessageBubble({
             stroke={4}
             progress={progress}
             fillColor={progressFill}
-            trackColor={trackColor}
           />
         )}
         <View
           style={[
             styles.videoRing,
-            // {
-            //   borderColor: isMine
-            //     ? `${colors.primary}D9`
-            //     : `${colors.surfaceBorder}E6`,
-            // },
-            // playing && {
-            //   borderColor: progressFill,
-            // },
+            {
+              borderColor: isMine
+                ? `${colors.primary}D9`
+                : `${colors.surfaceBorder}E6`,
+            },
+            playing && {
+              borderColor: progressFill,
+            },
           ]}
         >
           <VideoView

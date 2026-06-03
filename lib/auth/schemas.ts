@@ -1,43 +1,34 @@
-import { parsePhoneNumberFromString, type CountryCode } from "libphonenumber-js";
+import {
+  getCountries,
+  parsePhoneNumberFromString,
+  type CountryCode,
+} from "libphonenumber-js";
 import { z } from "zod";
 
-import {
-  resolveCountryFromCallingDigits,
-  sanitizeCallingCodeDigits,
-} from "@/lib/auth/phone";
+const VALID_PHONE_REGIONS = new Set<string>(getCountries());
 
 export const emailSchema = z.object({
   email: z.string().trim().email("Enter a valid email"),
 });
 
-/** Split: country calling code digits (no +) + national number (formatted). */
+/** Country region (ISO) from the picker + national number (formatted). */
 export const phonePartsSchema = z
   .object({
-    callingCodeDigits: z.string(),
+    countryIso: z.string(),
     nationalNumber: z.string(),
   })
   .superRefine((data, ctx) => {
-    const calling = sanitizeCallingCodeDigits(data.callingCodeDigits);
+    if (!data.countryIso || !VALID_PHONE_REGIONS.has(data.countryIso)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Select your country",
+        path: ["countryIso"],
+      });
+      return;
+    }
+
+    const country = data.countryIso as CountryCode;
     const nationalDigits = data.nationalNumber.replace(/\D/g, "");
-
-    if (!calling) {
-      ctx.addIssue({
-        code: "custom",
-        message: "Enter country code",
-        path: ["callingCodeDigits"],
-      });
-      return;
-    }
-
-    const country = resolveCountryFromCallingDigits(calling);
-    if (!country) {
-      ctx.addIssue({
-        code: "custom",
-        message: "Unknown country code",
-        path: ["callingCodeDigits"],
-      });
-      return;
-    }
 
     if (!nationalDigits) {
       ctx.addIssue({
@@ -48,10 +39,7 @@ export const phonePartsSchema = z
       return;
     }
 
-    const parsed = parsePhoneNumberFromString(
-      nationalDigits,
-      country as CountryCode,
-    );
+    const parsed = parsePhoneNumberFromString(nationalDigits, country);
     if (!parsed?.isValid()) {
       ctx.addIssue({
         code: "custom",

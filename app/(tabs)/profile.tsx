@@ -1,18 +1,12 @@
-import MaterialIcons from "@expo/vector-icons/MaterialIcons";
+import { useRouter } from "expo-router";
 import { useMemo } from "react";
-import { Alert, ScrollView, StyleSheet, View } from "react-native";
+import { ScrollView, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { ProfileActionCard } from "@/components/profile-action-card";
 import { ProfileAvatar } from "@/components/profile-avatar";
-import { ThemesCard } from "@/components/profile-themes-card";
-import { ScreenTopAccent } from "@/components/screen-top-accent";
-import { SecuritySummaryCard } from "@/components/security-summary-card";
-import { SettingsSection } from "@/components/settings-section";
-import { StorageSummaryCard } from "@/components/storage-summary-card";
-import { ThemedText } from "@/components/themed-text";
-import { ScalePressable } from "@/components/ui/scale-pressable";
+import { ProfileInfoPanel } from "@/components/profile-info-panel";
 import {
+<<<<<<< HEAD
   profile,
   profileActions,
   settingsSections,
@@ -27,208 +21,67 @@ export default function ProfileScreen() {
   const colorScheme = useColorScheme() ?? "light";
   const isDark = colorScheme === "dark";
   const { signOut } = useAuth();
+=======
+  ProfilePrimaryActions,
+  profilePrimaryActionPlaceholders,
+} from "@/components/profile-primary-actions";
+import { ThemedText } from "@/components/themed-text";
+import { profile } from "@/constants/profile-data";
+import { useAuthStore } from "@/stores/auth-store";
+import { useColors } from "@/stores/theme-store";
+
+export default function ProfileScreen() {
+>>>>>>> 120f59a07c86f57a4f26460c84949f86ec5a9ccf
   const colors = useColors();
-  const toggles = useSettingsStore((state) => state.toggles);
-  const setToggle = useSettingsStore((state) => state.setToggle);
+  const router = useRouter();
+  const user = useAuthStore((s) => s.user);
+  const placeholders = useMemo(() => profilePrimaryActionPlaceholders(), []);
 
-  const sections = useMemo<SettingsSectionType[]>(
-    () =>
-      settingsSections.map((section) => ({
-        ...section,
-        items: section.items.map((item) =>
-          item.hasToggle
-            ? {
-                ...item,
-                enabled:
-                  typeof toggles[item.id] === "boolean"
-                    ? toggles[item.id]
-                    : Boolean(item.enabled),
-              }
-            : item,
-        ),
-      })),
-    [toggles],
-  );
-
-  const handleToggle = (id: string, enabled: boolean) => {
-    setToggle(id, enabled);
-  };
-
-  const handleLogoutPress = () => {
-    Alert.alert("Log out", "You are about to log out. Are you sure?", [
-      {
-        text: "Cancel",
-        style: "cancel",
-      },
-      {
-        text: "Logout",
-        style: "destructive",
-        onPress: () => {
-          void signOut();
-        },
-      },
-    ]);
-  };
+  const phoneE164 = useMemo(() => {
+    if (user?.method === "phone" && user.identifier) {
+      return user.identifier;
+    }
+    return profile.phoneE164;
+  }, [user]);
 
   return (
     <SafeAreaView
       style={[styles.safeArea, { backgroundColor: colors.background }]}
     >
-      <ScreenTopAccent />
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        <View>
-          <View style={styles.headerRow}>
-            <View>
-              <ThemedText type="title" style={styles.screenTitle}>
-                Profile
-              </ThemedText>
-              <ThemedText
-                style={styles.screenSubtitle}
-                lightColor={colors.textMuted}
-                darkColor={colors.textMuted}
-              >
-                Account, safety, storage, and preferences
-              </ThemedText>
-            </View>
-
-            <ScalePressable
-              onPress={() =>
-                Alert.alert(
-                  "QR scanner",
-                  "QR contact adding will be connected soon.",
-                )
-              }
-              style={[
-                styles.iconButton,
-                {
-                  backgroundColor: colors.surfaceElevated,
-                  borderColor: colors.surfaceBorder,
-                  borderWidth: 0,
-                },
-              ]}
-            >
-              <MaterialIcons
-                name="qr-code-scanner"
-                size={30}
-                color={colors.text}
-                style={[styles.iconqr]}
-              />
-            </ScalePressable>
-          </View>
-        </View>
-
-        <View>
+        <View style={styles.hero}>
+          <ProfileAvatar
+            size={120}
+            initials={profile.avatarInitials}
+            source={profile.avatarImage}
+          />
           <ThemedText
-            type="subtitle"
-            style={[styles.sectionLabel, { color: colors.text }]}
+            type="title"
+            style={[styles.username, { color: colors.text }]}
             lightColor={colors.text}
             darkColor={colors.text}
           >
-            Theme
+            {profile.name}
           </ThemedText>
         </View>
 
-        <View>
-          <View
-            style={[
-              styles.profileCard,
-              {
-                backgroundColor: colors.surfaceElevated,
-                borderColor: colors.surfaceBorder,
-              },
-            ]}
-          >
-            <ProfileAvatar
-              initials={profile.avatarInitials}
-              source={profile.avatarImage}
-            />
-            <View style={styles.profileCopy}>
-              <ThemedText type="subtitle" style={styles.name}>
-                {profile.name}
-              </ThemedText>
-              <ThemedText
-                style={styles.handle}
-                lightColor={colors.tint}
-                darkColor={colors.tintMuted}
-              >
-                {profile.handle}
-              </ThemedText>
-              <ThemedText
-                style={styles.status}
-                lightColor={colors.textMuted}
-                darkColor={colors.textMuted}
-              >
-                {profile.status}
-              </ThemedText>
-              <View style={styles.metaRow}>
-                <MaterialIcons
-                  name="phone-iphone"
-                  size={16}
-                  color={colors.textMuted}
-                />
-                <ThemedText
-                  style={styles.metaText}
-                  lightColor={colors.textMuted}
-                  darkColor={colors.textMuted}
-                >
-                  {profile.phone}
-                </ThemedText>
-                <View
-                  style={[
-                    styles.metaDivider,
-                    { backgroundColor: colors.surfaceBorder },
-                  ]}
-                />
-              </View>
-            </View>
-          </View>
-        </View>
+        <ProfilePrimaryActions
+          onSetPhoto={placeholders.onSetPhoto}
+          onEditInfo={placeholders.onEditInfo}
+          onSettings={() => {
+            router.push("/(tabs)/settings");
+          }}
+        />
 
-        <View style={styles.actionsGrid}>
-          {profileActions.map((action) => (
-            <View key={action.id} style={styles.actionCell}>
-              <ProfileActionCard action={action} />
-            </View>
-          ))}
-        </View>
-        <ThemesCard />
-        <SecuritySummaryCard />
-        <StorageSummaryCard />
-
-        {sections.map((section) => (
-          <View key={section.id}>
-            <SettingsSection section={section} onToggle={handleToggle} />
-          </View>
-        ))}
-
-        <ScalePressable
-          accessibilityRole="button"
-          accessibilityLabel="Log out"
-          onPress={handleLogoutPress}
-          style={[
-            styles.logoutRow,
-            {
-              backgroundColor: isDark
-                ? "rgba(239,68,68,0.12)"
-                : "rgba(239,68,68,0.08)",
-              borderColor: isDark
-                ? "rgba(248,113,113,0.35)"
-                : "rgba(239,68,68,0.22)",
-            },
-          ]}
-        >
-          <MaterialIcons name="logout" size={20} color="#EF4444" />
-          <ThemedText
-            style={styles.logoutText}
-            lightColor="#DC2626"
-            darkColor="#F87171"
-          >
-            Log out
-          </ThemedText>
-        </ScalePressable>
+        <ProfileInfoPanel
+          phoneE164={phoneE164}
+          bio={profile.bio}
+          usernameAt={profile.handle}
+          birthday={profile.birthday}
+        />
       </ScrollView>
     </SafeAreaView>
   );
@@ -239,147 +92,19 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    paddingHorizontal: 18,
-    paddingTop: 14,
-    paddingBottom: 32,
-    gap: 18,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 100,
+    gap: 22,
   },
-  headerRow: {
-    flexDirection: "row",
+  hero: {
     alignItems: "center",
-    justifyContent: "space-between",
     gap: 14,
   },
-  screenTitle: {
-    fontSize: 34,
-    lineHeight: 42,
-  },
-  screenSubtitle: {
-    marginTop: 4,
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  iconButton: {
-    width: 48,
-    height: 48,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderRadius: 18,
-  },
-  iconqr: {
-    marginLeft: 8,
-  },
-  profileCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderWidth: 1,
-    borderRadius: 32,
-    padding: 18,
-    gap: 18,
-  },
-  profileCopy: {
-    flex: 1,
-    gap: 4,
-  },
-  name: {
-    fontSize: 23,
-    lineHeight: 28,
-  },
-  handle: {
-    fontSize: 15,
+  username: {
+    fontSize: 24,
+    lineHeight: 30,
+    textAlign: "center",
     fontWeight: "700",
-    lineHeight: 20,
-  },
-  status: {
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  metaRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    flexWrap: "wrap",
-    marginTop: 8,
-    gap: 6,
-  },
-  metaText: {
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  metaDivider: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-  },
-  actionsGrid: {
-    flexDirection: "row",
-    gap: 10,
-    alignItems: "stretch",
-  },
-  actionCell: {
-    flex: 1,
-    minWidth: 0,
-  },
-  logoutRow: {
-    marginTop: 4,
-    borderWidth: 1,
-    borderRadius: 16,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-  },
-  logoutText: {
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  sectionLabel: {
-    fontSize: 18,
-    marginBottom: 4,
-    lineHeight: 24,
-  },
-  sectionHint: {
-    fontSize: 13,
-    lineHeight: 18,
-    marginBottom: 12,
-  },
-  themeGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 12,
-    paddingBottom: 4,
-  },
-  themeCard: {
-    width: "47.5%",
-    minWidth: 140,
-    maxWidth: "100%",
-    flexGrow: 1,
-    borderRadius: 20,
-    borderWidth: 2,
-    padding: 14,
-    shadowOffset: { width: 0, height: 6 },
-    shadowRadius: 14,
-    elevation: 4,
-  },
-  themeSwatches: {
-    flexDirection: "row",
-    gap: 6,
-    marginBottom: 10,
-  },
-  swatchDot: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-  },
-  themeTitle: {
-    fontSize: 15,
-    marginBottom: 4,
-    lineHeight: 20,
-  },
-  themeTag: {
-    fontSize: 12,
-    lineHeight: 16,
   },
 });

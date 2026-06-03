@@ -33,7 +33,6 @@ export function CircularProgressRing({
           cx={center}
           cy={center}
           r={radius}
-          stroke={trackColor}
           strokeWidth={stroke}
           fill="none"
         />

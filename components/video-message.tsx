@@ -15,7 +15,7 @@ import React, {
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
 import { CircularProgressRing } from "@/components/circular-progress-ring";
-import { useThemeStore, useColors } from "@/stores/theme-store";
+import { useColors } from "@/stores/theme-store";
 
 export const VIDEO_RECORD_MAX_MS = 90_000;
 /** Visible camera disc */
@@ -200,8 +200,10 @@ export const VideoMessage = forwardRef<VideoMessageHandle, VideoMessageProps>(
                   style={[
                     styles.cameraDisc,
                     {
-                      borderColor: `${colors.primary}CC`,
-                      backgroundColor: "#000",
+                      marginTop: 3.5,
+                      marginLeft: 5,
+                      // borderColor: `${colors.primary}CC`,
+                      // backgroundColor: "#000",
                     },
                   ]}
                 >
@@ -258,7 +260,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   hint: {
-    fontSize: 12,
+    fontSize: 1,
     fontWeight: "600",
     textAlign: "center",
     lineHeight: 16,
@@ -284,13 +286,14 @@ const styles = StyleSheet.create({
   ringWrap: {
     alignItems: "center",
     justifyContent: "center",
+    borderColor: "none",
   },
   cameraDisc: {
     width: CIRCLE,
     height: CIRCLE,
     borderRadius: CIRCLE / 2,
     overflow: "hidden",
-    borderWidth: 2.5,
+    borderWidth: 0,
   },
   camera: {
     width: CIRCLE,
@@ -307,8 +310,9 @@ const styles = StyleSheet.create({
   timerStack: {
     position: "absolute",
     left: 0,
+
     right: 0,
-    bottom: 14,
+    bottom: 5,
     alignItems: "center",
     zIndex: 3,
     gap: 2,

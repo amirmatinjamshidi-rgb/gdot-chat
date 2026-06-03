@@ -59,8 +59,8 @@ export default function TabLayout() {
       }}
     >
       <MaterialTopTabs.Screen
-        name="index"
-        options={{ title: "Home", tabBarLabel: "Home" }}
+        name="contacts"
+        options={{ title: "Contacts", tabBarLabel: "Contacts" }}
       />
       <MaterialTopTabs.Screen
         name="chats"
@@ -69,6 +69,10 @@ export default function TabLayout() {
       <MaterialTopTabs.Screen
         name="profile"
         options={{ title: "Profile", tabBarLabel: "Profile" }}
+      />
+      <MaterialTopTabs.Screen
+        name="settings"
+        options={{ title: "Settings", tabBarLabel: "Settings" }}
       />
     </MaterialTopTabs>
   );

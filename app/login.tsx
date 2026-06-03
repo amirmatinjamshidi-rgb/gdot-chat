@@ -1,7 +1,10 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { BlurView } from "expo-blur";
 
+import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { Redirect, useRouter } from "expo-router";
+import type { CountryCode } from "libphonenumber-js";
+import { getCountries } from "libphonenumber-js";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import {
@@ -15,13 +18,12 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { LoginAmbientBackground } from "@/components/login-ambient-background";
+import { PhoneCountryPickerModal } from "@/components/phone-country-picker-modal";
 import { ThemedText } from "@/components/themed-text";
 import {
-  buildE164FromParts,
+  buildE164FromCountryIso,
   formatNationalAsYouType,
-  getCountryInfoFromCallingCodeDigits,
-  sanitizeCallingCodeDigits,
-  shouldAdvanceToNationalNumber,
+  getPhoneCountryDisplayFromIso,
 } from "@/lib/auth/phone";
 import {
   emailSchema,
@@ -30,7 +32,7 @@ import {
   type PhonePartsInput,
 } from "@/lib/auth/schemas";
 import { useAuthStore } from "@/stores/auth-store";
-import { useThemeStore, useColors } from "@/stores/theme-store";
+import { useColors, useThemeStore } from "@/stores/theme-store";
 
 type LoginMode = "phone" | "email";
 
@@ -40,16 +42,14 @@ export default function LoginScreen() {
   const colors = useColors();
   const mode = useThemeStore((state) => state.mode);
   const [loginMode, setLoginMode] = useState<LoginMode>("phone");
-  const [callingFocused, setCallingFocused] = useState(false);
+  const [countryPickerOpen, setCountryPickerOpen] = useState(false);
   const [nationalFocused, setNationalFocused] = useState(false);
   const [emailFocused, setEmailFocused] = useState(false);
   const nationalInputRef = useRef<TextInput>(null);
-  const callingInputRef = useRef<TextInput>(null);
-  const wasCallingCompleteRef = useRef(false);
 
   const phoneForm = useForm<PhonePartsInput>({
     resolver: zodResolver(phonePartsSchema),
-    defaultValues: { callingCodeDigits: "", nationalNumber: "" },
+    defaultValues: { countryIso: "", nationalNumber: "" },
     mode: "onTouched",
   });
 
@@ -59,38 +59,35 @@ export default function LoginScreen() {
     mode: "onTouched",
   });
 
-  const callingDigits = phoneForm.watch("callingCodeDigits");
-  const countryInfo = useMemo(
-    () => getCountryInfoFromCallingCodeDigits(callingDigits),
-    [callingDigits],
-  );
+  const countryIso = phoneForm.watch("countryIso");
+  const countryInfo = useMemo(() => {
+    if (!countryIso) return null;
+    const valid = (getCountries() as readonly string[]).includes(countryIso);
+    if (!valid) return null;
+    return getPhoneCountryDisplayFromIso(countryIso as CountryCode);
+  }, [countryIso]);
 
   const prevCountryIsoRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
-    const clean = sanitizeCallingCodeDigits(callingDigits);
-    if (!clean) {
+    if (!countryIso) {
       prevCountryIsoRef.current = undefined;
-      wasCallingCompleteRef.current = false;
       phoneForm.setValue("nationalNumber", "");
       return;
     }
-    const info = getCountryInfoFromCallingCodeDigits(clean);
-    if (!info) return;
-    const iso = info.countryCode;
-    if (prevCountryIsoRef.current && prevCountryIsoRef.current !== iso) {
+    if (prevCountryIsoRef.current && prevCountryIsoRef.current !== countryIso) {
       phoneForm.setValue("nationalNumber", "");
     }
-    prevCountryIsoRef.current = iso;
-  }, [callingDigits, phoneForm]);
+    prevCountryIsoRef.current = countryIso;
+  }, [countryIso, phoneForm]);
 
   if (isReady && isAuthenticated) {
     return <Redirect href="/(tabs)/chats" />;
   }
 
   const onSubmitPhone = phoneForm.handleSubmit((data) => {
-    const e164 = buildE164FromParts(
-      data.callingCodeDigits,
+    const e164 = buildE164FromCountryIso(
+      data.countryIso as CountryCode,
       data.nationalNumber,
     );
     if (!e164) return;
@@ -149,7 +146,7 @@ export default function LoginScreen() {
                 lightColor={colors.text}
                 darkColor={colors.text}
               >
-                Smash
+                welcome to GDOT chat
               </ThemedText>
               <ThemedText
                 style={[styles.tagline, { color: colors.textSecondary }]}
@@ -178,152 +175,117 @@ export default function LoginScreen() {
               >
                 {loginMode === "phone" ? (
                   <>
+                    <PhoneCountryPickerModal
+                      visible={countryPickerOpen}
+                      selectedIso={countryIso}
+                      onClose={() => setCountryPickerOpen(false)}
+                      onSelect={(iso) => {
+                        phoneForm.setValue("countryIso", iso, {
+                          shouldValidate: true,
+                          shouldTouch: true,
+                        });
+                        requestAnimationFrame(() => {
+                          nationalInputRef.current?.focus();
+                        });
+                      }}
+                    />
                     <ThemedText
                       style={[styles.fieldLabel, { color: colors.textMuted }]}
                       lightColor={colors.textMuted}
                       darkColor={colors.textMuted}
                     >
-                      Country code
+                      Country or region
                     </ThemedText>
-                    <View style={styles.phoneSplitRow}>
-                      <View
-                        style={[
-                          styles.callingShell,
-                          {
-                            borderColor: phoneForm.formState.errors
-                              .callingCodeDigits
-                              ? colors.error
-                              : callingFocused
-                                ? colors.inputBorderFocus
-                                : colors.inputBorder,
-                            backgroundColor: colors.inputFill,
-                          },
-                        ]}
-                      >
-                        <ThemedText
-                          type="defaultSemiBold"
-                          style={[styles.callingPlus, { color: colors.text }]}
-                          lightColor={colors.text}
-                          darkColor={colors.text}
-                        >
-                          +
-                        </ThemedText>
-                        <Controller
-                          control={phoneForm.control}
-                          name="callingCodeDigits"
-                          render={({ field: { onChange, onBlur, value } }) => (
-                            <TextInput
-                              ref={callingInputRef}
-                              keyboardType="number-pad"
-                              autoComplete="tel-country-code"
-                              textContentType="none"
-                              maxLength={4}
-                              accessibilityLabel="Country calling code"
-                              placeholder="1"
-                              placeholderTextColor={colors.textMuted}
-                              value={value}
-                              onFocus={() => setCallingFocused(true)}
-                              onBlur={() => {
-                                setCallingFocused(false);
-                                onBlur();
-                              }}
-                              onChangeText={(text) => {
-                                const prev = value;
-                                const newDigits =
-                                  sanitizeCallingCodeDigits(text);
-                                const prevInfo =
-                                  getCountryInfoFromCallingCodeDigits(prev);
-                                const nextInfo =
-                                  getCountryInfoFromCallingCodeDigits(
-                                    newDigits,
-                                  );
-                                if (
-                                  newDigits.length < prev.length &&
-                                  prevInfo &&
-                                  !nextInfo
-                                ) {
-                                  phoneForm.setValue("nationalNumber", "");
-                                }
-                                onChange(newDigits);
-                                const complete =
-                                  shouldAdvanceToNationalNumber(newDigits);
-                                if (
-                                  complete &&
-                                  !wasCallingCompleteRef.current
-                                ) {
-                                  wasCallingCompleteRef.current = true;
-                                  requestAnimationFrame(() => {
-                                    nationalInputRef.current?.focus();
-                                  });
-                                } else if (!complete) {
-                                  wasCallingCompleteRef.current = false;
-                                }
-                              }}
-                              returnKeyType={
-                                shouldAdvanceToNationalNumber(value)
-                                  ? "next"
-                                  : "done"
-                              }
-                              onSubmitEditing={() => {
-                                if (shouldAdvanceToNationalNumber(value)) {
-                                  nationalInputRef.current?.focus();
-                                }
-                              }}
-                              style={[
-                                styles.callingInput,
-                                { color: colors.text },
-                              ]}
-                            />
-                          )}
-                        />
-                      </View>
-                      {countryInfo ? (
+                    <Controller
+                      control={phoneForm.control}
+                      name="countryIso"
+                      render={({ field: { onBlur } }) => (
                         <Pressable
-                          onPress={() => callingInputRef.current?.focus()}
+                          onPress={() => {
+                            onBlur();
+                            setCountryPickerOpen(true);
+                          }}
                           accessibilityRole="button"
-                          accessibilityLabel="Change country code"
-                          hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+                          accessibilityLabel={
+                            countryInfo
+                              ? `Country ${countryInfo.name}, plus ${countryInfo.callingCode}. Tap to change`
+                              : "Select country or region"
+                          }
                           style={({ pressed }) => [
-                            styles.countryMetaPressable,
+                            styles.countrySelectRow,
                             {
+                              borderColor: phoneForm.formState.errors.countryIso
+                                ? colors.error
+                                : colors.inputBorder,
                               backgroundColor: colors.inputFill,
-                              borderColor: colors.inputBorder,
-                              opacity: pressed ? 0.88 : 1,
+                              opacity: pressed ? 0.92 : 1,
                             },
                           ]}
                         >
-                          <ThemedText
-                            style={[styles.flagEmoji, { color: colors.text }]}
-                            lightColor={colors.text}
-                            darkColor={colors.text}
-                          >
-                            {countryInfo.flag}
-                          </ThemedText>
-                          <ThemedText
-                            type="defaultSemiBold"
-                            numberOfLines={1}
-                            ellipsizeMode="tail"
-                            style={[
-                              styles.countryMetaName,
-                              { color: colors.textSecondary },
-                            ]}
-                            lightColor={colors.textSecondary}
-                            darkColor={colors.textSecondary}
-                          >
-                            {countryInfo.name}
-                          </ThemedText>
+                          {countryInfo ? (
+                            <>
+                              <ThemedText
+                                style={[
+                                  styles.countrySelectFlag,
+                                  { color: colors.text },
+                                ]}
+                                lightColor={colors.text}
+                                darkColor={colors.text}
+                              >
+                                {countryInfo.flag}
+                              </ThemedText>
+                              <ThemedText
+                                type="defaultSemiBold"
+                                numberOfLines={1}
+                                ellipsizeMode="tail"
+                                style={[
+                                  styles.countrySelectName,
+                                  { color: colors.text },
+                                ]}
+                                lightColor={colors.text}
+                                darkColor={colors.text}
+                              >
+                                {countryInfo.name}
+                              </ThemedText>
+                              <ThemedText
+                                type="defaultSemiBold"
+                                style={[
+                                  styles.countrySelectCode,
+                                  { color: colors.textSecondary },
+                                ]}
+                                lightColor={colors.textSecondary}
+                                darkColor={colors.textSecondary}
+                              >
+                                +{countryInfo.callingCode ?? ""}
+                              </ThemedText>
+                            </>
+                          ) : (
+                            <ThemedText
+                              style={[
+                                styles.countrySelectPlaceholder,
+                                { color: colors.textMuted },
+                              ]}
+                              lightColor={colors.textMuted}
+                              darkColor={colors.textMuted}
+                            >
+                              Choose your region
+                            </ThemedText>
+                          )}
+                          <MaterialIcons
+                            name="keyboard-arrow-down"
+                            size={26}
+                            color={colors.textSecondary}
+                            style={styles.countrySelectChevron}
+                          />
                         </Pressable>
-                      ) : (
-                        <View
-                          style={[
-                            styles.countryMetaPlaceholder,
-                            { borderColor: colors.inputBorder },
-                          ]}
-                        />
                       )}
-                    </View>
+                    />
                     <ThemedText
-                      style={[styles.fieldLabel, styles.fieldLabelSecond, { color: colors.textMuted }]}
+                      style={[
+                        styles.fieldLabel,
+                        styles.fieldLabelSecond,
+                        { color: colors.textMuted },
+                      ]}
                       lightColor={colors.textMuted}
                       darkColor={colors.textMuted}
                     >
@@ -343,7 +305,7 @@ export default function LoginScreen() {
                           placeholder={
                             countryInfo
                               ? "Enter your number"
-                              : "Enter country code first"
+                              : "Choose country first"
                           }
                           placeholderTextColor={colors.textMuted}
                           value={value}
@@ -381,8 +343,7 @@ export default function LoginScreen() {
                       lightColor={colors.error}
                       darkColor={colors.error}
                     >
-                      {phoneForm.formState.errors.callingCodeDigits
-                        ?.message ??
+                      {phoneForm.formState.errors.countryIso?.message ??
                         phoneForm.formState.errors.nationalNumber?.message ??
                         " "}
                     </ThemedText>
@@ -567,60 +528,34 @@ const styles = StyleSheet.create({
   fieldLabelSecond: {
     marginTop: 14,
   },
-  phoneSplitRow: {
+  countrySelectRow: {
     flexDirection: "row",
-    alignItems: "stretch",
+    alignItems: "center",
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    minHeight: 48,
     gap: 10,
   },
-  callingShell: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderRadius: 14,
-    borderWidth: 1,
-    paddingLeft: 12,
-    paddingRight: 8,
-    minHeight: 48,
-    width: 108,
+  countrySelectFlag: {
+    fontSize: 24,
+    lineHeight: 28,
   },
-  callingPlus: {
-    fontSize: 17,
-    marginRight: 2,
-  },
-  callingInput: {
+  countrySelectName: {
     flex: 1,
-    fontSize: 17,
-    lineHeight: 22,
-    fontWeight: "600",
-    paddingVertical: 0,
-    paddingHorizontal: 0,
-    minWidth: 36,
+    fontSize: 16,
+    minWidth: 0,
   },
-  countryMetaPressable: {
+  countrySelectCode: {
+    fontSize: 16,
+    marginLeft: 4,
+  },
+  countrySelectPlaceholder: {
     flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    borderRadius: 14,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    minHeight: 48,
+    fontSize: 16,
   },
-  flagEmoji: {
-    fontSize: 22,
-    lineHeight: 26,
-  },
-  countryMetaName: {
-    flex: 1,
-    fontSize: 14,
-    lineHeight: 18,
-  },
-  countryMetaPlaceholder: {
-    flex: 1,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderStyle: "dashed",
-    minHeight: 48,
-    opacity: 0.35,
+  countrySelectChevron: {
+    marginLeft: 4,
   },
   nationalInput: {
     borderBottomWidth: 2,
