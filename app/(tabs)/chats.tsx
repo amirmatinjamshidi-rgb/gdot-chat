@@ -7,10 +7,9 @@ import { ChatSearchBar } from "@/components/chat-search-bar";
 
 import { ScreenTopAccent } from "@/components/screen-top-accent";
 import { ThemedText } from "@/components/themed-text";
-import { IconSymbol } from "@/components/ui/icon-symbol";
 import { ScalePressable } from "@/components/ui/scale-pressable";
-import { useThemeStore, useColors } from "@/stores/theme-store";
 import { useChatsStore } from "@/stores/chats-store";
+import { useColors, useThemeStore } from "@/stores/theme-store";
 
 const ROW_HEIGHT = 56;
 const AVATAR = 46;
@@ -20,7 +19,7 @@ export default function ChatsScreen() {
   const mode = useThemeStore((state) => state.mode);
   const isDark = mode === "dark";
   const router = useRouter();
-  
+
   const searchQuery = useChatsStore((state) => state.searchQuery);
   const setSearchQuery = useChatsStore((state) => state.setSearchQuery);
   const getFilteredChats = useChatsStore((state) => state.getFilteredChats);
@@ -53,7 +52,7 @@ export default function ChatsScreen() {
               Search by name or last message. Tap a row to open the chat.
             </ThemedText>
           </View>
-          <ScalePressable
+          {/* <ScalePressable
             style={[
               styles.iconButton,
               {
@@ -68,7 +67,7 @@ export default function ChatsScreen() {
               size={22}
               color={colors.text}
             />
-          </ScalePressable>
+          </ScalePressable> */}
         </View>
 
         <ChatSearchBar
@@ -85,7 +84,6 @@ export default function ChatsScreen() {
           data={filteredChats}
           keyExtractor={(item) => item.id}
           keyboardShouldPersistTaps="handled"
-       
           alwaysBounceVertical={false}
           overScrollMode="never"
           renderItem={({ item }) => (
@@ -215,7 +213,7 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: 18,
     paddingTop: 8,
-    paddingBottom: 100,
+    paddingBottom: 30,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
@@ -231,7 +229,10 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   iconButton: {
+    // width: 40,
+    // height: 40,
     padding: 10,
+    marginRight: 60,
     borderRadius: 16,
     borderWidth: 1,
   },

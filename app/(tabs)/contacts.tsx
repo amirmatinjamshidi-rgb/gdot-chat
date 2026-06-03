@@ -7,8 +7,8 @@ import { ScreenTopAccent } from "@/components/screen-top-accent";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { ScalePressable } from "@/components/ui/scale-pressable";
-import { useThemeStore, useColors } from "@/stores/theme-store";
 import { useContactsStore, type Contact } from "@/stores/contacts-store";
+import { useColors, useThemeStore } from "@/stores/theme-store";
 
 const AVATAR = 46;
 
@@ -20,8 +20,12 @@ export default function ContactsTabScreen() {
 
   const searchQuery = useContactsStore((state) => state.searchQuery);
   const setSearchQuery = useContactsStore((state) => state.setSearchQuery);
-  const getFilteredContacts = useContactsStore((state) => state.getFilteredContacts);
-  const initializeMockData = useContactsStore((state) => state.initializeMockData);
+  const getFilteredContacts = useContactsStore(
+    (state) => state.getFilteredContacts,
+  );
+  const initializeMockData = useContactsStore(
+    (state) => state.initializeMockData,
+  );
   const filteredContacts = getFilteredContacts();
 
   useEffect(() => {
@@ -37,14 +41,17 @@ export default function ContactsTabScreen() {
   return (
     <ThemedView style={styles.container}>
       <ScreenTopAccent />
-      <ChatSearchBar
-        value={searchQuery}
-        onChangeText={setSearchQuery}
-        visible
-        isDark={isDark}
-        accentHex={colors.tint}
-        glowHex={colors.accentGlow}
-      />
+      <View style={styles.searchBarContainer}>
+        {" "}
+        <ChatSearchBar
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          visible
+          isDark={isDark}
+          accentHex={colors.tint}
+          glowHex={colors.accentGlow}
+        />
+      </View>
       <FlatList
         style={styles.list}
         data={filteredContacts}
@@ -133,6 +140,11 @@ const styles = StyleSheet.create({
   },
   list: {
     flex: 1,
+  },
+  searchBarContainer: {
+    paddingHorizontal: 12,
+    marginBottom: 12,
+    marginTop: 52,
   },
   listContent: {
     paddingHorizontal: 12,
