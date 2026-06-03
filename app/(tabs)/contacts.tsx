@@ -1,8 +1,9 @@
-import { Stack, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 import React, { useEffect } from "react";
 import { FlatList, StyleSheet, View } from "react-native";
 
 import { ChatSearchBar } from "@/components/chat-search-bar";
+import { ScreenTopAccent } from "@/components/screen-top-accent";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { ScalePressable } from "@/components/ui/scale-pressable";
@@ -11,7 +12,7 @@ import { useContactsStore, type Contact } from "@/stores/contacts-store";
 
 const AVATAR = 46;
 
-export default function ContactsScreen() {
+export default function ContactsTabScreen() {
   const colors = useColors();
   const mode = useThemeStore((state) => state.mode);
   const isDark = mode === "dark";
@@ -35,7 +36,7 @@ export default function ContactsScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <Stack.Screen options={{ title: "Contacts" }} />
+      <ScreenTopAccent />
       <ChatSearchBar
         value={searchQuery}
         onChangeText={setSearchQuery}
@@ -136,7 +137,7 @@ const styles = StyleSheet.create({
   listContent: {
     paddingHorizontal: 12,
     paddingTop: 8,
-    paddingBottom: 24,
+    paddingBottom: 120,
     flexGrow: 1,
   },
   row: {
