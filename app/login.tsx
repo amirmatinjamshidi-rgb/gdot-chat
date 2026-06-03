@@ -146,7 +146,7 @@ export default function LoginScreen() {
                 lightColor={colors.text}
                 darkColor={colors.text}
               >
-                Smash
+                welcome to GDOT chat
               </ThemedText>
               <ThemedText
                 style={[styles.tagline, { color: colors.textSecondary }]}
