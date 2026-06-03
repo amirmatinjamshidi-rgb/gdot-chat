@@ -153,6 +153,36 @@ export function buildE164FromParts(
   return parsed?.format("E.164") ?? null;
 }
 
+/** Prefer when the user picked an explicit region (e.g. shared NANP +1). */
+export function buildE164FromCountryIso(
+  country: CountryCode,
+  nationalFormatted: string,
+): string | null {
+  const nationalDigits = nationalFormatted.replace(/\D/g, "");
+  if (!nationalDigits) return null;
+  const parsed = parsePhoneNumberFromString(nationalDigits, country);
+  return parsed?.format("E.164") ?? null;
+}
+
+export function getPhoneCountryDisplayFromIso(
+  iso: CountryCode,
+): PhoneCountryInfo {
+  const callingCode = getCountryCallingCode(iso);
+  let name: string = iso;
+  try {
+    const regionNames = new Intl.DisplayNames(["en"], { type: "region" });
+    name = regionNames.of(iso) ?? iso;
+  } catch {
+    name = iso;
+  }
+  return {
+    countryCode: iso,
+    name,
+    callingCode,
+    flag: toFlagEmoji(iso),
+  };
+}
+
 export function normalizePhoneFromParts(
   callingDigits: string,
   nationalFormatted: string,
