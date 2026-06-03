@@ -26,7 +26,6 @@ export type SettingsSection = {
   items: SettingsItem[];
 };
 
-/** Mock / fallback profile fields (phone can be overridden from auth when method is phone). */
 export const profile = {
   /** Shown centered under the avatar */
   name: "AmirMatin",
@@ -34,7 +33,7 @@ export const profile = {
   handle: "@BestNigga",
   avatarInitials: "AM",
   avatarImage,
-  /** E.164 when not using signed-in phone from auth */
+
   phoneE164: "+989121234567",
   bio: "Building Smash. Secure chats, voice notes, and good typography.",
   birthday: "May 12, 1998",
