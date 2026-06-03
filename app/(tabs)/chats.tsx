@@ -61,7 +61,7 @@ export default function ChatsScreen() {
                 borderColor: colors.surfaceBorder,
               },
             ]}
-            onPress={() => router.push("/Contacts")}
+            onPress={() => router.push("/(tabs)/contacts")}
           >
             <IconSymbol
               name="person.badge.plus"
@@ -85,6 +85,9 @@ export default function ChatsScreen() {
           data={filteredChats}
           keyExtractor={(item) => item.id}
           keyboardShouldPersistTaps="handled"
+       
+          alwaysBounceVertical={false}
+          overScrollMode="never"
           renderItem={({ item }) => (
             <ScalePressable
               style={[
@@ -212,7 +215,7 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: 18,
     paddingTop: 8,
-    paddingBottom: 10,
+    paddingBottom: 100,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",

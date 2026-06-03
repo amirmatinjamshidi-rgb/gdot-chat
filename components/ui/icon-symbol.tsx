@@ -23,7 +23,7 @@ const MAPPING = {
   "mic.fill": "mic",
   "paperplane.fill": "send",
   "video.fill": "videocam",
-  "person.2.fill": "group",
+  "person.2.fill": "contacts",
   "person.3.fill": "groups",
   "person.badge.plus": "person-add",
   "person.crop.circle.fill": "account-circle",
