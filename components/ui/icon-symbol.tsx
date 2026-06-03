@@ -27,6 +27,7 @@ const MAPPING = {
   "person.3.fill": "groups",
   "person.badge.plus": "person-add",
   "person.crop.circle.fill": "account-circle",
+  "gearshape.fill": "settings",
   "chevron.left.forwardslash.chevron.right": "code",
   "chevron.right": "chevron-right",
   /** Safe fallback when route index exceeds the tab icon list */

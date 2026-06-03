@@ -11,6 +11,7 @@ const ICONS = [
   "house.fill",
   "bubble.left.and.bubble.right.fill",
   "person.crop.circle.fill",
+  "gearshape.fill",
 ] as const;
 
 export function SwipeTabBar({ state, descriptors, navigation }: MaterialTopTabBarProps) {

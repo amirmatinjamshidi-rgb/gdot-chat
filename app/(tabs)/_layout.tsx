@@ -70,6 +70,10 @@ export default function TabLayout() {
         name="profile"
         options={{ title: "Profile", tabBarLabel: "Profile" }}
       />
+      <MaterialTopTabs.Screen
+        name="settings"
+        options={{ title: "Settings", tabBarLabel: "Settings" }}
+      />
     </MaterialTopTabs>
   );
 }
