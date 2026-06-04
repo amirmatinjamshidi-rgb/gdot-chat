@@ -31,6 +31,7 @@ export interface LocalIdentity {
   username: string;
   registrationId: number;
   identityKeyPublic: Uint8Array;
+  createdAt?: number;
 }
 
 export interface RemoteIdentity {

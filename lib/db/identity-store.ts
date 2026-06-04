@@ -15,6 +15,7 @@ type LocalIdentityRow = {
   username: string;
   registration_id: number;
   identity_key_public: Uint8Array;
+  created_at: number;
 };
 
 type RemoteIdentityRow = {
@@ -31,7 +32,7 @@ export class IdentityStore implements IIdentityStore {
 
   async getLocalIdentity(): Promise<LocalIdentity | null> {
     const row = await this.db.getFirst<LocalIdentityRow>(
-      `SELECT user_id, device_id, username, registration_id, identity_key_public
+      `SELECT user_id, device_id, username, registration_id, identity_key_public, created_at
        FROM local_identity WHERE id = 1`,
     );
     if (!row) return null;
@@ -41,6 +42,7 @@ export class IdentityStore implements IIdentityStore {
       username: row.username,
       registrationId: row.registration_id,
       identityKeyPublic: row.identity_key_public,
+      createdAt: row.created_at,
     };
   }
 

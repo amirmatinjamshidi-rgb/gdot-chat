@@ -3,20 +3,16 @@ import { StyleSheet, View } from "react-native";
 import { ThemedText } from "@/components/themed-text";
 import { useColors } from "@/stores/theme-store";
 
-export type ProfileInfoPanelProps = {
-  phoneE164: string;
-  bio: string;
-  usernameAt: string;
-  birthday: string;
-};
-
-function Row({
-  label,
-  value,
-}: {
+export type ProfileInfoRow = {
   label: string;
   value: string;
-}) {
+};
+
+export type ProfileInfoPanelProps = {
+  rows: ProfileInfoRow[];
+};
+
+function Row({ label, value }: ProfileInfoRow) {
   const colors = useColors();
   return (
     <View style={styles.row}>
@@ -39,15 +35,7 @@ function Row({
   );
 }
 
-/**
- * Left-aligned profile facts (phone E.164, bio, @username, birthday) in a muted panel.
- */
-export function ProfileInfoPanel({
-  phoneE164,
-  bio,
-  usernameAt,
-  birthday,
-}: ProfileInfoPanelProps) {
+export function ProfileInfoPanel({ rows }: ProfileInfoPanelProps) {
   const colors = useColors();
 
   return (
@@ -60,13 +48,16 @@ export function ProfileInfoPanel({
         },
       ]}
     >
-      <Row label="Phone" value={phoneE164} />
-      <View style={[styles.divider, { backgroundColor: colors.surfaceBorder }]} />
-      <Row label="Bio" value={bio} />
-      <View style={[styles.divider, { backgroundColor: colors.surfaceBorder }]} />
-      <Row label="Username" value={usernameAt.startsWith("@") ? usernameAt : `@${usernameAt}`} />
-      <View style={[styles.divider, { backgroundColor: colors.surfaceBorder }]} />
-      <Row label="Birthday" value={birthday} />
+      {rows.map((row, index) => (
+        <View key={row.label}>
+          {index > 0 ? (
+            <View
+              style={[styles.divider, { backgroundColor: colors.surfaceBorder }]}
+            />
+          ) : null}
+          <Row label={row.label} value={row.value} />
+        </View>
+      ))}
     </View>
   );
 }

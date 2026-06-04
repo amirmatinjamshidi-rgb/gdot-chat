@@ -144,7 +144,8 @@ if (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Testing"))
 }
 
 app.UseMiddleware<ExceptionHandlingMiddleware>();
-if (!app.Environment.IsEnvironment("Testing"))
+// LAN phones use http://<ip>:5066; redirecting to HTTPS breaks fetch (untrusted dev cert).
+if (!app.Environment.IsDevelopment() && !app.Environment.IsEnvironment("Testing"))
     app.UseHttpsRedirection();
 if (app.Environment.IsDevelopment())
     app.UseCors("DevCors");
