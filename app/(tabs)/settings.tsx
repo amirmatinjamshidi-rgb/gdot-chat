@@ -15,7 +15,7 @@ import {
   type SettingsSection as SettingsSectionType,
 } from "@/constants/profile-data";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import { useAuthStore } from "@/stores/auth-store";
+import { useAuth } from "@/lib/providers/auth-provider";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useColors } from "@/stores/theme-store";
 
@@ -26,7 +26,7 @@ import { useColors } from "@/stores/theme-store";
 export default function SettingsScreen() {
   const colorScheme = useColorScheme() ?? "light";
   const isDark = colorScheme === "dark";
-  const signOut = useAuthStore((state) => state.signOut);
+  const { signOut } = useAuth();
   const colors = useColors();
   const toggles = useSettingsStore((state) => state.toggles);
   const setToggle = useSettingsStore((state) => state.setToggle);
@@ -61,7 +61,9 @@ export default function SettingsScreen() {
         text: "Logout",
         style: "destructive",
         onPress: () => {
-          void signOut();
+          void signOut().catch(() => {
+            Alert.alert("Log out", "Could not sign out. Try again.");
+          });
         },
       },
     ]);

@@ -60,6 +60,9 @@ import {
   VideoMessageBubble,
 } from "@/components/video-message-bubble";
 import { VoiceMessageBubble } from "@/components/voice-message-bubble";
+import { useConversationMessages } from "@/hooks/use-conversation-messages";
+import { localMessageToUi } from "@/lib/chat/local-message-ui";
+import { useAppServices } from "@/lib/services/app-services-context";
 import {
   useInputStore,
   type ComposerMode as StoreComposerMode,
@@ -145,12 +148,7 @@ export default function ChatRoomScreen() {
   const [videoSessionActive, setVideoSessionActive] = useState(false);
   const [voiceRecordingActive, setVoiceRecordingActive] = useState(false);
 
-  const initializeMockMessages = useMessagesStore(
-    (state) => state.initializeMockMessages,
-  );
-  const getMessagesForChat = useMessagesStore(
-    (state) => state.getMessagesForChat,
-  );
+  const { syncService } = useAppServices();
   const addMessage = useMessagesStore((state) => state.addMessage);
   const activePlaybackId = useMessagesStore((state) => state.activePlaybackId);
   const setActivePlayback = useMessagesStore(
@@ -163,7 +161,6 @@ export default function ChatRoomScreen() {
   const composerMode = useInputStore((state) => state.getComposerMode(chatId));
   const setComposerMode = useInputStore((state) => state.setComposerMode);
   const cycleComposerMode = useInputStore((state) => state.cycleComposerMode);
-  const messages = getMessagesForChat(chatId);
   const [voiceLocked, setVoiceLocked] = useState(false);
   const [videoLocked, setVideoLocked] = useState(false);
   const [videoRecordingActive, setVideoRecordingActive] = useState(false);
@@ -184,6 +181,12 @@ export default function ChatRoomScreen() {
   const mode = useThemeStore((state) => state.mode);
   const isDark = mode === "dark";
   const contactName = useMemo(() => name || "Chat", [name]);
+  const { messages: localMessages, reload: reloadMessages } =
+    useConversationMessages(chatId);
+  const messages = useMemo(
+    () => localMessages.map((m) => localMessageToUi(m, contactName)),
+    [localMessages, contactName],
+  );
 
   const swipeBackGesture = useMemo(
     () =>
@@ -198,10 +201,6 @@ export default function ChatRoomScreen() {
         }),
     [router, recordingLive],
   );
-
-  useEffect(() => {
-    initializeMockMessages(chatId);
-  }, [chatId, initializeMockMessages]);
 
   useEffect(() => {
     const id = requestAnimationFrame(() => {
@@ -413,14 +412,27 @@ export default function ChatRoomScreen() {
   const sendTextMessage = useCallback(() => {
     const trimmedMessage = draft.trim();
     if (!trimmedMessage) return;
-    appendMessage({
-      kind: "text",
-      text: trimmedMessage,
-      sender: "me",
-    });
-    clearDraft(chatId);
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  }, [appendMessage, draft, chatId, clearDraft]);
+    void (async () => {
+      try {
+        await syncService.sendOutgoing(chatId, trimmedMessage);
+        clearDraft(chatId);
+        resetComposerAfterSend();
+        await reloadMessages();
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } catch (e) {
+        setComposerError(
+          e instanceof Error ? e.message : "Failed to send message.",
+        );
+      }
+    })();
+  }, [
+    draft,
+    chatId,
+    clearDraft,
+    syncService,
+    reloadMessages,
+    resetComposerAfterSend,
+  ]);
 
   const finishVoiceCapture = useCallback(async () => {
     if (!voiceRecordingLiveRef.current) return;

@@ -145,12 +145,8 @@ export class SyncService {
       });
       void result;
     } catch {
-      await this.messageStore.updateStatus(id, "sent");
-      await this.conversationStore.upsert({
-        ...conversation,
-        lastMessagePreview: text.slice(0, 120),
-        lastMessageAt: createdAt,
-      });
+      await this.messageStore.updateStatus(id, "failed");
+      throw new Error("Message could not be delivered. Check connection and try again.");
     }
   }
 
