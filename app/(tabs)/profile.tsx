@@ -6,22 +6,6 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { ProfileAvatar } from "@/components/profile-avatar";
 import { ProfileInfoPanel } from "@/components/profile-info-panel";
 import {
-<<<<<<< HEAD
-  profile,
-  profileActions,
-  settingsSections,
-  type SettingsSection as SettingsSectionType,
-} from "@/constants/profile-data";
-import { useColorScheme } from "@/hooks/use-color-scheme";
-import { useAuth } from "@/lib/providers/auth-provider";
-import { useSettingsStore } from "@/stores/settings-store";
-import { useColors } from "@/stores/theme-store";
-
-export default function ProfileScreen() {
-  const colorScheme = useColorScheme() ?? "light";
-  const isDark = colorScheme === "dark";
-  const { signOut } = useAuth();
-=======
   ProfilePrimaryActions,
   profilePrimaryActionPlaceholders,
 } from "@/components/profile-primary-actions";
@@ -31,7 +15,6 @@ import { useAuthStore } from "@/stores/auth-store";
 import { useColors } from "@/stores/theme-store";
 
 export default function ProfileScreen() {
->>>>>>> 120f59a07c86f57a4f26460c84949f86ec5a9ccf
   const colors = useColors();
   const router = useRouter();
   const user = useAuthStore((s) => s.user);

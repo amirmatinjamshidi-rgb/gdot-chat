@@ -35,6 +35,12 @@ export interface UserSummaryDto {
   username: string;
 }
 
+export interface DeviceSummaryDto {
+  deviceId: string;
+  name: string;
+  registrationId: number;
+}
+
 export interface PreKeyBundleDto {
   userId: string;
   deviceId: string;

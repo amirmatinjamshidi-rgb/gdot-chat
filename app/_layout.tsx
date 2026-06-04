@@ -59,6 +59,7 @@ function RootNavigation() {
         <Stack.Screen name="login" options={{ headerShown: false }} />
         <Stack.Screen name="verify-otp" options={{ headerShown: false }} />
         <Stack.Screen name="ChatRoom" options={{ title: "Chat" }} />
+        <Stack.Screen name="add-contact" options={{ title: "Add contact" }} />
         <Stack.Screen name="CreateGroup" options={{ title: "Create Group" }} />
         <Stack.Screen
           name="safety-number"
