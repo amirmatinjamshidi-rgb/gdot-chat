@@ -40,6 +40,17 @@ EXPO_PUBLIC_API_URL=http://10.0.2.2:5066/v1
 ## Local storage
 
 - `gdot.db` via `expo-sqlite` + `useSQLCipher: true`, `PRAGMA key` from KEK
+- Composer drafts and profile fields: SQLCipher (`composer_drafts`, `local_profile`) — not AsyncStorage
+- Signal Protocol: `@privacyresearch/libsignal-protocol-typescript` via `lib/crypto/signal-engine.ts` and `modules/libsignal/`
+- Pre-key upload: `PUT /v1/devices/{deviceId}/prekeys` on sync start and when replenishing
+
+## SignalR security note
+
+The hub uses `?access_token=` for JWT (see `lib/api/signalr-client.ts`). Reverse proxies and access logs may capture this value; rotate tokens and use TLS in production.
+
+## Threat model
+
+See [THREAT_MODEL.md](./THREAT_MODEL.md).
 
 ## Running the server
 

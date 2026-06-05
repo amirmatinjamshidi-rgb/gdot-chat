@@ -13,16 +13,15 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { ScreenTopAccent } from "@/components/screen-top-accent";
 import { ThemedText } from "@/components/themed-text";
 import { ScalePressable } from "@/components/ui/scale-pressable";
+import { useProfilePrefs } from "@/hooks/use-profile-prefs";
 import { useAppServices } from "@/lib/services/app-services-context";
-import { useProfilePrefsStore } from "@/stores/profile-prefs-store";
 import { useColors } from "@/stores/theme-store";
 
 export default function EditProfileScreen() {
   const router = useRouter();
   const colors = useColors();
   const { identityStore } = useAppServices();
-  const prefs = useProfilePrefsStore();
-  const updatePrefs = useProfilePrefsStore((s) => s.updatePrefs);
+  const prefs = useProfilePrefs();
 
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState(prefs.displayName);
@@ -32,6 +31,13 @@ export default function EditProfileScreen() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setDisplayName(prefs.displayName);
+    setBio(prefs.bio);
+    setPhoneE164(prefs.phoneE164);
+    setBirthday(prefs.birthday);
+  }, [prefs.displayName, prefs.bio, prefs.phoneE164, prefs.birthday]);
+
+  useEffect(() => {
     void identityStore.getLocalIdentity().then((id) => {
       setUsername(id?.username ?? "");
       setLoading(false);
@@ -39,7 +45,7 @@ export default function EditProfileScreen() {
   }, [identityStore]);
 
   const onSave = () => {
-    updatePrefs({
+    void prefs.updatePrefs({
       displayName: displayName.trim(),
       bio: bio.trim(),
       phoneE164: phoneE164.trim(),
@@ -136,7 +142,7 @@ export default function EditProfileScreen() {
                   text: "Reset",
                   style: "destructive",
                   onPress: () => {
-                    useProfilePrefsStore.getState().resetPrefs();
+                    void prefs.resetPrefs();
                     setDisplayName("");
                     setBio("");
                     setPhoneE164("");

@@ -1,4 +1,5 @@
 import * as LocalAuthentication from "expo-local-authentication";
+import { type Href, usePathname, useRouter } from "expo-router";
 import React, {
   createContext,
   useCallback,
@@ -9,21 +10,45 @@ import React, {
 import { AppState, type AppStateStatus } from "react-native";
 
 import { APP_LOCK_BACKGROUND_MS } from "@/lib/config";
+import { ensureSignalInitialized } from "@/lib/crypto/init-signal";
 import { useAppServices } from "@/lib/services/app-services-context";
 
 type AppLockContextValue = {
   isUnlocked: boolean;
   dbReady: boolean;
+  lockEpoch: number;
   unlock: () => Promise<boolean>;
   lock: () => void;
 };
 
 const AppLockContext = createContext<AppLockContextValue | null>(null);
 
+const LOCK_ROUTE = "/lock";
+function isPublicRoute(path: string): boolean {
+  if (
+    path === "/" ||
+    path === "/lock" ||
+    path === "/login" ||
+    path === "/verify-otp" ||
+    path.endsWith("/login") ||
+    path.endsWith("/register")
+  ) {
+    return true;
+  }
+  return path.includes("(auth)");
+}
+
 export function AppLockProvider({ children }: { children: React.ReactNode }) {
   const { appLockStore, kekManager, db } = useAppServices();
+  const router = useRouter();
+  const pathname = usePathname();
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [dbReady, setDbReady] = useState(false);
+  const [lockEpoch, setLockEpoch] = useState(0);
+
+  useEffect(() => {
+    void ensureSignalInitialized();
+  }, []);
 
   const openDatabase = useCallback(async () => {
     const passphrase = await kekManager.getPassphraseForDb();
@@ -37,8 +62,12 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
     appLockStore.lock();
     setIsUnlocked(false);
     setDbReady(false);
+    setLockEpoch((n) => n + 1);
     void db.close();
-  }, [appLockStore, db]);
+    if (!isPublicRoute(pathname)) {
+      router.replace(LOCK_ROUTE as Href);
+    }
+  }, [appLockStore, db, pathname, router]);
 
   const unlock = useCallback(async (): Promise<boolean> => {
     try {
@@ -62,8 +91,12 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
     return appLockStore.onLock(() => {
       setIsUnlocked(false);
       setDbReady(false);
+      setLockEpoch((n) => n + 1);
+      if (!isPublicRoute(pathname)) {
+        router.replace(LOCK_ROUTE as Href);
+      }
     });
-  }, [appLockStore]);
+  }, [appLockStore, pathname, router]);
 
   useEffect(() => {
     const onChange = (state: AppStateStatus) => {
@@ -77,9 +110,15 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
     return () => sub.remove();
   }, [appLockStore]);
 
+  useEffect(() => {
+    if (!dbReady && !isPublicRoute(pathname)) {
+      router.replace(LOCK_ROUTE as Href);
+    }
+  }, [dbReady, pathname, router]);
+
   return (
     <AppLockContext.Provider
-      value={{ isUnlocked, dbReady, unlock, lock }}
+      value={{ isUnlocked, dbReady, lockEpoch, unlock, lock }}
     >
       {children}
     </AppLockContext.Provider>

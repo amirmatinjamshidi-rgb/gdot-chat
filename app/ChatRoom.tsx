@@ -60,6 +60,7 @@ import {
   VideoMessageBubble,
 } from "@/components/video-message-bubble";
 import { VoiceMessageBubble } from "@/components/voice-message-bubble";
+import { useComposerDraft } from "@/hooks/use-composer-draft";
 import { useConversationMessages } from "@/hooks/use-conversation-messages";
 import { localMessageToUi } from "@/lib/chat/local-message-ui";
 import { useAppServices } from "@/lib/services/app-services-context";
@@ -149,16 +150,13 @@ export default function ChatRoomScreen() {
   const [voiceRecordingActive, setVoiceRecordingActive] = useState(false);
 
   const { syncService } = useAppServices();
-  const addMessage = useMessagesStore((state) => state.addMessage);
   const activePlaybackId = useMessagesStore((state) => state.activePlaybackId);
   const setActivePlayback = useMessagesStore(
     (state) => state.setActivePlayback,
   );
 
-  const draft = useInputStore((state) => state.getDraft(chatId));
-  const setDraft = useInputStore((state) => state.setDraft);
-  const clearDraft = useInputStore((state) => state.clearDraft);
-  const composerMode = useInputStore((state) => state.getComposerMode(chatId));
+  const { draft, setDraft, clearDraft } = useComposerDraft(chatId);
+  const composerMode = "send" as const;
   const setComposerMode = useInputStore((state) => state.setComposerMode);
   const cycleComposerMode = useInputStore((state) => state.cycleComposerMode);
   const [voiceLocked, setVoiceLocked] = useState(false);
@@ -384,30 +382,11 @@ export default function ChatRoomScreen() {
     prevMessageCount.current = messages.length;
   }, [messages.length]);
 
-  const appendMessage = useCallback(
-    (row: {
-      kind: "text" | "voice" | "video";
-      text?: string;
-      durationMs?: number;
-      mediaUri?: string;
-      sender: string;
-      id?: string;
-      time?: string;
-    }) => {
-      addMessage(chatId, {
-        id: row.id ?? `${Date.now()}`,
-        chatId,
-        time: row.time ?? "Now",
-        kind: row.kind,
-        text: row.text,
-        durationMs: row.durationMs,
-        mediaUri: row.mediaUri,
-        sender: row.sender,
-        isMine: row.sender === "me",
-      });
-    },
-    [chatId, addMessage],
-  );
+  const mediaNotAvailable = useCallback(() => {
+    setComposerError(
+      "Voice and video are not available in encrypted text mode (MVP).",
+    );
+  }, []);
 
   const sendTextMessage = useCallback(() => {
     const trimmedMessage = draft.trim();
@@ -415,7 +394,7 @@ export default function ChatRoomScreen() {
     void (async () => {
       try {
         await syncService.sendOutgoing(chatId, trimmedMessage);
-        clearDraft(chatId);
+        clearDraft();
         resetComposerAfterSend();
         await reloadMessages();
         void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -435,43 +414,11 @@ export default function ChatRoomScreen() {
   ]);
 
   const finishVoiceCapture = useCallback(async () => {
-    if (!voiceRecordingLiveRef.current) return;
-    voiceRecordingLiveRef.current = false;
-    const recorder = audioRecorderRef.current;
-    try {
-      await safeStopVoiceRecording();
-      const uri = recorder.uri;
-      const st = recorder.getStatus();
-      const dur =
-        st.durationMillis > 0
-          ? st.durationMillis
-          : Date.now() - voiceRecordStartedAt.current;
-      if (dur < MIN_RECORD_MS) {
-        setComposerError("Hold to record audio. Tap to change.");
-        return;
-      }
-      if (uri) {
-        const payload = {
-          kind: "voice" as const,
-          mediaUri: uri,
-          durationMs: dur,
-          sender: "me" as const,
-          text: `Voice message ┬╖ ${formatDuration(dur)}`,
-        };
-        appendMessage(payload);
-        void Haptics.notificationAsync(
-          Haptics.NotificationFeedbackType.Success,
-        );
-        resetComposerAfterSend();
-      }
-    } catch {
-      setComposerError("Could not save the voice message.");
-    } finally {
-      setVoiceRecordingActive(false);
-      setVoiceLocked(false);
-      useRecordingStore.getState().stopRecording();
-    }
-  }, [appendMessage, resetComposerAfterSend, safeStopVoiceRecording]);
+    mediaNotAvailable();
+    setVoiceRecordingActive(false);
+    setVoiceLocked(false);
+    useRecordingStore.getState().stopRecording();
+  }, [mediaNotAvailable]);
 
   const discardVoiceRecording = useCallback(async () => {
     voiceRecordingLiveRef.current = false;
@@ -529,34 +476,13 @@ export default function ChatRoomScreen() {
   }, [chatId, safeStopVoiceRecording]);
 
   const finishVideoCapture = useCallback(async () => {
-    videoStartGenRef.current += 1;
+    mediaNotAvailable();
     setVideoSessionActive(false);
     setVideoLocked(false);
     setVideoRecordingActive(false);
     videoRecordingActiveRef.current = false;
-    try {
-      const file = await videoRef.current?.stopRecording();
-      const dur = Date.now() - videoRecordStartedAt.current;
-      if (dur < MIN_RECORD_MS || !file?.uri) {
-        setComposerError("Hold longer to record a video message.");
-        return;
-      }
-      const payload = {
-        kind: "video" as const,
-        mediaUri: file.uri,
-        durationMs: dur,
-        sender: "me" as const,
-        // text: "Video message",
-      };
-      appendMessage(payload);
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      resetComposerAfterSend();
-    } catch {
-      setComposerError("Could not save the video message.");
-    } finally {
-      useRecordingStore.getState().stopRecording();
-    }
-  }, [appendMessage, resetComposerAfterSend]);
+    useRecordingStore.getState().stopRecording();
+  }, [mediaNotAvailable]);
 
   const discardVideoRecording = useCallback(async () => {
     videoStartGenRef.current += 1;
@@ -845,11 +771,8 @@ export default function ChatRoomScreen() {
     return 0;
   }, [voiceRecordingActive, videoRecordingActive, recordHudTick]);
 
-  const showVoiceRecordingMeter =
-    voiceRecordingActive && composerMode === "voice";
-
-  const showVideoRecordingMeter =
-    Platform.OS !== "web" && videoRecordingActive && composerMode === "video";
+  const showVoiceRecordingMeter = false;
+  const showVideoRecordingMeter = false;
 
   const isSendOnly = draft.trim().length > 0;
 
@@ -1059,7 +982,7 @@ export default function ChatRoomScreen() {
                           placeholder="Type a message..."
                           placeholderTextColor={colors.textMuted}
                           value={draft}
-                          onChangeText={(text) => setDraft(chatId, text)}
+                          onChangeText={setDraft}
                           onFocus={() => setInputFocused(true)}
                           onBlur={() => setInputFocused(false)}
                         />
@@ -1067,52 +990,14 @@ export default function ChatRoomScreen() {
                     )}
                   </View>
                   <View style={styles.actionSlot}>
-                    {isSendOnly || composerMode === "send" ? (
-                      <ComposerFab
-                        isSendOnly={isSendOnly}
-                        composerMode={composerMode}
-                        onSendText={sendTextMessage}
-                        onCycleSendEmpty={() =>
-                          setComposerMode(chatId, "voice")
-                        }
-                        fabColor={colors.primary}
-                        iconColor={colors.onPrimary}
-                      />
-                    ) : (
-                      <HoldRecordControls
-                        ref={holdRecordControlsRef}
-                        mode={composerMode}
-                        recording={recordingLive}
-                        accentColor={colors.primary}
-                        iconColor={colors.onPrimary}
-                        locked={
-                          composerMode === "voice" ? voiceLocked : videoLocked
-                        }
-                        dragY={dragY}
-                        elapsedMs={recordElapsedMs}
-                        hideFloatingTimer={
-                          showVoiceRecordingMeter || showVideoRecordingMeter
-                        }
-                        maxDurationMs={
-                          composerMode === "video" && recordingLive
-                            ? VIDEO_RECORD_MAX_MS
-                            : undefined
-                        }
-                        panHandlers={
-                          (composerMode === "voice" ? voiceLocked : videoLocked)
-                            ? {}
-                            : recordPanResponder.panHandlers
-                        }
-                        onSendLocked={() => {
-                          if (composerMode === "voice") {
-                            void finishVoiceCapture();
-                          } else {
-                            void finishVideoCapture();
-                          }
-                        }}
-                        slideFabX={slideCancelFabX}
-                      />
-                    )}
+                    <ComposerFab
+                      isSendOnly={isSendOnly}
+                      composerMode="send"
+                      onSendText={sendTextMessage}
+                      onCycleSendEmpty={mediaNotAvailable}
+                      fabColor={colors.primary}
+                      iconColor={colors.onPrimary}
+                    />
                   </View>
                 </View>
               </View>

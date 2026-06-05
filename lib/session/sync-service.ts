@@ -10,9 +10,12 @@ import type { IMessageStore } from "@/lib/db/message-store";
 import type { Conversation, LocalMessage } from "@/lib/db/types";
 import type { AuthStore } from "@/lib/session/auth-store";
 
+export type SyncErrorHandler = (message: string) => void;
+
 export class SyncService {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private started = false;
+  private onError: SyncErrorHandler | null = null;
 
   constructor(
     private readonly messagesApi: MessagesApi,
@@ -24,9 +27,15 @@ export class SyncService {
     private readonly authStore: AuthStore,
   ) {}
 
+  setErrorHandler(handler: SyncErrorHandler | null): void {
+    this.onError = handler;
+  }
+
   async start(): Promise<void> {
     if (this.started) return;
     this.started = true;
+
+    await this.signalService.replenishLocalPreKeysIfNeeded();
 
     this.signalr.setEnvelopeHandler(() => {
       void this.pullPending();
@@ -35,7 +44,9 @@ export class SyncService {
     try {
       await this.signalr.connect();
     } catch {
-      // Hub optional when server offline
+      if (__DEV__) {
+        console.warn("[SyncService] SignalR connect failed");
+      }
     }
 
     this.pollTimer = setInterval(() => {
@@ -62,19 +73,32 @@ export class SyncService {
       if (!localDeviceId) return;
 
       for (const env of envelopes) {
-        const plaintext = await this.signalService.decryptIncoming(
-          env.senderDeviceId,
-          env.messageType as 2 | 3,
-          base64ToBytes(env.ciphertextBase64),
-        );
-
-        let conversation = await this.findConversationForSender(
+        const conversation = await this.findConversationForSender(
           env.senderDeviceId,
         );
         if (!conversation) {
-          conversation = await this.createPlaceholderConversation(
-            env.senderDeviceId,
+          if (__DEV__) {
+            console.warn(
+              "[SyncService] unknown sender device; add contact first",
+              env.senderDeviceId,
+            );
+          }
+          continue;
+        }
+
+        let plaintext: string;
+        try {
+          plaintext = await this.signalService.decryptIncoming(
+            conversation.peerUserId,
+            env.messageType as 2 | 3,
+            base64ToBytes(env.ciphertextBase64),
           );
+        } catch (e) {
+          const msg =
+            e instanceof Error ? e.message : "Failed to decrypt message";
+          this.onError?.(msg);
+          if (__DEV__) console.warn("[SyncService] decrypt failed", msg);
+          continue;
         }
 
         const msg: LocalMessage = {
@@ -98,8 +122,13 @@ export class SyncService {
         });
         await this.messagesApi.ack(env.id);
       }
-    } catch {
-      // Server unreachable — local-only mode
+    } catch (e) {
+      if (__DEV__) {
+        console.warn(
+          "[SyncService] pullPending failed",
+          e instanceof Error ? e.message : e,
+        );
+      }
     }
   }
 
@@ -144,9 +173,11 @@ export class SyncService {
         lastMessageAt: createdAt,
       });
       void result;
-    } catch {
+    } catch (e) {
       await this.messageStore.updateStatus(id, "failed");
-      throw new Error("Message could not be delivered. Check connection and try again.");
+      throw e instanceof Error
+        ? e
+        : new Error("Message could not be delivered. Check connection and try again.");
     }
   }
 
@@ -155,21 +186,5 @@ export class SyncService {
   ): Promise<Conversation | null> {
     const all = await this.conversationStore.listAll();
     return all.find((c) => c.peerDeviceId === senderDeviceId) ?? null;
-  }
-
-  private async createPlaceholderConversation(
-    senderDeviceId: string,
-  ): Promise<Conversation> {
-    const c: Conversation = {
-      id: randomUUID(),
-      peerUserId: senderDeviceId,
-      peerUsername: "Unknown",
-      peerDeviceId: senderDeviceId,
-      lastMessagePreview: "",
-      lastMessageAt: Date.now(),
-      unreadCount: 0,
-    };
-    await this.conversationStore.upsert(c);
-    return c;
   }
 }

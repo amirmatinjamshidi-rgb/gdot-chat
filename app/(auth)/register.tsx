@@ -40,6 +40,7 @@ export default function RegisterScreen() {
         kekManager: services.kekManager,
         db: services.db,
         identityStore: services.identityStore,
+        cryptoKeyStore: services.cryptoKeyStore,
       });
       await refresh();
       router.replace("/lock" as Href);

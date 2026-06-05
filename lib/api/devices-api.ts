@@ -1,5 +1,5 @@
 import type { ApiClient } from "./api-client";
-import type { PreKeyBundleDto } from "./api-types";
+import type { PreKeyBundleDto, UploadPreKeysRequest } from "./api-types";
 
 export class DevicesApi {
   constructor(private readonly client: ApiClient) {}
@@ -8,5 +8,12 @@ export class DevicesApi {
     return this.client.get<PreKeyBundleDto>(
       `/users/${userId}/devices/${deviceId}/prekey-bundle`,
     );
+  }
+
+  uploadPreKeys(
+    deviceId: string,
+    body: UploadPreKeysRequest,
+  ): Promise<void> {
+    return this.client.put<void>(`/devices/${deviceId}/prekeys`, body);
   }
 }

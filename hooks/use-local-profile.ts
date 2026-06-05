@@ -9,7 +9,8 @@ import {
 } from "@/lib/profile/display";
 import { useAppServices } from "@/lib/services/app-services-context";
 import { useAuthStore } from "@/stores/auth-store";
-import { useProfilePrefsStore } from "@/stores/profile-prefs-store";
+
+import { useProfilePrefs } from "./use-profile-prefs";
 
 export type LocalProfileView = {
   username: string;
@@ -45,7 +46,7 @@ const EMPTY_VIEW: LocalProfileView = {
 
 export function useLocalProfile(): LocalProfileView {
   const { identityStore, conversationStore, authStore } = useAppServices();
-  const prefs = useProfilePrefsStore();
+  const prefs = useProfilePrefs();
   const legacyUser = useAuthStore((s) => s.user);
   const [view, setView] = useState<LocalProfileView>(EMPTY_VIEW);
 

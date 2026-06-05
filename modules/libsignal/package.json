@@ -1,0 +1,6 @@
+{
+  "name": "gdot-libsignal",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "description": "Gdot Chat Signal Protocol module (TypeScript libsignal implementation)"
+}

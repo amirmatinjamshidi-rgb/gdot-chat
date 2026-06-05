@@ -1,14 +1,16 @@
 import type { AuthResult, RegisterRequest } from "@/lib/api/api-types";
+import { ApiError } from "@/lib/api/api-client";
+import type { AuthApi } from "@/lib/api/auth-api";
 import { bytesToBase64 } from "@/lib/crypto/encoding";
 import type { LibSignalAdapter } from "@/lib/crypto/libsignal-adapter";
-import type { AuthApi } from "@/lib/api/auth-api";
-import type { LocalIdentity } from "@/lib/db/types";
+import type { ICryptoKeyStore } from "@/lib/db/crypto-key-store";
+import { clearLegacyAsyncStorage } from "@/lib/db/clear-legacy-storage";
+import type { IDatabase } from "@/lib/db/database-types";
 import type { IIdentityStore } from "@/lib/db/identity-store";
 import type { IKekManager } from "@/lib/db/kek-manager";
-import type { IDatabase } from "@/lib/db/database-types";
-import type { AuthStore } from "@/lib/session/auth-store";
-import { ApiError } from "@/lib/api/api-client";
+import type { LocalIdentity } from "@/lib/db/types";
 import { randomUUID } from "@/lib/crypto/random-id";
+import type { AuthStore } from "@/lib/session/auth-store";
 
 export async function registerUser(params: {
   username: string;
@@ -20,6 +22,7 @@ export async function registerUser(params: {
   kekManager: IKekManager;
   db: IDatabase;
   identityStore: IIdentityStore;
+  cryptoKeyStore: ICryptoKeyStore;
 }): Promise<void> {
   const username = params.username.trim().toLowerCase();
   const identityPair = await params.crypto.generateIdentityKeyPair();
@@ -56,6 +59,9 @@ export async function registerUser(params: {
     if (e instanceof ApiError && e.status >= 400 && e.status < 500) {
       throw e;
     }
+    if (!__DEV__) {
+      throw e instanceof Error ? e : new Error("Registration failed");
+    }
     auth = offlineAuthResult(username);
   }
 
@@ -66,6 +72,7 @@ export async function registerUser(params: {
   if (!params.db.isOpen()) {
     await params.db.open(passphrase);
   }
+  await clearLegacyAsyncStorage();
 
   const localIdentity: LocalIdentity = {
     userId: auth.userId,
@@ -75,6 +82,12 @@ export async function registerUser(params: {
     identityKeyPublic: identityPair.publicKey,
   };
   await params.identityStore.saveLocalIdentity(localIdentity);
+  await params.cryptoKeyStore.saveIdentityPrivateKey(identityPair.privateKey);
+  await params.cryptoKeyStore.saveSignedPreKey(signedPreKey);
+  await params.cryptoKeyStore.saveOneTimePreKeys(oneTimePreKeys);
+  await params.cryptoKeyStore.setNextOtkKeyId(
+    oneTimePreKeys[oneTimePreKeys.length - 1]!.keyId + 1,
+  );
   await params.authStore.setTokens(auth);
 }
 
@@ -104,6 +117,7 @@ export async function loginUser(params: {
   if (!params.db.isOpen()) {
     await params.db.open(passphrase);
   }
+  await clearLegacyAsyncStorage();
 
   const local = await params.identityStore.getLocalIdentity();
 
@@ -116,7 +130,10 @@ export async function loginUser(params: {
       password: params.password,
       deviceId,
     });
-  } catch {
+  } catch (e) {
+    if (!__DEV__) {
+      throw e instanceof Error ? e : new Error("Login failed");
+    }
     if (!local || local.username !== username) {
       throw new Error("Invalid credentials or no local account");
     }

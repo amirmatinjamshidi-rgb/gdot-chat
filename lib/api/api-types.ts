@@ -41,6 +41,15 @@ export interface DeviceSummaryDto {
   registrationId: number;
 }
 
+export interface UploadPreKeysRequest {
+  signedPreKey: {
+    keyId: number;
+    publicKeyBase64: string;
+    signatureBase64: string;
+  };
+  oneTimePreKeys: { keyId: number; publicKeyBase64: string }[];
+}
+
 export interface PreKeyBundleDto {
   userId: string;
   deviceId: string;

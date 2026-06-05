@@ -1,4 +1,7 @@
-import { LibSignalModule } from "@/modules/libsignal/src";
+import type { PreKeyBundleDto } from "@/lib/api/api-types";
+import type { ICryptoKeyStore } from "@/lib/db/crypto-key-store";
+import type { IIdentityStore } from "@/lib/db/identity-store";
+import type { ISessionStore } from "@/lib/db/session-store";
 
 import type {
   CiphertextResult,
@@ -7,7 +10,8 @@ import type {
   SessionRecord,
   SignedPreKey,
 } from "./types";
-import { base64ToBytes, bytesToBase64, textToBytes } from "./encoding";
+import { SignalEngine } from "./signal-engine";
+import { bytesToBase64 } from "./encoding";
 
 export interface ICryptoEngine {
   generateIdentityKeyPair(): Promise<IdentityKeyPair>;
@@ -17,81 +21,92 @@ export interface ICryptoEngine {
     keyId: number,
   ): Promise<SignedPreKey>;
   generatePreKeys(startId: number, count: number): Promise<PreKey[]>;
-  encrypt(sessionRecord: SessionRecord, plaintext: string): Promise<CiphertextResult>;
+  encrypt(
+    peerAddressId: string,
+    plaintext: string,
+  ): Promise<CiphertextResult>;
   decrypt(
-    sessionRecord: SessionRecord,
+    peerAddressId: string,
     ciphertext: Uint8Array,
     type: 2 | 3,
   ): Promise<string>;
-  serializeSession(record: SessionRecord): Promise<Uint8Array>;
-  deserializeSession(bytes: Uint8Array, peerDeviceId: string): Promise<SessionRecord>;
-  computeSafetyNumber(localPublic: Uint8Array, remotePublic: Uint8Array): Promise<string>;
+  ensureSession(peerAddressId: string, bundle: PreKeyBundleDto): Promise<void>;
+  computeSafetyNumber(
+    localPublic: Uint8Array,
+    remotePublic: Uint8Array,
+  ): Promise<string>;
 }
 
+/** Real Signal Protocol via @privacyresearch/libsignal-protocol-typescript. */
 export class LibSignalAdapter implements ICryptoEngine {
-  async generateIdentityKeyPair(): Promise<IdentityKeyPair> {
-    const pair = await LibSignalModule.generateIdentityKeyPair();
-    return {
-      publicKey: base64ToBytes(pair.publicKey),
-      privateKey: base64ToBytes(pair.privateKey),
-    };
+  private readonly engine: SignalEngine;
+
+  constructor(
+    identityStore: IIdentityStore,
+    cryptoKeyStore: ICryptoKeyStore,
+    sessionStore: ISessionStore,
+  ) {
+    this.engine = new SignalEngine(
+      identityStore,
+      cryptoKeyStore,
+      sessionStore,
+    );
   }
 
-  async generateRegistrationId(): Promise<number> {
-    return LibSignalModule.generateRegistrationId();
+  generateIdentityKeyPair(): Promise<IdentityKeyPair> {
+    return this.engine.generateIdentityKeyPair();
   }
 
-  async generateSignedPreKey(
+  generateRegistrationId(): Promise<number> {
+    return this.engine.generateRegistrationId();
+  }
+
+  generateSignedPreKey(
     identity: IdentityKeyPair,
     keyId: number,
   ): Promise<SignedPreKey> {
-    const spk = await LibSignalModule.generateSignedPreKey(
-      bytesToBase64(identity.privateKey),
-      keyId,
-    );
-    return {
-      keyId: spk.keyId,
-      publicKey: base64ToBytes(spk.publicKey),
-      privateKey: base64ToBytes(spk.privateKey),
-      signature: base64ToBytes(spk.signature),
-    };
+    return this.engine.generateSignedPreKey(identity, keyId);
   }
 
-  async generatePreKeys(startId: number, count: number): Promise<PreKey[]> {
-    const keys = await LibSignalModule.generatePreKeys(startId, count);
-    return keys.map((k) => ({
-      keyId: k.keyId,
-      publicKey: base64ToBytes(k.publicKey),
-      privateKey: base64ToBytes(k.privateKey),
-    }));
+  generatePreKeys(startId: number, count: number): Promise<PreKey[]> {
+    return this.engine.generatePreKeys(startId, count);
+  }
+
+  async ensureSession(
+    peerAddressId: string,
+    bundle: PreKeyBundleDto,
+  ): Promise<void> {
+    return this.engine.ensureSession(peerAddressId, bundle);
   }
 
   async encrypt(
-    sessionRecord: SessionRecord,
+    peerAddressId: string,
     plaintext: string,
   ): Promise<CiphertextResult> {
-    const sessionB64 = bytesToBase64(sessionRecord.serialized);
-    const result = await LibSignalModule.encrypt(sessionB64, plaintext);
+    const result = await this.engine.encrypt(peerAddressId, plaintext);
     return {
-      ciphertext: base64ToBytes(result.ciphertext),
-      messageType: result.messageType as 2 | 3,
-      updatedSession: base64ToBytes(result.session),
+      ciphertext: result.ciphertext,
+      messageType: result.messageType,
+      updatedSession: new Uint8Array(0),
     };
   }
 
   async decrypt(
-    sessionRecord: SessionRecord,
+    peerAddressId: string,
     ciphertext: Uint8Array,
     type: 2 | 3,
   ): Promise<string> {
-    const result = await LibSignalModule.decrypt(
-      bytesToBase64(sessionRecord.serialized),
-      type,
-      bytesToBase64(ciphertext),
-    );
-    return result.plaintext;
+    return this.engine.decrypt(peerAddressId, type, ciphertext);
   }
 
+  computeSafetyNumber(
+    localPublic: Uint8Array,
+    remotePublic: Uint8Array,
+  ): Promise<string> {
+    return this.engine.computeSafetyNumber(localPublic, remotePublic);
+  }
+
+  /** @deprecated Session blobs managed by SignalProtocolStore */
   async serializeSession(record: SessionRecord): Promise<Uint8Array> {
     return record.serialized;
   }
@@ -102,44 +117,8 @@ export class LibSignalAdapter implements ICryptoEngine {
   ): Promise<SessionRecord> {
     return { peerDeviceId, serialized: bytes };
   }
+}
 
-  async computeSafetyNumber(
-    localPublic: Uint8Array,
-    remotePublic: Uint8Array,
-  ): Promise<string> {
-    return LibSignalModule.computeSafetyNumber(
-      bytesToBase64(localPublic),
-      bytesToBase64(remotePublic),
-    );
-  }
-
-  async processPreKeyBundle(
-    identityPrivate: Uint8Array,
-    registrationId: number,
-    remoteBundleJson: string,
-    existingSession?: SessionRecord,
-  ): Promise<{ session: SessionRecord; identityChanged: boolean }> {
-    const result = await LibSignalModule.processPreKeyBundle(
-      bytesToBase64(identityPrivate),
-      registrationId,
-      remoteBundleJson,
-      existingSession
-        ? bytesToBase64(existingSession.serialized)
-        : undefined,
-    );
-    return {
-      session: {
-        peerDeviceId: "",
-        serialized: base64ToBytes(result.session),
-      },
-      identityChanged: result.identityChanged,
-    };
-  }
-
-  initialSession(peerDeviceId: string): SessionRecord {
-    return {
-      peerDeviceId,
-      serialized: textToBytes(`session:${peerDeviceId}`),
-    };
-  }
+export function ciphertextToBase64(ciphertext: Uint8Array): string {
+  return bytesToBase64(ciphertext);
 }
