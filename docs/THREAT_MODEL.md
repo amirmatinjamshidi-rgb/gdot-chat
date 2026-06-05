@@ -40,6 +40,9 @@ The server is an **honest relay**:
 
 ## Known limitations
 
+- **MVP crypto implementation:** Signal Protocol runs in **TypeScript** (`@privacyresearch/libsignal-protocol-typescript`, community port), not Signal’s official Rust `libsignal-client`. Production hardening should migrate to native libsignal (see follow-up plan).
+- **Hermes TextDecoder:** iOS/Android load `lib/polyfills.ts` (`@borewit/text-codec`) at startup. The polyfill supplies missing encodings (`utf-16le`, `latin1`); it does not replace ratchet/curve math.
+- **GPL-3.0:** The TS libsignal package is GPL-3.0-only — review licensing before commercial distribution.
 - **SignalR JWT** is passed as `access_token` query parameter (may appear in logs/proxies). Prefer header auth in hardened deployments.
 - **Offline auth** exists only in `__DEV__` builds.
 - **Unknown senders**: inbound envelopes from devices without a local conversation are skipped until the user adds a contact.

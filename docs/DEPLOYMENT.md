@@ -373,6 +373,30 @@ On the phone: open the dev client → dev menu → set bundler to `http://127.0.
 
 **Alternative:** `npx expo start --dev-client --tunnel` (slower, works through some VPNs).
 
+### Step 5.4c — App crashes with `Unknown encoding: utf16le` (Hermes)
+
+On Android/iOS the E2EE stack needs encodings Hermes does not provide (`utf-16le`). The project polyfills `TextDecoder` / `TextEncoder` before Expo Router loads.
+
+**Symptom:**
+
+```text
+RangeError: Unknown encoding: utf16le (normalized: utf-16le), js engine: hermes
+```
+
+**Fix:**
+
+1. Confirm [`index.ts`](../index.ts) imports `./lib/polyfills` before `expo-router/entry`.
+2. Confirm [`package.json`](../package.json) has `"main": "index.ts"`.
+3. Restart Metro with cache clear:
+
+```powershell
+npx expo start --dev-client --clear
+```
+
+4. Reload the dev client on the phone (no native rebuild needed for this JS-only change).
+
+If the error persists after a code update, fully close the app and reopen it.
+
 ### Step 5.5 — Change server address later
 
 1. Edit `.env`

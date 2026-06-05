@@ -1,7 +1,7 @@
 {
   "name": "smash",
   "type": "module",
-  "main": "expo-router/entry",
+  "main": "index.ts",
   "version": "1.0.0",
   "scripts": {
     "start": "expo start",
@@ -13,6 +13,7 @@
     "postinstall": "patch-package"
   },
   "dependencies": {
+    "@borewit/text-codec": "^0.2.2",
     "@expo/vector-icons": "^15.0.3",
     "@hookform/resolvers": "^5.4.0",
     "@microsoft/signalr": "^10.0.0",

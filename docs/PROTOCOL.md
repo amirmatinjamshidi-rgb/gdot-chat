@@ -41,7 +41,9 @@ EXPO_PUBLIC_API_URL=http://10.0.2.2:5066/v1
 
 - `gdot.db` via `expo-sqlite` + `useSQLCipher: true`, `PRAGMA key` from KEK
 - Composer drafts and profile fields: SQLCipher (`composer_drafts`, `local_profile`) — not AsyncStorage
-- Signal Protocol: `@privacyresearch/libsignal-protocol-typescript` via `lib/crypto/signal-engine.ts` and `modules/libsignal/`
+- **MVP client crypto:** `@privacyresearch/libsignal-protocol-typescript` on Hermes via `lib/crypto/signal-engine.ts`
+- **Hermes polyfill:** `index.ts` → `lib/polyfills.ts` (`@borewit/text-codec`) — required on iOS/Android for `utf-16le` TextDecoder support
+- **Native libsignal** (`LibSignalClient` / Rust core): **deferred**; not required for T2 MVP
 - Pre-key upload: `PUT /v1/devices/{deviceId}/prekeys` on sync start and when replenishing
 
 ## SignalR security note
