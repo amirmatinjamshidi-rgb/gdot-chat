@@ -126,6 +126,15 @@ export class SignalEngine {
     return keys;
   }
 
+  async hasSession(peerAddressId: string): Promise<boolean> {
+    await ensureSignalInitialized();
+    const store = this.getProtocolStore();
+    const session = await store.loadSession(
+      addressFor(peerAddressId).toString(),
+    );
+    return Boolean(session);
+  }
+
   async ensureSession(
     peerAddressId: string,
     bundle: PreKeyBundleDto,

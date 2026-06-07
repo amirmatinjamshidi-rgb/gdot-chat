@@ -10,6 +10,7 @@ import React, {
 import { AppState, type AppStateStatus } from "react-native";
 
 import { APP_LOCK_BACKGROUND_MS } from "@/lib/config";
+import { agentDebugLog } from "@/lib/debug-agent-log";
 import { ensureSignalInitialized } from "@/lib/crypto/init-signal";
 import { useAppServices } from "@/lib/services/app-services-context";
 
@@ -59,6 +60,14 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
   }, [db, kekManager]);
 
   const lock = useCallback(() => {
+    // #region agent log
+    agentDebugLog(
+      "app-lock-provider.tsx:lock",
+      "db close requested",
+      { pathname },
+      "D",
+    );
+    // #endregion
     appLockStore.lock();
     setIsUnlocked(false);
     setDbReady(false);

@@ -131,6 +131,9 @@ export async function loginUser(params: {
       deviceId,
     });
   } catch (e) {
+    if (e instanceof ApiError && e.status >= 400 && e.status < 500) {
+      throw e;
+    }
     if (!__DEV__) {
       throw e instanceof Error ? e : new Error("Login failed");
     }

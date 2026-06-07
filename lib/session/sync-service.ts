@@ -1,6 +1,6 @@
 import type { MessagesApi } from "@/lib/api/messages-api";
 import type { SignalRClient } from "@/lib/api/signalr-client";
-import { SYNC_POLL_INTERVAL_MS } from "@/lib/config";
+import { ENABLE_SIGNALR, SYNC_POLL_INTERVAL_MS } from "@/lib/config";
 import type { SignalService } from "@/lib/crypto/signal-service";
 import { base64ToBytes } from "@/lib/crypto/encoding";
 import { randomUUID } from "@/lib/crypto/random-id";
@@ -8,14 +8,21 @@ import type { IConversationStore } from "@/lib/db/conversation-store";
 import type { IIdentityStore } from "@/lib/db/identity-store";
 import type { IMessageStore } from "@/lib/db/message-store";
 import type { Conversation, LocalMessage } from "@/lib/db/types";
+import { agentDebugLog } from "@/lib/debug-agent-log";
 import type { AuthStore } from "@/lib/session/auth-store";
+import { isOfflineToken } from "@/lib/session/auth-store";
 
 export type SyncErrorHandler = (message: string) => void;
 
 export class SyncService {
+  readonly instanceId = randomUUID();
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private started = false;
   private onError: SyncErrorHandler | null = null;
+  private pullChain: Promise<void> = Promise.resolve();
+  private sendChain: Promise<void> = Promise.resolve();
+  private startInFlight: Promise<void> | null = null;
+  private outboundInFlight = 0;
 
   constructor(
     private readonly messagesApi: MessagesApi,
@@ -33,27 +40,73 @@ export class SyncService {
 
   async start(): Promise<void> {
     if (this.started) return;
+    if (this.startInFlight) return this.startInFlight;
+
+    this.startInFlight = this.startInner().finally(() => {
+      this.startInFlight = null;
+    });
+    return this.startInFlight;
+  }
+
+  private async startInner(): Promise<void> {
+    if (this.started) return;
     this.started = true;
+    // #region agent log
+    agentDebugLog(
+      "sync-service.ts:startInner",
+      "sync started",
+      { instanceId: this.instanceId },
+      "J",
+      "post-fix",
+    );
+    // #endregion
 
     await this.signalService.replenishLocalPreKeysIfNeeded();
 
-    this.signalr.setEnvelopeHandler(() => {
-      void this.pullPending();
-    });
-
-    try {
-      await this.signalr.connect();
-    } catch {
-      if (__DEV__) {
-        console.warn("[SyncService] SignalR connect failed");
-      }
+    const accessToken = await this.authStore.getAccessToken();
+    if (isOfflineToken(accessToken)) {
+      // #region agent log
+      agentDebugLog(
+        "sync-service.ts:startInner",
+        "offline tokens cleared",
+        {},
+        "O",
+        "post-fix",
+      );
+      // #endregion
+      await this.authStore.clearSessionExpired();
+      this.started = false;
+      return;
     }
 
     this.pollTimer = setInterval(() => {
       void this.pullPending();
     }, SYNC_POLL_INTERVAL_MS);
 
-    await this.pullPending();
+    void this.pullPending();
+
+    if (ENABLE_SIGNALR) {
+      this.signalr.setEnvelopeHandler(() => {
+        void this.pullPending();
+      });
+      try {
+        await this.signalr.connect();
+      } catch {
+        if (__DEV__) {
+          console.warn("[SyncService] SignalR connect failed");
+        }
+      }
+    } else {
+      // #region agent log
+      agentDebugLog(
+        "sync-service.ts:startInner",
+        "signalr disabled poll-only",
+        {},
+        "L",
+        "post-fix",
+      );
+      // #endregion
+    }
   }
 
   async stop(): Promise<void> {
@@ -67,6 +120,32 @@ export class SyncService {
   }
 
   async pullPending(): Promise<void> {
+    const run = this.pullChain.then(() => this.pullPendingInner());
+    this.pullChain = run.catch(() => {});
+    return run;
+  }
+
+  private async pullPendingInner(): Promise<void> {
+    if (this.outboundInFlight > 0) {
+      // #region agent log
+      agentDebugLog(
+        "sync-service.ts:pullPending",
+        "pullPending skipped during send",
+        { outboundInFlight: this.outboundInFlight },
+        "K",
+        "post-fix",
+      );
+      // #endregion
+      return;
+    }
+    // #region agent log
+    agentDebugLog(
+      "sync-service.ts:pullPending",
+      "pullPending start",
+      {},
+      "B",
+    );
+    // #endregion
     try {
       const envelopes = await this.messagesApi.getPending();
       const localDeviceId = await this.authStore.getDeviceId();
@@ -123,16 +202,66 @@ export class SyncService {
         await this.messagesApi.ack(env.id);
       }
     } catch (e) {
-      if (__DEV__) {
-        console.warn(
-          "[SyncService] pullPending failed",
-          e instanceof Error ? e.message : e,
+      const msg = e instanceof Error ? e.message : String(e);
+      const abortedForSend =
+        this.outboundInFlight > 0 &&
+        (msg.includes("Aborted") || msg.includes("abort"));
+      if (abortedForSend) {
+        // #region agent log
+        agentDebugLog(
+          "sync-service.ts:pullPending",
+          "pullPending aborted for send",
+          {},
+          "L",
+          "post-fix",
         );
+        // #endregion
+        return;
       }
+      // #region agent log
+      agentDebugLog(
+        "sync-service.ts:pullPending",
+        "pullPending error",
+        { error: msg },
+        "B",
+      );
+      // #endregion
+      if (__DEV__) {
+        console.warn("[SyncService] pullPending failed", msg);
+      }
+    } finally {
+      // #region agent log
+      agentDebugLog(
+        "sync-service.ts:pullPending",
+        "pullPending end",
+        {},
+        "B",
+      );
+      // #endregion
     }
   }
 
   async sendOutgoing(conversationId: string, text: string): Promise<void> {
+    const run = this.sendChain.then(() =>
+      this.sendOutgoingInner(conversationId, text),
+    );
+    this.sendChain = run.catch(() => {});
+    return run;
+  }
+
+  private async sendOutgoingInner(
+    conversationId: string,
+    text: string,
+  ): Promise<void> {
+    // #region agent log
+    agentDebugLog(
+      "sync-service.ts:sendOutgoing",
+      "sendOutgoing start",
+      { conversationId },
+      "A",
+      "post-fix",
+    );
+    // #endregion
     const conversation = await this.conversationStore.getById(conversationId);
     if (!conversation) throw new Error("Conversation not found");
 
@@ -153,31 +282,81 @@ export class SyncService {
       createdAt,
     };
     await this.messageStore.insert(optimistic);
+    // #region agent log
+    agentDebugLog(
+      "sync-service.ts:sendOutgoing",
+      "after message insert",
+      { messageId: id },
+      "A",
+    );
+    // #endregion
 
+    await this.messagesApi.abortBackground();
+    this.outboundInFlight++;
     try {
-      const payload = await this.signalService.encryptOutgoing(
-        conversation.peerUserId,
-        conversation.peerDeviceId,
-        text,
+      await this.signalr.runWithTransportPaused(async () => {
+        const payload = await this.signalService.encryptOutgoing(
+          conversation.peerUserId,
+          conversation.peerDeviceId,
+          text,
+        );
+        // #region agent log
+        agentDebugLog(
+          "sync-service.ts:sendOutgoing",
+          "after encrypt",
+          { messageType: payload.messageType },
+          "A",
+        );
+        // #endregion
+        // #region agent log
+        agentDebugLog(
+          "sync-service.ts:sendOutgoing",
+          "posting message to server",
+          {
+            recipientUserId: payload.recipientUserId,
+            recipientDeviceId: payload.recipientDeviceId,
+          },
+          "A",
+          "post-fix",
+        );
+        // #endregion
+        const result = await this.messagesApi.send({
+          recipientUserId: payload.recipientUserId,
+          recipientDeviceId: payload.recipientDeviceId,
+          messageType: payload.messageType,
+          ciphertextBase64: payload.ciphertextBase64,
+        });
+        await this.messageStore.updateStatus(id, "sent");
+        await this.conversationStore.upsert({
+          ...conversation,
+          lastMessagePreview: text.slice(0, 120),
+          lastMessageAt: createdAt,
+        });
+        void result;
+      });
+      // #region agent log
+      agentDebugLog(
+        "sync-service.ts:sendOutgoing",
+        "sendOutgoing success",
+        { messageId: id },
+        "A",
       );
-      const result = await this.messagesApi.send({
-        recipientUserId: payload.recipientUserId,
-        recipientDeviceId: payload.recipientDeviceId,
-        messageType: payload.messageType,
-        ciphertextBase64: payload.ciphertextBase64,
-      });
-      await this.messageStore.updateStatus(id, "sent");
-      await this.conversationStore.upsert({
-        ...conversation,
-        lastMessagePreview: text.slice(0, 120),
-        lastMessageAt: createdAt,
-      });
-      void result;
+      // #endregion
     } catch (e) {
+      // #region agent log
+      agentDebugLog(
+        "sync-service.ts:sendOutgoing",
+        "sendOutgoing error",
+        { error: e instanceof Error ? e.message : String(e) },
+        "A",
+      );
+      // #endregion
       await this.messageStore.updateStatus(id, "failed");
       throw e instanceof Error
         ? e
         : new Error("Message could not be delivered. Check connection and try again.");
+    } finally {
+      this.outboundInFlight--;
     }
   }
 

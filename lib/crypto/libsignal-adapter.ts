@@ -31,6 +31,7 @@ export interface ICryptoEngine {
     type: 2 | 3,
   ): Promise<string>;
   ensureSession(peerAddressId: string, bundle: PreKeyBundleDto): Promise<void>;
+  hasSession(peerAddressId: string): Promise<boolean>;
   computeSafetyNumber(
     localPublic: Uint8Array,
     remotePublic: Uint8Array,
@@ -70,6 +71,10 @@ export class LibSignalAdapter implements ICryptoEngine {
 
   generatePreKeys(startId: number, count: number): Promise<PreKey[]> {
     return this.engine.generatePreKeys(startId, count);
+  }
+
+  hasSession(peerAddressId: string): Promise<boolean> {
+    return this.engine.hasSession(peerAddressId);
   }
 
   async ensureSession(

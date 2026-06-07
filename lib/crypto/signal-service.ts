@@ -1,6 +1,7 @@
 import type { DevicesApi } from "@/lib/api/devices-api";
 import { ApiError } from "@/lib/api/api-client";
 import type { PreKeyBundleDto } from "@/lib/api/api-types";
+import { agentDebugLog } from "@/lib/debug-agent-log";
 import type { IIdentityStore } from "@/lib/db/identity-store";
 
 import type { ICryptoEngine } from "./libsignal-adapter";
@@ -22,8 +23,39 @@ export class SignalService {
 
   async ensureSession(peerUserId: string, peerDeviceId: string): Promise<void> {
     const addr = protocolAddressId(peerUserId);
+    const hasSession = await this.crypto.hasSession(addr);
+    // #region agent log
+    agentDebugLog(
+      "signal-service.ts:ensureSession",
+      "session check",
+      { peerUserId, hasSession },
+      "H",
+      "post-fix",
+    );
+    // #endregion
+    if (hasSession) {
+      return;
+    }
+    // #region agent log
+    agentDebugLog(
+      "signal-service.ts:ensureSession",
+      "fetching prekey bundle",
+      { peerUserId, peerDeviceId },
+      "H",
+      "post-fix",
+    );
+    // #endregion
     const bundle = await this.fetchBundleWithReplenish(peerUserId, peerDeviceId);
     await this.crypto.ensureSession(addr, bundle);
+    // #region agent log
+    agentDebugLog(
+      "signal-service.ts:ensureSession",
+      "session established",
+      { peerUserId },
+      "H",
+      "post-fix",
+    );
+    // #endregion
   }
 
   async encryptOutgoing(
@@ -33,7 +65,28 @@ export class SignalService {
   ): Promise<SendPayload> {
     await this.ensureSession(peerUserId, peerDeviceId);
     const addr = protocolAddressId(peerUserId);
+    // #region agent log
+    agentDebugLog(
+      "signal-service.ts:encryptOutgoing",
+      "encrypt start",
+      { peerUserId },
+      "H",
+      "post-fix",
+    );
+    // #endregion
     const result = await this.crypto.encrypt(addr, plaintext);
+    if (result.ciphertext.length === 0) {
+      throw new Error("Encryption produced empty ciphertext");
+    }
+    // #region agent log
+    agentDebugLog(
+      "signal-service.ts:encryptOutgoing",
+      "encrypt done",
+      { messageType: result.messageType, bytes: result.ciphertext.length },
+      "H",
+      "post-fix",
+    );
+    // #endregion
     return {
       recipientUserId: peerUserId,
       recipientDeviceId: peerDeviceId,
@@ -94,9 +147,12 @@ export class SignalService {
   async replenishLocalPreKeysIfNeeded(): Promise<void> {
     try {
       await this.preKeyManager.replenishOneTimePreKeys();
-    } catch {
+    } catch (e) {
       if (__DEV__) {
-        console.warn("[SignalService] pre-key upload skipped");
+        console.warn(
+          "[SignalService] pre-key upload skipped",
+          e instanceof Error ? e.message : e,
+        );
       }
     }
   }

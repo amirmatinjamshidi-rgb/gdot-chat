@@ -5,7 +5,7 @@ export class DevicesApi {
   constructor(private readonly client: ApiClient) {}
 
   getPreKeyBundle(userId: string, deviceId: string): Promise<PreKeyBundleDto> {
-    return this.client.get<PreKeyBundleDto>(
+    return this.client.getPriority<PreKeyBundleDto>(
       `/users/${userId}/devices/${deviceId}/prekey-bundle`,
     );
   }

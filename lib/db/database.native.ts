@@ -1,5 +1,7 @@
 import * as SQLite from "expo-sqlite";
 
+import { agentDebugLog } from "@/lib/debug-agent-log";
+
 import { DB_NAME } from "./constants";
 import type { IDatabase, RunResult, SqlParams } from "./database-types";
 import { MigrationRunner } from "./migration-runner";
@@ -7,8 +9,32 @@ import { escapeSqlString } from "./sql-utils";
 
 export type { IDatabase, RunResult, SqlParams } from "./database-types";
 
+const BUSY_TIMEOUT_MS = 5000;
+
 export class SqlCipherDatabase implements IDatabase {
   private db: SQLite.SQLiteDatabase | null = null;
+  private mutex: Promise<void> = Promise.resolve();
+  private depth = 0;
+
+  /** Serialize all DB access; re-entrant while inside withTransaction. */
+  private async serialize<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.depth > 0) {
+      return fn();
+    }
+    const previous = this.mutex;
+    let release!: () => void;
+    this.mutex = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    this.depth++;
+    try {
+      return await fn();
+    } finally {
+      this.depth--;
+      release();
+    }
+  }
 
   async open(passphrase: string): Promise<void> {
     if (this.db) return;
@@ -18,6 +44,7 @@ export class SqlCipherDatabase implements IDatabase {
     );
     await this.db.execAsync("PRAGMA foreign_keys = ON");
     await this.db.execAsync("PRAGMA cipher_memory_security = ON");
+    await this.db.execAsync(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
     const runner = new MigrationRunner();
     const self: IDatabase = this;
     await runner.runMigrations(self);
@@ -25,8 +52,10 @@ export class SqlCipherDatabase implements IDatabase {
   }
 
   async close(): Promise<void> {
-    await this.db?.closeAsync();
-    this.db = null;
+    await this.serialize(async () => {
+      await this.db?.closeAsync();
+      this.db = null;
+    });
   }
 
   isOpen(): boolean {
@@ -34,35 +63,88 @@ export class SqlCipherDatabase implements IDatabase {
   }
 
   async run(sql: string, params: SqlParams = []): Promise<RunResult> {
-    if (!this.db) throw new Error("DB not open");
-    const result = await this.db.runAsync(sql, params);
-    return {
-      changes: result.changes,
-      lastInsertRowId: result.lastInsertRowId,
-    };
+    const op = sql.trim().split(/\s+/)[0]?.toUpperCase() ?? "?";
+    // #region agent log
+    agentDebugLog(
+      "database.native.ts:run",
+      "db.run start",
+      { op, depth: this.depth, isOpen: this.db !== null },
+      "C",
+    );
+    // #endregion
+    try {
+      return await this.serialize(async () => {
+        if (!this.db) throw new Error("DB not open");
+        const result = await this.db.runAsync(sql, params);
+        return {
+          changes: result.changes,
+          lastInsertRowId: result.lastInsertRowId,
+        };
+      });
+    } catch (e) {
+      // #region agent log
+      agentDebugLog(
+        "database.native.ts:run",
+        "db.run error",
+        {
+          op,
+          depth: this.depth,
+          error: e instanceof Error ? e.message : String(e),
+        },
+        "C",
+      );
+      // #endregion
+      throw e;
+    }
   }
 
   async getFirst<T>(sql: string, params: SqlParams = []): Promise<T | null> {
-    if (!this.db) throw new Error("DB not open");
-    return (await this.db.getFirstAsync<T>(sql, params)) ?? null;
+    const table =
+      sql.match(/FROM\s+(\w+)/i)?.[1] ??
+      sql.match(/INTO\s+(\w+)/i)?.[1] ??
+      "?";
+    try {
+      return await this.serialize(async () => {
+        if (!this.db) throw new Error("DB not open");
+        return (await this.db.getFirstAsync<T>(sql, params)) ?? null;
+      });
+    } catch (e) {
+      // #region agent log
+      agentDebugLog(
+        "database.native.ts:getFirst",
+        "db.getFirst error",
+        {
+          table,
+          depth: this.depth,
+          error: e instanceof Error ? e.message : String(e),
+        },
+        "C",
+      );
+      // #endregion
+      throw e;
+    }
   }
 
   async getAll<T>(sql: string, params: SqlParams = []): Promise<T[]> {
-    if (!this.db) throw new Error("DB not open");
-    return this.db.getAllAsync<T>(sql, params);
+    return this.serialize(async () => {
+      if (!this.db) throw new Error("DB not open");
+      return this.db.getAllAsync<T>(sql, params);
+    });
   }
 
   async withTransaction<T>(fn: () => Promise<T>): Promise<T> {
-    if (!this.db) throw new Error("DB not open");
-    await this.run("BEGIN IMMEDIATE");
-    try {
-      const result = await fn();
-      await this.run("COMMIT");
-      return result;
-    } catch (e) {
-      await this.run("ROLLBACK");
-      throw e;
-    }
+    return this.serialize(async () => {
+      if (!this.db) throw new Error("DB not open");
+      await this.db.runAsync("BEGIN IMMEDIATE");
+      try {
+        const result = await fn();
+        await this.db.runAsync("COMMIT");
+        return result;
+      } catch (e) {
+        await this.db.runAsync("ROLLBACK");
+        throw e;
+      }
+    });
   }
 }
 

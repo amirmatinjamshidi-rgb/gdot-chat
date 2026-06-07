@@ -8,11 +8,12 @@ import { useAppServices } from "@/lib/services/app-services-context";
 const REFRESH_MS = 5_000;
 
 /**
- * Loads messages for a conversation and polls the server for inbound envelopes.
+ * Loads messages for a conversation from SQLCipher.
+ * Inbound sync is handled by SyncService (poll + SignalR); this hook only reads.
  * Clears in-memory plaintext when the app locks (lockEpoch).
  */
 export function useConversationMessages(conversationId: string | undefined) {
-  const { messageStore, syncService } = useAppServices();
+  const { messageStore } = useAppServices();
   const { dbReady, lockEpoch } = useAppLock();
   const [messages, setMessages] = useState<LocalMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -24,13 +25,12 @@ export function useConversationMessages(conversationId: string | undefined) {
       return;
     }
     try {
-      await syncService.pullPending();
       const list = await messageStore.listByConversation(conversationId, 200);
       setMessages(list);
     } finally {
       setLoading(false);
     }
-  }, [conversationId, messageStore, syncService, dbReady]);
+  }, [conversationId, messageStore, dbReady]);
 
   useFocusEffect(
     useCallback(() => {

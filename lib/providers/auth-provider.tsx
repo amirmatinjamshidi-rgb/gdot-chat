@@ -42,6 +42,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [refresh]);
 
   useEffect(() => {
+    return authStore.onSessionExpired(() => {
+      setIsLoggedIn(false);
+    });
+  }, [authStore]);
+
+  useEffect(() => {
     if (isLoading) return;
     const root = segments[0] as string | undefined;
     const inAuth = root === "(auth)";

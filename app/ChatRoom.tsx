@@ -146,6 +146,7 @@ export default function ChatRoomScreen() {
   const chatId = id || "default";
 
   const [composerError, setComposerError] = useState<string | null>(null);
+  const [isSending, setIsSending] = useState(false);
   const [videoSessionActive, setVideoSessionActive] = useState(false);
   const [voiceRecordingActive, setVoiceRecordingActive] = useState(false);
 
@@ -390,8 +391,9 @@ export default function ChatRoomScreen() {
 
   const sendTextMessage = useCallback(() => {
     const trimmedMessage = draft.trim();
-    if (!trimmedMessage) return;
+    if (!trimmedMessage || isSending) return;
     void (async () => {
+      setIsSending(true);
       try {
         await syncService.sendOutgoing(chatId, trimmedMessage);
         clearDraft();
@@ -402,6 +404,8 @@ export default function ChatRoomScreen() {
         setComposerError(
           e instanceof Error ? e.message : "Failed to send message.",
         );
+      } finally {
+        setIsSending(false);
       }
     })();
   }, [
@@ -411,6 +415,7 @@ export default function ChatRoomScreen() {
     syncService,
     reloadMessages,
     resetComposerAfterSend,
+    isSending,
   ]);
 
   const finishVoiceCapture = useCallback(async () => {
