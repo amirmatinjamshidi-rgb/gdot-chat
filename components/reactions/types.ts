@@ -13,8 +13,15 @@ export type ReactionPayload = {
   serverEnvelopeId?: string;
 };
 
-/** First row in the picker (7 slots); last slot opens the full emoji sheet. */
-export const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥", "➕"] as const;
+export const QUICK_REACTIONS = [
+  "👍",
+  "❤️",
+  "😂",
+  "😮",
+  "😢",
+  "🔥",
+  "😭",
+] as const;
 
 export const ALL_REACTIONS = [
   "👍",
@@ -37,6 +44,7 @@ export const ALL_REACTIONS = [
   "🤡",
   "🥱",
   "🥴",
+  "➕",
   "😍",
   "🐳",
   "❤️‍🔥",
