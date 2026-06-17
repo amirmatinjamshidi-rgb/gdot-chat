@@ -31,7 +31,7 @@ export async function registerUser(params: {
     identityPair,
     1,
   );
-  const oneTimePreKeys = await params.crypto.generatePreKeys(1, 100);
+  const oneTimePreKeys = await params.crypto.generatePreKeys(1, 50);
 
   const registerBody: RegisterRequest = {
     username,

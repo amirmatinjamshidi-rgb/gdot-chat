@@ -2,20 +2,38 @@ import * as signalR from "@microsoft/signalr";
 import { Platform } from "react-native";
 
 import { SIGNALR_HUB_URL } from "@/lib/config";
+import type { ReactionPayload } from "@/components/reactions/types";
 import { agentDebugLog } from "@/lib/debug-agent-log";
 import type { AuthStore } from "@/lib/session/auth-store";
 
 export type EnvelopeAvailableHandler = (envelopeId: string) => void;
+export type ReactionHandler = (payload: ReactionPayload) => void;
 
 export class SignalRClient {
   private connection: signalR.HubConnection | null = null;
   private onEnvelope: EnvelopeAvailableHandler | null = null;
+  private onReaction: ReactionHandler | null = null;
   private connectInFlight: Promise<void> | null = null;
 
   constructor(private readonly authStore: AuthStore) {}
 
   setEnvelopeHandler(handler: EnvelopeAvailableHandler | null): void {
     this.onEnvelope = handler;
+  }
+
+  setReactionHandler(handler: ReactionHandler | null): void {
+    this.onReaction = handler;
+  }
+
+  async sendReaction(payload: ReactionPayload): Promise<void> {
+    if (this.connection?.state !== signalR.HubConnectionState.Connected) {
+      return;
+    }
+    try {
+      await this.connection.invoke("SendReaction", payload);
+    } catch {
+      /* REST fallback already sent */
+    }
   }
 
   async connect(): Promise<void> {
@@ -74,6 +92,10 @@ export class SignalRClient {
         this.onEnvelope?.(payload.envelopeId);
       },
     );
+
+    this.connection.on("ReceiveReaction", (payload: ReactionPayload) => {
+      this.onReaction?.(payload);
+    });
 
     try {
       await this.connection.start();
