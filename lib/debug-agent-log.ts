@@ -38,11 +38,15 @@ export function agentDebugLog(
     runId,
     timestamp: Date.now(),
   };
-  if (__DEV__) {
+  // Native: never console.log here — registration alone writes 50+ pre-keys and
+  // synchronous JSON.stringify + LogBox on each INSERT freezes the JS thread on
+  // Android (e.g. Xiaomi). Opt in with EXPO_PUBLIC_AGENT_DEBUG=1 if needed.
+  const verbose =
+    process.env.EXPO_PUBLIC_AGENT_DEBUG === "1" ||
+    process.env.EXPO_PUBLIC_AGENT_DEBUG === "true";
+  if (__DEV__ && verbose && Platform.OS === "web") {
     console.log(`[DEBUG-${SESSION_ID}]`, JSON.stringify(payload));
   }
-  // Native: skip ingest HTTP — parallel fetches to host:7859 (no listener) starve
-  // OkHttp connections to the same LAN IP and block API calls on :5066.
   if (Platform.OS !== "web") {
     return;
   }
