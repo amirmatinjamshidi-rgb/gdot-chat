@@ -1,6 +1,6 @@
 import { type Href, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Alert, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ThemedText } from "@/components/themed-text";
@@ -28,6 +28,11 @@ export default function LockScreen() {
     setBusy(false);
     if (ok) {
       router.replace("/(tabs)/chats" as Href);
+    } else {
+      Alert.alert(
+        "Unlock failed",
+        "Use your fingerprint, face, or device PIN. On some phones you must enroll biometrics in system settings first.",
+      );
     }
   };
 
