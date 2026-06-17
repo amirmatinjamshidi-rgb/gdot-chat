@@ -4,6 +4,7 @@ export * from "./database";
 export * from "./kek-manager";
 export * from "./types";
 export * from "./message-store";
+export * from "./reaction-store";
 export * from "./conversation-store";
 export * from "./session-store";
 export * from "./identity-store";
