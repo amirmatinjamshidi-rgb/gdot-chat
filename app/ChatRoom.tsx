@@ -47,6 +47,8 @@ import {
   type HoldRecordControlsHandle,
 } from "@/components/hold-record-controls";
 import { RecordingSlideMeter } from "@/components/recording-slide-meter";
+import { ReactionPicker } from "@/components/reactions/reaction-picker";
+import { TextMessageBubble } from "@/components/reactions/text-message-bubble";
 import { ScreenTopAccent } from "@/components/screen-top-accent";
 import { ThemedText } from "@/components/themed-text";
 import {
@@ -62,6 +64,7 @@ import {
 import { VoiceMessageBubble } from "@/components/voice-message-bubble";
 import { useComposerDraft } from "@/hooks/use-composer-draft";
 import { useConversationMessages } from "@/hooks/use-conversation-messages";
+import { useReactions } from "@/hooks/use-reactions";
 import { localMessageToUi } from "@/lib/chat/local-message-ui";
 import { useAppServices } from "@/lib/services/app-services-context";
 import {
@@ -150,7 +153,7 @@ export default function ChatRoomScreen() {
   const [videoSessionActive, setVideoSessionActive] = useState(false);
   const [voiceRecordingActive, setVoiceRecordingActive] = useState(false);
 
-  const { syncService } = useAppServices();
+  const { syncService, conversationStore } = useAppServices();
   const activePlaybackId = useMessagesStore((state) => state.activePlaybackId);
   const setActivePlayback = useMessagesStore(
     (state) => state.setActivePlayback,
@@ -182,9 +185,53 @@ export default function ChatRoomScreen() {
   const contactName = useMemo(() => name || "Chat", [name]);
   const { messages: localMessages, reload: reloadMessages } =
     useConversationMessages(chatId);
+  const { reactionsByMessageId, sendReaction, currentUserId } = useReactions({
+    conversationId: chatId,
+  });
+  const [peerDeviceId, setPeerDeviceId] = useState("");
+  const [pickerVisible, setPickerVisible] = useState(false);
+  const [pickerAnchor, setPickerAnchor] = useState({ x: 0, y: 0 });
+  const [pickerMessageId, setPickerMessageId] = useState<string | null>(null);
+  const [highlightEmoji, setHighlightEmoji] = useState<string | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      const conv = await conversationStore.getById(chatId);
+      if (conv) setPeerDeviceId(conv.peerDeviceId);
+    })();
+  }, [chatId, conversationStore]);
+
   const messages = useMemo(
-    () => localMessages.map((m) => localMessageToUi(m, contactName)),
-    [localMessages, contactName],
+    () =>
+      localMessages.map((m) =>
+        localMessageToUi(m, contactName, reactionsByMessageId[m.id] ?? []),
+      ),
+    [localMessages, contactName, reactionsByMessageId],
+  );
+
+  const handleMessageLongPress = useCallback(
+    (messageId: string, layout: { x: number; y: number }) => {
+      setPickerMessageId(messageId);
+      setPickerAnchor(layout);
+      setPickerVisible(true);
+    },
+    [],
+  );
+
+  const handleReactionPress = useCallback(
+    (messageId: string, emoji: string) => {
+      if (!peerDeviceId) return;
+      const msg = messages.find((m) => m.id === messageId);
+      setHighlightEmoji(emoji);
+      void sendReaction(
+        messageId,
+        emoji,
+        peerDeviceId,
+        msg?.serverEnvelopeId,
+      );
+      setTimeout(() => setHighlightEmoji(null), 500);
+    },
+    [messages, peerDeviceId, sendReaction],
   );
 
   const swipeBackGesture = useMemo(
@@ -851,6 +898,37 @@ export default function ChatRoomScreen() {
                         ? "rgba(255,255,255,0.7)"
                         : "rgba(0,0,0,0.5)";
 
+                  if (item.kind === "text") {
+                    return (
+                      <TextMessageBubble
+                        messageId={item.id}
+                        text={item.text ?? ""}
+                        time={item.time}
+                        isMine={item.isMine ?? item.sender === "me"}
+                        primaryColor={primaryColor}
+                        timeColor={timeColor}
+                        bubbleStyle={[
+                          styles.messageBubble,
+                          item.sender === "me"
+                            ? styles.myMessage
+                            : styles.theirMessage,
+                          {
+                            backgroundColor: bubbleBg,
+                            borderWidth: item.sender === "me" ? 0 : 1,
+                            borderColor: colors.surfaceBorder,
+                          },
+                        ]}
+                        reactions={item.reactions ?? []}
+                        myId={currentUserId}
+                        highlightEmoji={
+                          pickerMessageId === item.id ? highlightEmoji : null
+                        }
+                        onLongPress={handleMessageLongPress}
+                        onReactionPress={handleReactionPress}
+                      />
+                    );
+                  }
+
                   return (
                     <View
                       style={[
@@ -910,17 +988,6 @@ export default function ChatRoomScreen() {
                           />
                         </View>
                       ) : null}
-                      {item.kind === "text" ? (
-                        <ThemedText style={{ color: primaryColor }}>
-                          {item.text}
-                        </ThemedText>
-                      ) : item.kind === "video" ? (
-                        <ThemedText
-                          style={[styles.videoLabel, { color: timeColor }]}
-                        >
-                          {/* Video message */}
-                        </ThemedText>
-                      ) : null}
                       <ThemedText
                         style={[styles.timeText, { color: timeColor }]}
                       >
@@ -928,6 +995,26 @@ export default function ChatRoomScreen() {
                       </ThemedText>
                     </View>
                   );
+                }}
+              />
+
+              <ReactionPicker
+                visible={pickerVisible}
+                anchorX={pickerAnchor.x}
+                anchorY={pickerAnchor.y}
+                onClose={() => setPickerVisible(false)}
+                onSelect={(emoji) => {
+                  if (pickerMessageId && peerDeviceId) {
+                    const msg = messages.find((m) => m.id === pickerMessageId);
+                    setHighlightEmoji(emoji);
+                    void sendReaction(
+                      pickerMessageId,
+                      emoji,
+                      peerDeviceId,
+                      msg?.serverEnvelopeId,
+                    );
+                    setTimeout(() => setHighlightEmoji(null), 500);
+                  }
                 }}
               />
 
