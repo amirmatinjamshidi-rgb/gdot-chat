@@ -9,7 +9,9 @@ export interface IMessageStore {
     before?: number,
   ): Promise<LocalMessage[]>;
   updateStatus(id: string, status: MessageStatus): Promise<void>;
+  updateServerEnvelopeId(id: string, serverEnvelopeId: string): Promise<void>;
   getByClientId(clientId: string): Promise<LocalMessage | null>;
+  getByServerEnvelopeId(serverEnvelopeId: string): Promise<LocalMessage | null>;
 }
 
 type MessageRow = {
@@ -95,10 +97,30 @@ export class MessageStore implements IMessageStore {
     ]);
   }
 
+  async updateServerEnvelopeId(
+    id: string,
+    serverEnvelopeId: string,
+  ): Promise<void> {
+    await this.db.run(
+      `UPDATE messages SET server_envelope_id = ? WHERE id = ?`,
+      [serverEnvelopeId, id],
+    );
+  }
+
   async getByClientId(clientId: string): Promise<LocalMessage | null> {
     const row = await this.db.getFirst<MessageRow>(
       `SELECT * FROM messages WHERE client_id = ?`,
       [clientId],
+    );
+    return row ? mapRow(row) : null;
+  }
+
+  async getByServerEnvelopeId(
+    serverEnvelopeId: string,
+  ): Promise<LocalMessage | null> {
+    const row = await this.db.getFirst<MessageRow>(
+      `SELECT * FROM messages WHERE server_envelope_id = ?`,
+      [serverEnvelopeId],
     );
     return row ? mapRow(row) : null;
   }

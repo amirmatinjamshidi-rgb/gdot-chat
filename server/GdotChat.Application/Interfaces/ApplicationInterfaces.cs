@@ -36,6 +36,15 @@ public interface IMessageRelayService
     Task<int> PurgeExpiredAsync(CancellationToken ct = default);
 }
 
+public interface IReactionService
+{
+    Task ToggleAndNotifyAsync(
+        Guid senderUserId,
+        Guid senderDeviceId,
+        ReactionRequest request,
+        CancellationToken ct = default);
+}
+
 public interface IJwtTokenService
 {
     string CreateAccessToken(User user, Device device);
@@ -55,4 +64,5 @@ public interface IMessageNotifier
 {
     Task NotifyEnvelopeAvailableAsync(Guid recipientDeviceId, Guid envelopeId, CancellationToken ct = default);
     Task NotifyPreKeysLowAsync(Guid deviceId, int remainingCount, CancellationToken ct = default);
+    Task NotifyReactionAsync(Guid recipientDeviceId, ReactionPayload payload, CancellationToken ct = default);
 }

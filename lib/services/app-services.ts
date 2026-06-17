@@ -3,6 +3,7 @@ import { ENABLE_SIGNALR } from "@/lib/config";
 import { AuthApi } from "@/lib/api/auth-api";
 import { DevicesApi } from "@/lib/api/devices-api";
 import { MessagesApi } from "@/lib/api/messages-api";
+import { ReactionsApi } from "@/lib/api/reactions-api";
 import { SignalRClient } from "@/lib/api/signalr-client";
 import { UsersApi } from "@/lib/api/users-api";
 import { LibSignalAdapter } from "@/lib/crypto/libsignal-adapter";
@@ -15,6 +16,7 @@ import { DraftStore } from "@/lib/db/draft-store";
 import { IdentityStore } from "@/lib/db/identity-store";
 import { kekManager } from "@/lib/db/kek-manager";
 import { MessageStore } from "@/lib/db/message-store";
+import { ReactionStore } from "@/lib/db/reaction-store";
 import { ProfileStore } from "@/lib/db/profile-store";
 import { SessionStore } from "@/lib/db/session-store";
 import { authStore } from "@/lib/session/auth-store";
@@ -39,7 +41,9 @@ const crypto = new LibSignalAdapter(
 );
 const devicesApi = new DevicesApi(apiClient);
 const messagesApi = new MessagesApi(apiClient);
+const reactionsApi = new ReactionsApi(apiClient);
 const messageStore = new MessageStore(sqlCipherDatabase);
+const reactionStore = new ReactionStore(sqlCipherDatabase);
 const conversationStore = new ConversationStore(sqlCipherDatabase);
 const preKeyManager = new PreKeyManager(
   crypto,
@@ -72,6 +76,7 @@ export const appServices = {
   authApi: new AuthApi(apiClient),
   devicesApi,
   messagesApi,
+  reactionsApi,
   usersApi: new UsersApi(apiClient),
   signalr,
   identityStore,
@@ -80,6 +85,7 @@ export const appServices = {
   draftStore: new DraftStore(sqlCipherDatabase),
   sessionStore,
   messageStore,
+  reactionStore,
   conversationStore,
   crypto,
   preKeyManager,

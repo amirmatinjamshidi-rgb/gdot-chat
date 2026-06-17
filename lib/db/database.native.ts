@@ -1,7 +1,5 @@
 import * as SQLite from "expo-sqlite";
 
-import { agentDebugLog } from "@/lib/debug-agent-log";
-
 import { DB_NAME } from "./constants";
 import type { IDatabase, RunResult, SqlParams } from "./database-types";
 import { MigrationRunner } from "./migration-runner";
@@ -63,66 +61,21 @@ export class SqlCipherDatabase implements IDatabase {
   }
 
   async run(sql: string, params: SqlParams = []): Promise<RunResult> {
-    const op = sql.trim().split(/\s+/)[0]?.toUpperCase() ?? "?";
-    // #region agent log
-    agentDebugLog(
-      "database.native.ts:run",
-      "db.run start",
-      { op, depth: this.depth, isOpen: this.db !== null },
-      "C",
-    );
-    // #endregion
-    try {
-      return await this.serialize(async () => {
-        if (!this.db) throw new Error("DB not open");
-        const result = await this.db.runAsync(sql, params);
-        return {
-          changes: result.changes,
-          lastInsertRowId: result.lastInsertRowId,
-        };
-      });
-    } catch (e) {
-      // #region agent log
-      agentDebugLog(
-        "database.native.ts:run",
-        "db.run error",
-        {
-          op,
-          depth: this.depth,
-          error: e instanceof Error ? e.message : String(e),
-        },
-        "C",
-      );
-      // #endregion
-      throw e;
-    }
+    return this.serialize(async () => {
+      if (!this.db) throw new Error("DB not open");
+      const result = await this.db.runAsync(sql, params);
+      return {
+        changes: result.changes,
+        lastInsertRowId: result.lastInsertRowId,
+      };
+    });
   }
 
   async getFirst<T>(sql: string, params: SqlParams = []): Promise<T | null> {
-    const table =
-      sql.match(/FROM\s+(\w+)/i)?.[1] ??
-      sql.match(/INTO\s+(\w+)/i)?.[1] ??
-      "?";
-    try {
-      return await this.serialize(async () => {
-        if (!this.db) throw new Error("DB not open");
-        return (await this.db.getFirstAsync<T>(sql, params)) ?? null;
-      });
-    } catch (e) {
-      // #region agent log
-      agentDebugLog(
-        "database.native.ts:getFirst",
-        "db.getFirst error",
-        {
-          table,
-          depth: this.depth,
-          error: e instanceof Error ? e.message : String(e),
-        },
-        "C",
-      );
-      // #endregion
-      throw e;
-    }
+    return this.serialize(async () => {
+      if (!this.db) throw new Error("DB not open");
+      return (await this.db.getFirstAsync<T>(sql, params)) ?? null;
+    });
   }
 
   async getAll<T>(sql: string, params: SqlParams = []): Promise<T[]> {

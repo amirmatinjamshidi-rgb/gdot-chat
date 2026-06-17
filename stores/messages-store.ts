@@ -1,5 +1,7 @@
 import { create } from "zustand";
 
+import type { Reaction } from "@/components/reactions/types";
+
 export type MessageKind = "text" | "voice" | "video" | "story";
 
 export type Message = {
@@ -13,6 +15,8 @@ export type Message = {
   mediaUri?: string;
   storyUri?: string;
   isMine?: boolean;
+  reactions?: Reaction[];
+  serverEnvelopeId?: string;
 };
 
 type MessagesState = {

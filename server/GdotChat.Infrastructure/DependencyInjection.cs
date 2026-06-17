@@ -28,6 +28,7 @@ public static class DependencyInjection
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IDeviceService, DeviceService>();
         services.AddScoped<IMessageRelayService, MessageRelayService>();
+        services.AddScoped<IReactionService, ReactionService>();
         services.AddScoped<IJwtTokenService, JwtTokenService>();
         services.AddScoped<IPasswordHasher, PasswordHasher>();
         services.AddScoped<IMessageNotifier, SignalRMessageNotifier>();

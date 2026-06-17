@@ -18,3 +18,18 @@ public record SendMessageResponse(Guid EnvelopeId);
 public record EnvelopeAvailablePayload(Guid EnvelopeId);
 
 public record PreKeysLowPayload(int RemainingCount);
+
+public record ReactionRequest(
+    string MessageId,
+    string ConversationId,
+    string Emoji,
+    string UserId,
+    Guid RecipientDeviceId,
+    string? ServerEnvelopeId);
+
+public record ReactionPayload(
+    string MessageId,
+    string ConversationId,
+    string Emoji,
+    string UserId,
+    string? ServerEnvelopeId);

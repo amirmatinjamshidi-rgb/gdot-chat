@@ -2,11 +2,13 @@ import { MIGRATIONS_TABLE } from "./constants";
 import type { IDatabase } from "./database-types";
 import { MIGRATION_001_SQL } from "./migrations/001-initial";
 import { MIGRATION_002_SQL } from "./migrations/002-key-material";
+import { MIGRATION_003_SQL } from "./migrations/003-reactions";
 import { splitStatements } from "./sql-utils";
 
 const MIGRATIONS: { version: number; sql: string }[] = [
   { version: 1, sql: MIGRATION_001_SQL },
   { version: 2, sql: MIGRATION_002_SQL },
+  { version: 3, sql: MIGRATION_003_SQL },
 ];
 
 export class MigrationRunner {

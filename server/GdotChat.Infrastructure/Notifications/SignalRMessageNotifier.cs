@@ -28,5 +28,13 @@ public class SignalRMessageNotifier : IMessageNotifier
             .Group(DeviceGroup(deviceId))
             .SendAsync("PreKeysLow", new PreKeysLowPayload(remainingCount), ct);
 
+    public Task NotifyReactionAsync(
+        Guid recipientDeviceId,
+        ReactionPayload payload,
+        CancellationToken ct = default) =>
+        _hubContext.Clients
+            .Group(DeviceGroup(recipientDeviceId))
+            .SendAsync("ReceiveReaction", payload, ct);
+
     private static string DeviceGroup(Guid deviceId) => $"device:{deviceId}";
 }

@@ -75,14 +75,17 @@ export class CryptoKeyStore implements ICryptoKeyStore {
   }
 
   async saveOneTimePreKeys(keys: PreKey[]): Promise<void> {
-    for (const k of keys) {
-      await this.db.run(
-        `INSERT OR REPLACE INTO crypto_prekeys
-         (key_id, key_type, public_key, private_key, signature, consumed)
-         VALUES (?, 'onetime', ?, ?, NULL, 0)`,
-        [k.keyId, k.publicKey, k.privateKey],
-      );
-    }
+    if (keys.length === 0) return;
+    await this.db.withTransaction(async () => {
+      for (const k of keys) {
+        await this.db.run(
+          `INSERT OR REPLACE INTO crypto_prekeys
+           (key_id, key_type, public_key, private_key, signature, consumed)
+           VALUES (?, 'onetime', ?, ?, NULL, 0)`,
+          [k.keyId, k.publicKey, k.privateKey],
+        );
+      }
+    });
   }
 
   async getNextOtkKeyId(): Promise<number> {

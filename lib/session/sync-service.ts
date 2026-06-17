@@ -326,6 +326,7 @@ export class SyncService {
           messageType: payload.messageType,
           ciphertextBase64: payload.ciphertextBase64,
         });
+        await this.messageStore.updateServerEnvelopeId(id, result.envelopeId);
         await this.messageStore.updateStatus(id, "sent");
         await this.conversationStore.upsert({
           ...conversation,

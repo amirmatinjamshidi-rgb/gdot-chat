@@ -1,3 +1,4 @@
+import type { Reaction } from "@/components/reactions/types";
 import { formatConversationTime } from "@/lib/chat/format-conversation-time";
 import type { LocalMessage } from "@/lib/db/types";
 import type { Message } from "@/stores/messages-store";
@@ -6,6 +7,7 @@ import type { Message } from "@/stores/messages-store";
 export function localMessageToUi(
   m: LocalMessage,
   peerDisplayName: string,
+  reactions: Reaction[] = [],
 ): Message {
   const isMine = m.direction === "outgoing";
   return {
@@ -16,5 +18,7 @@ export function localMessageToUi(
     kind: "text",
     text: m.plaintext,
     isMine,
+    reactions,
+    serverEnvelopeId: m.serverEnvelopeId,
   };
 }
