@@ -11,6 +11,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ThemedText } from "@/components/themed-text";
 import { ScalePressable } from "@/components/ui/scale-pressable";
+import { AppAuthError } from "@/lib/auth/app-auth-error";
 import { loginUser } from "@/lib/auth/registration";
 import { useAuth } from "@/lib/providers/auth-provider";
 import { useAppServices } from "@/lib/services/app-services-context";
@@ -42,8 +43,14 @@ export default function LoginScreen() {
       await refresh();
       router.replace("/lock" as Href);
     } catch (e) {
+      const title =
+        e instanceof AppAuthError && e.code === "STRONG_BIOMETRIC_REQUIRED"
+          ? "Fingerprint required"
+          : e instanceof AppAuthError && e.code === "NOT_ENROLLED"
+            ? "Biometrics not set up"
+            : "Login failed";
       Alert.alert(
-        "Login failed",
+        title,
         e instanceof Error ? e.message : "Unknown error",
       );
     } finally {

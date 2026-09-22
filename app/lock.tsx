@@ -1,10 +1,14 @@
 import { type Href, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Alert, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ThemedText } from "@/components/themed-text";
 import { ScalePressable } from "@/components/ui/scale-pressable";
+import {
+  type AppAuthErrorCode,
+  messageForAppAuthCode,
+} from "@/lib/auth/app-auth-error";
 import { useAppLock } from "@/lib/providers/app-lock-provider";
 
 export default function LockScreen() {
@@ -24,16 +28,15 @@ export default function LockScreen() {
 
   const tryUnlock = async () => {
     setBusy(true);
-    const ok = await unlock();
+    const result = await unlock();
     setBusy(false);
-    if (ok) {
+    if (result.ok) {
       router.replace("/(tabs)/chats" as Href);
-    } else {
-      Alert.alert(
-        "Unlock failed",
-        "Use your fingerprint, face, or device PIN. On some phones you must enroll biometrics in system settings first.",
-      );
+      return;
     }
+    // User dismissed the system sheet — stay on lock screen quietly.
+    if (result.code === "USER_CANCEL") return;
+    showUnlockAlert(result.code);
   };
 
   return (
@@ -51,6 +54,16 @@ export default function LockScreen() {
       </ScalePressable>
     </SafeAreaView>
   );
+}
+
+function showUnlockAlert(code: AppAuthErrorCode) {
+  const title =
+    code === "STRONG_BIOMETRIC_REQUIRED"
+      ? "Fingerprint required"
+      : code === "NOT_ENROLLED"
+        ? "Biometrics not set up"
+        : "Unlock failed";
+  Alert.alert(title, messageForAppAuthCode(code));
 }
 
 const styles = StyleSheet.create({

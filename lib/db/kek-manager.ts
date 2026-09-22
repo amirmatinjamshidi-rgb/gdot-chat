@@ -1,9 +1,17 @@
-import * as LocalAuthentication from "expo-local-authentication";
 import * as SecureStore from "expo-secure-store";
 import { getRandomBytes } from "expo-crypto";
 
+import { AppAuthError } from "@/lib/auth/app-auth-error";
+import {
+  assertStrongBiometricForSecureStore,
+  authenticateWithDeviceFallback,
+  mapSecureStoreAuthError,
+} from "@/lib/auth/biometric-capability";
 import { SECURE_STORE_KEK_KEY } from "./constants";
 import { bytesToHex } from "./sql-utils";
+
+const AUTH_PROMPT = "Unlock Gdot Chat";
+const SETUP_PROMPT = "Set up app lock";
 
 export interface IKekManager {
   hasKek(): Promise<boolean>;
@@ -18,24 +26,38 @@ export class KekManager implements IKekManager {
   }
 
   async createKekAfterBiometric(): Promise<void> {
-    const ok = await LocalAuthentication.authenticateAsync({
-      promptMessage: "Set up app lock",
-    });
-    if (!ok.success) throw new Error("Biometric required");
+    await assertStrongBiometricForSecureStore();
+    await authenticateWithDeviceFallback(SETUP_PROMPT);
+
     const kek = getRandomBytes(32);
     const hex = bytesToHex(kek);
-    await SecureStore.setItemAsync(SECURE_STORE_KEK_KEY, hex, {
-      requireAuthentication: true,
-      authenticationPrompt: "Unlock Gdot Chat",
-    });
+    try {
+      await SecureStore.setItemAsync(SECURE_STORE_KEK_KEY, hex, {
+        requireAuthentication: true,
+        authenticationPrompt: AUTH_PROMPT,
+      });
+    } catch (error) {
+      throw mapSecureStoreAuthError(error);
+    }
   }
 
   async getPassphraseForDb(): Promise<string> {
-    const hex = await SecureStore.getItemAsync(SECURE_STORE_KEK_KEY, {
-      requireAuthentication: true,
-      authenticationPrompt: "Unlock Gdot Chat",
-    });
-    if (!hex) throw new Error("KEK missing");
+    // Option B: system sheet (Strong biometric + device PIN/pattern/password
+    // fallback) first, then SecureStore requireAuthentication for the KEK.
+    await assertStrongBiometricForSecureStore();
+    await authenticateWithDeviceFallback(AUTH_PROMPT);
+
+    let hex: string | null;
+    try {
+      hex = await SecureStore.getItemAsync(SECURE_STORE_KEK_KEY, {
+        requireAuthentication: true,
+        authenticationPrompt: AUTH_PROMPT,
+      });
+    } catch (error) {
+      throw mapSecureStoreAuthError(error);
+    }
+
+    if (!hex) throw new AppAuthError("KEK_MISSING");
     return hex;
   }
 

@@ -1,4 +1,3 @@
-import * as LocalAuthentication from "expo-local-authentication";
 import { type Href, usePathname, useRouter } from "expo-router";
 import React, {
   createContext,
@@ -9,16 +8,26 @@ import React, {
 } from "react";
 import { AppState, type AppStateStatus } from "react-native";
 
+import {
+  AppAuthError,
+  type AppAuthErrorCode,
+  isUserCancelAuth,
+} from "@/lib/auth/app-auth-error";
+import { mapSecureStoreAuthError } from "@/lib/auth/biometric-capability";
 import { APP_LOCK_BACKGROUND_MS } from "@/lib/config";
 import { agentDebugLog } from "@/lib/debug-agent-log";
 import { ensureSignalInitialized } from "@/lib/crypto/init-signal";
 import { useAppServices } from "@/lib/services/app-services-context";
 
+export type UnlockResult =
+  | { ok: true }
+  | { ok: false; code: AppAuthErrorCode };
+
 type AppLockContextValue = {
   isUnlocked: boolean;
   dbReady: boolean;
   lockEpoch: number;
-  unlock: () => Promise<boolean>;
+  unlock: () => Promise<UnlockResult>;
   lock: () => void;
 };
 
@@ -52,8 +61,8 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const openDatabase = useCallback(async () => {
-    const passphrase = await kekManager.getPassphraseForDb();
     if (!db.isOpen()) {
+      const passphrase = await kekManager.getPassphraseForDb();
       await db.open(passphrase);
     }
     setDbReady(true);
@@ -78,21 +87,23 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
     }
   }, [appLockStore, db, pathname, router]);
 
-  const unlock = useCallback(async (): Promise<boolean> => {
+  const unlock = useCallback(async (): Promise<UnlockResult> => {
     try {
-      const hasHardware = await LocalAuthentication.hasHardwareAsync();
-      if (hasHardware) {
-        const result = await LocalAuthentication.authenticateAsync({
-          promptMessage: "Unlock Gdot Chat",
-        });
-        if (!result.success) return false;
-      }
+      // LocalAuthentication (device fallback) + SecureStore KEK live in
+      // getPassphraseForDb so login and lock share the same Option B path.
       await openDatabase();
       appLockStore.unlock();
       setIsUnlocked(true);
-      return true;
-    } catch {
-      return false;
+      return { ok: true };
+    } catch (error) {
+      if (isUserCancelAuth(error)) {
+        return { ok: false, code: "USER_CANCEL" };
+      }
+      const mapped =
+        error instanceof AppAuthError
+          ? error
+          : mapSecureStoreAuthError(error);
+      return { ok: false, code: mapped.code };
     }
   }, [openDatabase, appLockStore]);
 
