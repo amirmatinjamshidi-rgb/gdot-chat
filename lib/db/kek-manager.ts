@@ -132,6 +132,10 @@ export class KekManager implements IKekManager {
   async getPassphraseForDb(opts?: { pin?: string }): Promise<string> {
     const mode = await this.getLockMode();
 
+    if (mode === "none") {
+      throw new AppAuthError("KEK_MISSING");
+    }
+
     if (mode === "pin") {
       if (!opts?.pin) throw new AppAuthError("PIN_REQUIRED");
       const now = this.clock();

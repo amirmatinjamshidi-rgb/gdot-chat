@@ -11,7 +11,6 @@ import type { IDatabase } from "@/lib/db/database-types";
 import type { IIdentityStore } from "@/lib/db/identity-store";
 import type { IKekManager } from "@/lib/db/kek-manager";
 import type { LocalIdentity } from "@/lib/db/types";
-import { randomUUID } from "@/lib/crypto/random-id";
 import type { AuthStore } from "@/lib/session/auth-store";
 
 export async function ensureKek(
@@ -60,6 +59,7 @@ export async function registerUser(params: {
 }): Promise<void> {
   // Resolve KEK path before server registration so PIN_REQUIRED does not leave
   // a half-created server account.
+  const hadKek = await params.kekManager.hasKek();
   await ensureKek(params.kekManager, params.appPin);
 
   const username = params.username.trim().toLowerCase();
@@ -103,6 +103,10 @@ export async function registerUser(params: {
   const passphrase = await params.kekManager.getPassphraseForDb({
     pin: params.appPin,
   });
+  // New KEK cannot open an orphan SQLCipher file from a previous install.
+  if (!hadKek) {
+    await params.db.deleteDatabase();
+  }
   if (!params.db.isOpen()) {
     await params.db.open(passphrase);
   }
@@ -133,22 +137,35 @@ export async function registerUser(params: {
 export async function loginUser(params: {
   username: string;
   password: string;
+  deviceName?: string;
   authApi: AuthApi;
+  crypto: LibSignalAdapter;
   authStore: AuthStore;
   kekManager: IKekManager;
   db: IDatabase;
   identityStore: IIdentityStore;
+  cryptoKeyStore: ICryptoKeyStore;
   appPin?: string;
 }): Promise<void> {
   const username = params.username.trim().toLowerCase();
-  const mode = await params.kekManager.getLockMode();
-  if (mode === "pin" && !params.appPin) {
-    throw new AppAuthError("PIN_REQUIRED");
+  const hadKek = await params.kekManager.hasKek();
+  if (!hadKek) {
+    // First lock on this device (reinstall / new device): biometric or PIN.
+    await ensureKek(params.kekManager, params.appPin);
+  } else {
+    const mode = await params.kekManager.getLockMode();
+    if (mode === "pin" && !params.appPin) {
+      throw new AppAuthError("PIN_REQUIRED");
+    }
   }
 
   const passphrase = await params.kekManager.getPassphraseForDb({
     pin: params.appPin,
   });
+  // Creating a fresh KEK cannot decrypt a leftover DB from a wiped SecureStore.
+  if (!hadKek) {
+    await params.db.deleteDatabase();
+  }
   if (!params.db.isOpen()) {
     await params.db.open(passphrase);
   }
@@ -158,15 +175,62 @@ export async function loginUser(params: {
 
   let auth: AuthResult;
   try {
-    const deviceId =
-      (await params.authStore.getDeviceId()) ?? local?.deviceId ?? randomUUID();
-    auth = await params.authApi.login({
-      username,
-      password: params.password,
-      deviceId,
-    });
+    if (local) {
+      const deviceId =
+        (await params.authStore.getDeviceId()) ?? local.deviceId;
+      auth = await params.authApi.login({
+        username,
+        password: params.password,
+        deviceId,
+      });
+    } else {
+      // No local identity: register this install as a new device (password fallback).
+      const deviceName = params.deviceName?.trim() || "Mobile";
+      const identityPair = await params.crypto.generateIdentityKeyPair();
+      const registrationId = await params.crypto.generateRegistrationId();
+      const signedPreKey = await params.crypto.generateSignedPreKey(
+        identityPair,
+        1,
+      );
+      const oneTimePreKeys = await params.crypto.generatePreKeys(1, 50);
+
+      auth = await params.authApi.loginNewDevice({
+        username,
+        password: params.password,
+        device: {
+          deviceName,
+          registrationId,
+          identityKeyPublicBase64: bytesToBase64(identityPair.publicKey),
+          signedPreKey: {
+            keyId: signedPreKey.keyId,
+            publicKeyBase64: bytesToBase64(signedPreKey.publicKey),
+            signatureBase64: bytesToBase64(signedPreKey.signature),
+          },
+          oneTimePreKeys: oneTimePreKeys.map((k) => ({
+            keyId: k.keyId,
+            publicKeyBase64: bytesToBase64(k.publicKey),
+          })),
+        },
+      });
+
+      const localIdentity: LocalIdentity = {
+        userId: auth.userId,
+        deviceId: auth.deviceId,
+        username,
+        registrationId,
+        identityKeyPublic: identityPair.publicKey,
+      };
+      await params.identityStore.saveLocalIdentity(localIdentity);
+      await params.cryptoKeyStore.saveIdentityPrivateKey(identityPair.privateKey);
+      await params.cryptoKeyStore.saveSignedPreKey(signedPreKey);
+      await params.cryptoKeyStore.saveOneTimePreKeys(oneTimePreKeys);
+      await params.cryptoKeyStore.setNextOtkKeyId(
+        oneTimePreKeys[oneTimePreKeys.length - 1]!.keyId + 1,
+      );
+    }
   } catch (e) {
     if (e instanceof ApiError) throw e;
+    if (e instanceof AppAuthError) throw e;
     throw e instanceof Error
       ? e
       : new Error("Login failed. Check your connection and try again.");

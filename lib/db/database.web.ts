@@ -12,6 +12,8 @@ export class SqlCipherDatabase implements IDatabase {
 
   async close(): Promise<void> {}
 
+  async deleteDatabase(): Promise<void> {}
+
   isOpen(): boolean {
     return false;
   }

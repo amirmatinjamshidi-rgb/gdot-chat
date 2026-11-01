@@ -56,6 +56,19 @@ export class SqlCipherDatabase implements IDatabase {
     });
   }
 
+  async deleteDatabase(): Promise<void> {
+    if (this.db) {
+      await this.close();
+    }
+    try {
+      await SQLite.deleteDatabaseAsync(DB_NAME);
+    } catch (e) {
+      // Fresh installs have no on-disk DB yet; treat missing file as success.
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!/not found/i.test(msg)) throw e;
+    }
+  }
+
   isOpen(): boolean {
     return this.db !== null;
   }

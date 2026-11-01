@@ -40,17 +40,25 @@ export default function SetAppPinScreen() {
   const { refresh } = useAuth();
   const services = useAppServices();
   const pending = peekPendingAppPinAuth();
-  const isCreate = pending?.kind === "register";
+  const [isCreate, setIsCreate] = useState(pending?.kind === "register");
 
   const [pin, setPin] = useState("");
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!peekPendingAppPinAuth()) {
+    const current = peekPendingAppPinAuth();
+    if (!current) {
       router.replace("/(auth)/login" as Href);
+      return;
     }
-  }, [router]);
+    if (current.kind === "register") {
+      setIsCreate(true);
+      return;
+    }
+    // Login with no KEK yet = set a new app PIN (reinstall / new device).
+    void services.kekManager.hasKek().then((has) => setIsCreate(!has));
+  }, [router, services.kekManager]);
 
   const onSubmit = async () => {
     const pendingAuth = takePendingAppPinAuth();
@@ -70,7 +78,7 @@ export default function SetAppPinScreen() {
       return;
     }
 
-    if (pendingAuth.kind === "register" && pin !== confirm) {
+    if (isCreate && pin !== confirm) {
       setPendingAppPinAuth(pendingAuth);
       Alert.alert("PIN mismatch", "App PIN and confirmation do not match");
       return;
@@ -97,11 +105,14 @@ export default function SetAppPinScreen() {
         await loginUser({
           username: pendingAuth.username,
           password: pendingAuth.password,
+          deviceName: "Mobile",
           authApi: services.authApi,
+          crypto: services.crypto as LibSignalAdapter,
           authStore: services.authStore,
           kekManager: services.kekManager,
           db: services.db,
           identityStore: services.identityStore,
+          cryptoKeyStore: services.cryptoKeyStore,
           appPin: pin,
         });
       }

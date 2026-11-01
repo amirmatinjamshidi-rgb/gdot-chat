@@ -28,6 +28,7 @@ export function mockAppServices(
       isOpen: jest.fn(() => false),
       open: jest.fn(async () => undefined),
       close: jest.fn(async () => undefined),
+      deleteDatabase: jest.fn(async () => undefined),
     },
     identityStore: { getLocalIdentity: jest.fn(async () => null) },
     cryptoKeyStore: {},

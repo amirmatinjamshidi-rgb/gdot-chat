@@ -204,4 +204,100 @@ describe("Login / Register / SetAppPin screens", () => {
       expect(expoRouter.useRouter().replace).toHaveBeenCalledWith("/lock");
     });
   });
+
+  it("routes login to set-app-pin when KEK_MISSING", async () => {
+    const username = `user_${randomId("u")}`;
+    const password = `pw_${randomId("p")}!Aa1`;
+    mockLoginUser.mockRejectedValue(
+      new AppAuthError("KEK_MISSING", "missing kek"),
+    );
+    const user = userEvent.setup();
+    renderWithServices(<LoginScreen />, mockAppServices());
+
+    await user.type(screen.getByPlaceholderText("Username"), username);
+    await user.type(screen.getByPlaceholderText("Password"), password);
+    await user.press(screen.getByText("Sign in"));
+
+    await waitFor(() => {
+      expect(expoRouter.useRouter().push).toHaveBeenCalledWith(
+        "/(auth)/set-app-pin",
+      );
+    });
+  });
+
+  it("completes login after setting an app PIN on a device with no KEK", async () => {
+    const username = `user_${randomId("u")}`;
+    const password = `pw_${randomId("p")}!Aa1`;
+    const pin = `pin_${randomId("x")}`;
+    setPendingAppPinAuth({
+      kind: "login",
+      username,
+      password,
+    });
+    mockLoginUser.mockResolvedValue(undefined);
+    const services = mockAppServices({
+      kekManager: {
+        hasKek: jest.fn(async () => false),
+        getLockMode: jest.fn(async () => "none" as const),
+        getPassphraseForDb: jest.fn(async () => "pass"),
+        createKekAfterBiometric: jest.fn(async () => undefined),
+        createKekWithPin: jest.fn(async () => undefined),
+        wipeKek: jest.fn(async () => undefined),
+      } as never,
+    });
+    const user = userEvent.setup();
+    renderWithServices(<SetAppPinScreen />, services);
+
+    await waitFor(() => {
+      expect(screen.getByText("Set app PIN")).toBeTruthy();
+    });
+    await user.type(screen.getByPlaceholderText(/App PIN \(min/i), pin);
+    await user.type(screen.getByPlaceholderText(/Confirm app PIN/i), pin);
+    await user.press(screen.getByText("Continue"));
+
+    await waitFor(() => {
+      expect(mockLoginUser).toHaveBeenCalledWith(
+        expect.objectContaining({ username, password, appPin: pin }),
+      );
+      expect(expoRouter.useRouter().replace).toHaveBeenCalledWith("/lock");
+    });
+  });
+
+  it("unlocks login with existing app PIN when KEK already exists", async () => {
+    const username = `user_${randomId("u")}`;
+    const password = `pw_${randomId("p")}!Aa1`;
+    const pin = `pin_${randomId("x")}`;
+    setPendingAppPinAuth({
+      kind: "login",
+      username,
+      password,
+    });
+    mockLoginUser.mockResolvedValue(undefined);
+    const services = mockAppServices({
+      kekManager: {
+        hasKek: jest.fn(async () => true),
+        getLockMode: jest.fn(async () => "pin" as const),
+        getPassphraseForDb: jest.fn(async () => "pass"),
+        createKekAfterBiometric: jest.fn(async () => undefined),
+        createKekWithPin: jest.fn(async () => undefined),
+        wipeKek: jest.fn(async () => undefined),
+      } as never,
+    });
+    const user = userEvent.setup();
+    renderWithServices(<SetAppPinScreen />, services);
+
+    await waitFor(() => {
+      expect(screen.getByText("Enter app PIN")).toBeTruthy();
+    });
+    await user.type(screen.getByPlaceholderText(/App PIN \(min/i), pin);
+    await user.press(screen.getByText("Unlock"));
+
+    await waitFor(() => {
+      expect(mockLoginUser).toHaveBeenCalledWith(
+        expect.objectContaining({ username, password, appPin: pin }),
+      );
+      expect(expoRouter.useRouter().replace).toHaveBeenCalledWith("/lock");
+    });
+  });
+
 });

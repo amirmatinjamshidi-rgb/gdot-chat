@@ -9,6 +9,8 @@ export interface IDatabase {
   open(passphrase: string): Promise<void>;
   close(): Promise<void>;
   isOpen(): boolean;
+  /** Remove the on-disk DB file (no-op if missing). Caller must close first or this closes. */
+  deleteDatabase(): Promise<void>;
   run(sql: string, params?: SqlParams): Promise<RunResult>;
   getFirst<T>(sql: string, params?: SqlParams): Promise<T | null>;
   getAll<T>(sql: string, params?: SqlParams): Promise<T[]>;

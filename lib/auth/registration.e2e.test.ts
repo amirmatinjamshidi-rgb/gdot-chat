@@ -52,6 +52,7 @@ describe("registerUser E2E (KEK before server account)", () => {
           isOpen: () => false,
           open: async () => undefined,
           close: async () => undefined,
+          deleteDatabase: async () => undefined,
         } as unknown as IDatabase,
         identityStore: new MemoryIdentityStore(),
         cryptoKeyStore: new MemoryCryptoKeyStore(),
@@ -105,6 +106,7 @@ describe("registerUser E2E (KEK before server account)", () => {
       db: {
         async open() {},
         async close() {},
+        async deleteDatabase() {},
         isOpen() {
           return false;
         },

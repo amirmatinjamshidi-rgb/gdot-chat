@@ -16,6 +16,7 @@ import {
 } from "@/lib/auth/app-auth-error";
 import { setPendingAppPinAuth } from "@/lib/auth/pending-app-pin-auth";
 import { loginUser } from "@/lib/auth/registration";
+import type { LibSignalAdapter } from "@/lib/crypto/libsignal-adapter";
 
 function authErrorCode(error: unknown): AppAuthErrorCode | null {
   if (error instanceof AppAuthError) return error.code;
@@ -45,11 +46,14 @@ export default function LoginScreen() {
       await loginUser({
         username,
         password,
+        deviceName: "Mobile",
         authApi: services.authApi,
+        crypto: services.crypto as LibSignalAdapter,
         authStore: services.authStore,
         kekManager: services.kekManager,
         db: services.db,
         identityStore: services.identityStore,
+        cryptoKeyStore: services.cryptoKeyStore,
       });
       await refresh();
       router.replace("/lock" as Href);
@@ -57,6 +61,7 @@ export default function LoginScreen() {
       const code = authErrorCode(e);
       if (
         code === "PIN_REQUIRED" ||
+        code === "KEK_MISSING" ||
         code === "NOT_ENROLLED" ||
         code === "STRONG_BIOMETRIC_REQUIRED"
       ) {
