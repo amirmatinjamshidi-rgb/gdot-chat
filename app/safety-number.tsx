@@ -13,7 +13,7 @@ export default function SafetyNumberScreen() {
     peerUserId: string;
     peerDeviceId: string;
   }>();
-  const { signalService } = useAppServices();
+  const { signalService, syncService } = useAppServices();
   const [formatted, setFormatted] = useState("…");
   const [keyChanged, setKeyChanged] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -33,6 +33,7 @@ export default function SafetyNumberScreen() {
     setBusy(true);
     try {
       await signalService.acceptNewIdentityKey(peerUserId, { markVerified });
+      await syncService.retryIdentityQuarantine(peerUserId);
       setKeyChanged(false);
       router.back();
     } finally {

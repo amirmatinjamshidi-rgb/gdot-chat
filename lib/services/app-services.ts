@@ -4,6 +4,7 @@ import { ENABLE_SIGNALR } from "@/lib/config";
 import { AuthApi } from "@/lib/api/auth-api";
 import { DevicesApi } from "@/lib/api/devices-api";
 import { MessagesApi } from "@/lib/api/messages-api";
+import { SessionResetApi } from "@/lib/api/session-reset-api";
 import { SignalRClient } from "@/lib/api/signalr-client";
 import { UsersApi } from "@/lib/api/users-api";
 import { LibSignalAdapter } from "@/lib/crypto/libsignal-adapter";
@@ -17,6 +18,8 @@ import { DraftStore } from "@/lib/db/draft-store";
 import { IdentityStore } from "@/lib/db/identity-store";
 import { kekManager } from "@/lib/db/kek-manager";
 import { MessageStore } from "@/lib/db/message-store";
+import { EnvelopeQuarantineStore } from "@/lib/db/envelope-quarantine-store";
+import { EnvelopeAttemptStore } from "@/lib/db/envelope-attempt-store";
 import { ReactionStore } from "@/lib/db/reaction-store";
 import { ProfileStore } from "@/lib/db/profile-store";
 import { SessionStore } from "@/lib/db/session-store";
@@ -43,6 +46,10 @@ const crypto = new LibSignalAdapter(
 );
 const devicesApi = new DevicesApi(apiClient);
 const messagesApi = new MessagesApi(apiClient);
+const sessionResetApi = new SessionResetApi(apiClient);
+const usersApi = new UsersApi(apiClient);
+const envelopeQuarantineStore = new EnvelopeQuarantineStore(sqlCipherDatabase);
+const envelopeAttemptStore = new EnvelopeAttemptStore(sqlCipherDatabase);
 const messageStore = new MessageStore(sqlCipherDatabase);
 const reactionStore = new ReactionStore(sqlCipherDatabase);
 const conversationStore = new ConversationStore(sqlCipherDatabase);
@@ -70,6 +77,21 @@ const syncService = new SyncService(
   identityStore,
   authStore,
   reactionStore,
+  null,
+  {
+    quarantineStore: envelopeQuarantineStore,
+    attemptStore: envelopeAttemptStore,
+    sessionResetApi,
+    sessionStore,
+    resolveUsername: async (userId) => {
+      try {
+        const profile = await usersApi.getProfile(userId);
+        return profile.username;
+      } catch {
+        return null;
+      }
+    },
+  },
 );
 const mediaTransfer = new MediaTransferService(
   attachmentsApi,
@@ -90,7 +112,7 @@ export const appServices = {
   authApi: new AuthApi(apiClient),
   devicesApi,
   messagesApi,
-  usersApi: new UsersApi(apiClient),
+  usersApi,
   signalr,
   identityStore,
   cryptoKeyStore,
@@ -100,6 +122,9 @@ export const appServices = {
   messageStore,
   reactionStore,
   conversationStore,
+  envelopeQuarantineStore,
+  envelopeAttemptStore,
+  sessionResetApi,
   attachmentStore,
   attachmentsApi,
   mediaTransfer,

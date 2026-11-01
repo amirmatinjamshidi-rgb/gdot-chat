@@ -73,6 +73,8 @@ export interface SendMessageRequest {
 export interface MessageEnvelopeDto {
   id: string;
   senderDeviceId: string;
+  /** Owning user of the sender device (for message requests / quarantine). */
+  senderUserId: string;
   messageType: number;
   ciphertextBase64: string;
   createdAt: string;

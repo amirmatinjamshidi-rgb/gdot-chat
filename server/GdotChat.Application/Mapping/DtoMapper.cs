@@ -24,10 +24,11 @@ public static class DtoMapper
             ToDto(spk),
             otk is null ? null : ToOtkDto(otk));
 
-    public static MessageEnvelopeDto ToDto(MessageEnvelope entity) =>
+    public static MessageEnvelopeDto ToDto(MessageEnvelope entity, Guid senderUserId) =>
         new(
             entity.Id,
             entity.SenderDeviceId,
+            senderUserId,
             entity.MessageType,
             ToBase64(entity.Ciphertext),
             entity.CreatedAt);

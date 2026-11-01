@@ -108,12 +108,15 @@ public class MessageRelayService : IMessageRelayService
         var now = DateTimeOffset.UtcNow;
 
         var envelopes = await _db.Set<MessageEnvelope>()
+            .Include(e => e.SenderDevice)
             .Where(e => e.RecipientDeviceId == deviceId && e.ExpiresAt > now)
             .OrderBy(e => e.CreatedAt)
             .Take(limit)
             .ToListAsync(ct);
 
-        return envelopes.Select(DtoMapper.ToDto).ToList();
+        return envelopes
+            .Select(e => DtoMapper.ToDto(e, e.SenderDevice.UserId))
+            .ToList();
     }
 
     public async Task AckAsync(Guid deviceId, Guid envelopeId, CancellationToken ct = default)

@@ -9,9 +9,14 @@ public record SendMessageRequest(
 public record MessageEnvelopeDto(
     Guid Id,
     Guid SenderDeviceId,
+    Guid SenderUserId,
     int MessageType,
     string CiphertextBase64,
     DateTimeOffset CreatedAt);
+
+public record SessionResetRequest(Guid TargetDeviceId);
+
+public record SessionResetRequestedPayload(Guid FromDeviceId, Guid FromUserId);
 
 public record SendMessageResponse(Guid EnvelopeId);
 

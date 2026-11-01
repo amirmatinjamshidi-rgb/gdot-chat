@@ -28,5 +28,17 @@ public class SignalRMessageNotifier : IMessageNotifier
             .Group(DeviceGroup(deviceId))
             .SendAsync("PreKeysLow", new PreKeysLowPayload(remainingCount), ct);
 
+    public Task NotifySessionResetRequestedAsync(
+        Guid targetDeviceId,
+        Guid fromDeviceId,
+        Guid fromUserId,
+        CancellationToken ct = default) =>
+        _hubContext.Clients
+            .Group(DeviceGroup(targetDeviceId))
+            .SendAsync(
+                "SessionResetRequested",
+                new SessionResetRequestedPayload(fromDeviceId, fromUserId),
+                ct);
+
     private static string DeviceGroup(Guid deviceId) => $"device:{deviceId}";
 }

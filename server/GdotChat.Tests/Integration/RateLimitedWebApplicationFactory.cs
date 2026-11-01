@@ -67,6 +67,10 @@ public sealed class RateLimitedWebApplicationFactory : WebApplicationFactory<Pro
         builder.UseSetting("RateLimits:PreKeyFetchCallerWindowSeconds", PreKeyFetchWindowSeconds.ToString());
         builder.UseSetting("RateLimits:PreKeyFetchTargetWindowSeconds", PreKeyFetchWindowSeconds.ToString());
 
+        // Session-reset defaults high; E2E tests lower via WithWebHostBuilder.
+        builder.UseSetting("RateLimits:SessionResetPermitLimit", int.MaxValue.ToString());
+        builder.UseSetting("RateLimits:SessionResetWindowSeconds", "3600");
+
         builder.ConfigureTestServices(services =>
         {
             var descriptors = services

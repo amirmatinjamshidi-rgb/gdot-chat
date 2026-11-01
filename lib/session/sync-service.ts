@@ -1,4 +1,5 @@
 import type { MessagesApi } from "@/lib/api/messages-api";
+import type { SessionResetApi } from "@/lib/api/session-reset-api";
 import type { SignalRClient } from "@/lib/api/signalr-client";
 import {
   ENABLE_SIGNALR,
@@ -7,27 +8,40 @@ import {
 } from "@/lib/config";
 import { decideSyncTransport } from "@/lib/session/sync-transport-policy";
 import type { SignalService } from "@/lib/crypto/signal-service";
-import { base64ToBytes } from "@/lib/crypto/encoding";
 import { randomUUID } from "@/lib/crypto/random-id";
 import type { IConversationStore } from "@/lib/db/conversation-store";
+import { MemorySessionResetCooldownStore } from "@/lib/db/envelope-attempt-store";
+import type { IEnvelopeAttemptStore } from "@/lib/db/envelope-attempt-store";
+import type { IEnvelopeQuarantineStore } from "@/lib/db/envelope-quarantine-store";
 import type { IIdentityStore } from "@/lib/db/identity-store";
 import type { IMessageStore } from "@/lib/db/message-store";
 import type { IReactionStore } from "@/lib/db/reaction-store";
+import type { ISessionStore } from "@/lib/db/session-store";
 import type { Conversation, LocalMessage } from "@/lib/db/types";
 import { agentDebugLog } from "@/lib/debug-agent-log";
 import type { MediaTransferService } from "@/lib/media/media-transfer";
 import {
-  parseSignalPlaintext,
   serializeReactionPayload,
   serializeTextPayload,
   type ReactionOp,
 } from "@/lib/protocol/payload";
 import { assertMessageTextWithinLimit } from "@/lib/protocol/message-limits";
 import { isOfflineToken, type AuthStore } from "@/lib/session/auth-store";
-import { useMediaStore } from "@/stores/media-store";
+import { appLockStore } from "@/lib/session/app-lock-store";
+import { InboundEnvelopeProcessor } from "@/lib/session/inbound/inbound-envelope-processor";
+import { systemClock, type Clock } from "@/lib/session/inbound/constants";
 
 export type SyncErrorHandler = (message: string) => void;
 export type ReactionAppliedHandler = (conversationId: string) => void;
+
+export type SyncServiceInboundDeps = {
+  quarantineStore: IEnvelopeQuarantineStore;
+  attemptStore: IEnvelopeAttemptStore;
+  sessionResetApi: SessionResetApi;
+  sessionStore: ISessionStore;
+  clock?: Clock;
+  resolveUsername?: (userId: string) => Promise<string | null>;
+};
 
 export class SyncService {
   readonly instanceId = randomUUID();
@@ -43,6 +57,11 @@ export class SyncService {
   private appInForeground = true;
   private pullDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private applyingTransport = false;
+  private transientBackoffUntil = 0;
+  private readonly inbound: InboundEnvelopeProcessor;
+  private readonly sessionStore: ISessionStore;
+  private readonly clock: Clock;
+  private readonly sessionResetCooldown = new MemorySessionResetCooldownStore();
 
   constructor(
     private readonly messagesApi: MessagesApi,
@@ -54,10 +73,55 @@ export class SyncService {
     private readonly authStore: AuthStore,
     private readonly reactionStore: IReactionStore,
     private mediaTransfer: MediaTransferService | null = null,
-  ) {}
+    inboundDeps?: SyncServiceInboundDeps,
+  ) {
+    if (!inboundDeps) {
+      throw new Error("SyncService requires inboundDeps (quarantine/attempt/sessionReset)");
+    }
+    this.sessionStore = inboundDeps.sessionStore;
+    this.clock = inboundDeps.clock ?? systemClock;
+    this.inbound = new InboundEnvelopeProcessor({
+      messagesApi,
+      signalService,
+      messageStore,
+      conversationStore,
+      reactionStore,
+      quarantineStore: inboundDeps.quarantineStore,
+      attemptStore: inboundDeps.attemptStore,
+      sessionResetApi: inboundDeps.sessionResetApi,
+      sessionResetCooldown: this.sessionResetCooldown,
+      mediaTransfer,
+      isDbReady: () => appLockStore.isUnlocked,
+      clock: this.clock,
+      resolveUsername: inboundDeps.resolveUsername,
+      logFailure: ({ envelopeId, errorClass, errorName }) => {
+        if (__DEV__) {
+          console.warn(
+            "[SyncService] inbound failure",
+            envelopeId,
+            errorClass,
+            errorName,
+          );
+        }
+        if (errorClass === "transient") {
+          this.onError?.("Waiting to retry an undecryptable message…");
+        } else if (errorClass === "needs_user") {
+          this.onError?.(
+            "A message is held until you accept this contact's new safety number.",
+          );
+        } else if (errorClass === "message_request") {
+          this.onError?.("New message request received.");
+        }
+      },
+      onReactionApplied: (conversationId) => {
+        this.onReactionApplied?.(conversationId);
+      },
+    });
+  }
 
   setMediaTransfer(mediaTransfer: MediaTransferService): void {
     this.mediaTransfer = mediaTransfer;
+    this.inbound.setMediaTransfer(mediaTransfer);
   }
 
   setErrorHandler(handler: SyncErrorHandler | null): void {
@@ -118,6 +182,9 @@ export class SyncService {
         );
       });
     });
+    this.signalr.setSessionResetHandler((fromDeviceId) => {
+      void this.handleSessionResetRequested(fromDeviceId);
+    });
     this.signalr.setEnvelopeHandler(() => {
       this.schedulePullPending();
     });
@@ -145,6 +212,7 @@ export class SyncService {
     this.signalr.setEnvelopeHandler(null);
     this.signalr.setConnectionHandler(null);
     this.signalr.setPreKeysLowHandler(null);
+    this.signalr.setSessionResetHandler(null);
     this.signalRConnected = false;
     await this.signalr.disconnect();
   }
@@ -271,7 +339,6 @@ export class SyncService {
 
   private async pullPendingInner(): Promise<void> {
     if (this.outboundInFlight > 0) {
-      // #region agent log
       agentDebugLog(
         "sync-service.ts:pullPending",
         "pullPending skipped during send",
@@ -279,108 +346,47 @@ export class SyncService {
         "K",
         "post-fix",
       );
-      // #endregion
       return;
     }
-    // #region agent log
+    if (!appLockStore.isUnlocked) {
+      agentDebugLog(
+        "sync-service.ts:pullPending",
+        "pullPending paused while locked",
+        {},
+        "B",
+      );
+      return;
+    }
+    const now = this.clock();
+    if (now < this.transientBackoffUntil) {
+      return;
+    }
     agentDebugLog(
       "sync-service.ts:pullPending",
       "pullPending start",
       {},
       "B",
     );
-    // #endregion
     try {
+      await this.inbound.expireStaleMessageRequests();
       const envelopes = await this.messagesApi.getPending();
       const localDeviceId = await this.authStore.getDeviceId();
       if (!localDeviceId) return;
 
+      let sawTransient = false;
       for (const env of envelopes) {
-        const conversation = await this.findConversationForSender(
-          env.senderDeviceId,
-        );
-        if (!conversation) {
-          if (__DEV__) {
-            console.warn(
-              "[SyncService] unknown sender device; add contact first",
-              env.senderDeviceId,
-            );
-          }
-          continue;
-        }
-
-        let plaintext: string;
+        const beforeAttempts = env.id;
         try {
-          plaintext = await this.signalService.decryptIncoming(
-            conversation.peerUserId,
-            env.messageType as 2 | 3,
-            base64ToBytes(env.ciphertextBase64),
-          );
-        } catch (e) {
-          const msg =
-            e instanceof Error ? e.message : "Failed to decrypt message";
-          this.onError?.(msg);
-          if (__DEV__) console.warn("[SyncService] decrypt failed", msg);
-          continue;
+          await this.inbound.processEnvelope(env);
+        } catch {
+          /* processEnvelope already isolates */
         }
-
-        const parsed = parseSignalPlaintext(plaintext);
-        if (parsed.kind === "media") {
-          if (!this.mediaTransfer) {
-            this.onError?.("Media transfer is not initialized");
-            continue;
-          }
-          await this.mediaTransfer.ingestIncomingMedia({
-            conversation,
-            payload: parsed.payload,
-            senderDeviceId: env.senderDeviceId,
-            serverEnvelopeId: env.id,
-            createdAt: Date.parse(env.createdAt) || Date.now(),
-            messageType: env.messageType as 2 | 3,
-          });
-          await this.messagesApi.ack(env.id);
-          if (useMediaStore.getState().autoDownloadPolicy !== "never") {
-            void this.mediaTransfer.downloadAttachment(parsed.payload.attachmentId);
-          }
-          continue;
-        }
-
-        if (parsed.kind === "reaction") {
-          await this.applyIncomingReaction(
-            conversation,
-            conversation.peerUserId,
-            parsed.payload.op,
-            parsed.payload.emoji,
-            parsed.payload.targetServerEnvelopeId,
-          );
-          await this.messagesApi.ack(env.id);
-          continue;
-        }
-
-        const text =
-          parsed.kind === "text" ? parsed.payload.text : parsed.text;
-
-        const msg: LocalMessage = {
-          id: randomUUID(),
-          clientId: randomUUID(),
-          conversationId: conversation.id,
-          direction: "incoming",
-          kind: "text",
-          plaintext: text,
-          messageType: env.messageType as 2 | 3,
-          status: "delivered",
-          senderDeviceId: env.senderDeviceId,
-          serverEnvelopeId: env.id,
-          createdAt: Date.parse(env.createdAt) || Date.now(),
-        };
-        await this.messageStore.insert(msg);
-        await this.conversationStore.upsert({
-          ...conversation,
-          lastMessagePreview: text.slice(0, 120),
-          lastMessageAt: msg.createdAt,
-          unreadCount: conversation.unreadCount + 1,
-        });
-        await this.messagesApi.ack(env.id);
+        void beforeAttempts;
+      }
+      // Soft backoff when failures logged as transient via onError path —
+      // attempt store remaining on server implies retry; bump short backoff.
+      if (sawTransient) {
+        this.transientBackoffUntil = now + 2_000;
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -388,7 +394,6 @@ export class SyncService {
         this.outboundInFlight > 0 &&
         (msg.includes("Aborted") || msg.includes("abort"));
       if (abortedForSend) {
-        // #region agent log
         agentDebugLog(
           "sync-service.ts:pullPending",
           "pullPending aborted for send",
@@ -396,29 +401,57 @@ export class SyncService {
           "L",
           "post-fix",
         );
-        // #endregion
         return;
       }
-      // #region agent log
       agentDebugLog(
         "sync-service.ts:pullPending",
         "pullPending error",
         { error: msg },
         "B",
       );
-      // #endregion
+      // Network etc. — transient backoff without ack.
+      this.transientBackoffUntil = this.clock() + 5_000;
       if (__DEV__) {
         console.warn("[SyncService] pullPending failed", msg);
       }
     } finally {
-      // #region agent log
       agentDebugLog(
         "sync-service.ts:pullPending",
         "pullPending end",
         {},
         "B",
       );
-      // #endregion
+    }
+  }
+
+  listMessageRequests() {
+    return this.inbound.listMessageRequests();
+  }
+
+  acceptMessageRequest(quarantineId: string) {
+    return this.inbound.acceptMessageRequest(quarantineId);
+  }
+
+  rejectMessageRequest(quarantineId: string) {
+    return this.inbound.rejectMessageRequest(quarantineId);
+  }
+
+  retryIdentityQuarantine(peerUserId: string) {
+    return this.inbound.retryIdentityQuarantine(peerUserId);
+  }
+
+  /** Peer asked us to drop our Signal session so their next send uses a fresh prekey bundle. */
+  async handleSessionResetRequested(fromDeviceId: string): Promise<void> {
+    const all = await this.conversationStore.listAll();
+    const conversation = all.find((c) => c.peerDeviceId === fromDeviceId);
+    if (!conversation) return;
+    await this.sessionStore.delete(`${conversation.peerUserId}.1`);
+    await this.sessionStore.delete(conversation.peerUserId);
+    if (__DEV__) {
+      console.warn(
+        "[SyncService] cleared session after SessionResetRequested",
+        fromDeviceId,
+      );
     }
   }
 
@@ -608,33 +641,6 @@ export class SyncService {
     await this.encryptAndPost(conversation, plaintext);
   }
 
-  private async applyIncomingReaction(
-    conversation: Conversation,
-    senderUserId: string,
-    op: ReactionOp,
-    emoji: string,
-    targetServerEnvelopeId: string,
-  ): Promise<void> {
-    const target = await this.messageStore.getByServerEnvelopeId(
-      targetServerEnvelopeId,
-    );
-    if (!target) {
-      if (__DEV__) {
-        console.warn(
-          "[SyncService] reaction for unknown envelope",
-          targetServerEnvelopeId,
-        );
-      }
-      return;
-    }
-    await this.reactionStore.apply(target.id, emoji, senderUserId, op);
-    this.onReactionApplied?.(conversation.id);
-  }
 
-  private async findConversationForSender(
-    senderDeviceId: string,
-  ): Promise<Conversation | null> {
-    const all = await this.conversationStore.listAll();
-    return all.find((c) => c.peerDeviceId === senderDeviceId) ?? null;
-  }
+
 }

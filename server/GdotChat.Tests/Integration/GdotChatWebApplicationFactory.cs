@@ -56,6 +56,8 @@ public sealed class GdotChatWebApplicationFactory : WebApplicationFactory<Progra
         builder.UseSetting("RateLimits:PreKeyFetchTargetPermitLimit", int.MaxValue.ToString());
         builder.UseSetting("RateLimits:PreKeyFetchCallerWindowSeconds", "3600");
         builder.UseSetting("RateLimits:PreKeyFetchTargetWindowSeconds", "3600");
+        builder.UseSetting("RateLimits:SessionResetPermitLimit", int.MaxValue.ToString());
+        builder.UseSetting("RateLimits:SessionResetWindowSeconds", "3600");
 
         builder.ConfigureTestServices(services =>
         {

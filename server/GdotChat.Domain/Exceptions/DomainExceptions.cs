@@ -70,3 +70,8 @@ public class InvalidMessageRequestException : Exception
     public InvalidMessageRequestException(string message) : base(message) { }
 }
 
+public class SessionResetRateLimitedException : Exception
+{
+    public SessionResetRateLimitedException() : base("Session reset rate limit exceeded") { }
+}
+

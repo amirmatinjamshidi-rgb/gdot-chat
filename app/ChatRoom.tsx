@@ -221,6 +221,7 @@ export default function ChatRoomScreen() {
   const acceptIdentityKey = useCallback(async () => {
     if (!peerUserId) return;
     await signalService.acceptNewIdentityKey(peerUserId);
+    await syncService.retryIdentityQuarantine(peerUserId);
     setIdentityKeyChanged(false);
   }, [peerUserId, signalService]);
 

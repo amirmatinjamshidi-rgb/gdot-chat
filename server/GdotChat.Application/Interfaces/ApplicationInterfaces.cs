@@ -90,8 +90,18 @@ public interface IAttachmentService
     Task<int> PurgeExpiredAsync(CancellationToken ct = default);
 }
 
+public interface ISessionResetService
+{
+    Task RequestAsync(Guid callerDeviceId, Guid callerUserId, Guid targetDeviceId, CancellationToken ct = default);
+}
+
 public interface IMessageNotifier
 {
     Task NotifyEnvelopeAvailableAsync(Guid recipientDeviceId, Guid envelopeId, CancellationToken ct = default);
     Task NotifyPreKeysLowAsync(Guid deviceId, int remainingCount, CancellationToken ct = default);
+    Task NotifySessionResetRequestedAsync(
+        Guid targetDeviceId,
+        Guid fromDeviceId,
+        Guid fromUserId,
+        CancellationToken ct = default);
 }

@@ -49,11 +49,13 @@ public static class DependencyInjection
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IDeviceService, DeviceService>();
         services.AddScoped<IMessageRelayService, MessageRelayService>();
+        services.AddScoped<ISessionResetService, SessionResetService>();
         services.AddScoped<IAttachmentService, AttachmentService>();
         services.AddScoped<IJwtTokenService, JwtTokenService>();
         services.AddScoped<IPasswordHasher, PasswordHasher>();
         services.AddScoped<IMessageNotifier, SignalRMessageNotifier>();
         services.AddSingleton<IPreKeyBundleRateLimiter, PreKeyBundleRateLimiter>();
+        services.AddSingleton<ISessionResetRateLimiter, SessionResetRateLimiter>();
 
         services.AddHostedService<EnvelopePurgeWorker>();
         services.AddHostedService<AttachmentPurgeWorker>();

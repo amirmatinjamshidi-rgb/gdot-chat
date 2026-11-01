@@ -176,6 +176,16 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0,
             }));
 
+    options.AddPolicy("session-reset", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.User.FindFirst("device_id")?.Value ?? "anon",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = rateLimitOptions.SessionResetPermitLimit,
+                Window = TimeSpan.FromSeconds(Math.Max(1, rateLimitOptions.SessionResetWindowSeconds)),
+                QueueLimit = 0,
+            }));
+
     options.AddPolicy("attachments-create", httpContext =>
         RateLimitPartition.GetFixedWindowLimiter(
             httpContext.User.FindFirst("device_id")?.Value ?? "anon",

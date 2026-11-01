@@ -9,6 +9,7 @@ import { isOfflineToken } from "@/lib/session/auth-store";
 export type EnvelopeAvailableHandler = (envelopeId: string) => void;
 export type SignalRConnectionHandler = (connected: boolean) => void;
 export type PreKeysLowHandler = (remainingCount: number) => void;
+export type SessionResetHandler = (fromDeviceId: string) => void;
 
 /** Backoff for withAutomaticReconnect (ms). Final null stops retrying until manual connect. */
 const RECONNECT_DELAYS_MS = [0, 2_000, 5_000, 10_000, 30_000];
@@ -18,6 +19,7 @@ export class SignalRClient {
   private onEnvelope: EnvelopeAvailableHandler | null = null;
   private onConnection: SignalRConnectionHandler | null = null;
   private onPreKeysLow: PreKeysLowHandler | null = null;
+  private onSessionReset: SessionResetHandler | null = null;
   private connectInFlight: Promise<void> | null = null;
   /** When false, ignore automatic reconnect / don't auto-start (background / stop). */
   private desireConnected = false;
@@ -34,6 +36,10 @@ export class SignalRClient {
 
   setPreKeysLowHandler(handler: PreKeysLowHandler | null): void {
     this.onPreKeysLow = handler;
+  }
+
+  setSessionResetHandler(handler: SessionResetHandler | null): void {
+    this.onSessionReset = handler;
   }
 
   isConnected(): boolean {
@@ -119,6 +125,17 @@ export class SignalRClient {
         const remaining =
           payload.remainingCount ?? payload.RemainingCount ?? 0;
         this.onPreKeysLow?.(remaining);
+      },
+    );
+
+    this.connection.on(
+      "SessionResetRequested",
+      (payload: {
+        fromDeviceId?: string;
+        FromDeviceId?: string;
+      }) => {
+        const from = payload.fromDeviceId ?? payload.FromDeviceId;
+        if (from) this.onSessionReset?.(from);
       },
     );
 
