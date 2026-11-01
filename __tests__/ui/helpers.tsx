@@ -40,6 +40,11 @@ export function mockAppServices(
     },
     syncService: {
       sendGroupOutgoing: jest.fn(async () => undefined),
+      sendGroupOutgoingMedia: jest.fn(async () => undefined),
+      sendReaction: jest.fn(async () => undefined),
+      getGroupReceiptAggregate: jest.fn(async () => null),
+      markGroupMessagesRead: jest.fn(async () => undefined),
+      setReactionAppliedHandler: jest.fn(),
       listMessageRequests: jest.fn(async () => []),
       acceptMessageRequest: jest.fn(async () => undefined),
       rejectMessageRequest: jest.fn(async () => undefined),
@@ -55,6 +60,11 @@ export function mockAppServices(
       lock: jest.fn(),
     },
     mediaTransfer: {},
+    reactionStore: {
+      listForConversation: jest.fn(async () => new Map()),
+      userHasReaction: jest.fn(async () => false),
+      apply: jest.fn(async () => []),
+    },
   } as unknown as AppServices;
 
   return { ...base, ...overrides } as AppServices;

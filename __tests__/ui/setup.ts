@@ -1,3 +1,24 @@
+jest.mock("expo-audio", () => {
+  const recorder = {
+    isRecording: false,
+    uri: null as string | null,
+    prepareToRecordAsync: jest.fn(async () => undefined),
+    record: jest.fn(async () => {
+      recorder.isRecording = true;
+      recorder.uri = "file:///mock-voice.m4a";
+    }),
+    stop: jest.fn(async () => {
+      recorder.isRecording = false;
+    }),
+  };
+  return {
+    RecordingPresets: { HIGH_QUALITY: {} },
+    requestRecordingPermissionsAsync: jest.fn(async () => ({ granted: true })),
+    setAudioModeAsync: jest.fn(async () => undefined),
+    useAudioRecorder: () => recorder,
+  };
+});
+
 jest.mock("@/lib/services/app-services", () => ({
   appServices: {},
 }));
@@ -99,6 +120,17 @@ jest.mock("@expo/vector-icons/MaterialIcons", () => {
     __esModule: true,
     default: (props: Record<string, unknown>) =>
       React.createElement("MaterialIcons", props),
+  };
+});
+
+jest.mock("@expo/vector-icons", () => {
+  const React = require("react");
+  const Icon = (props: Record<string, unknown>) =>
+    React.createElement("ExpoIcon", props);
+  return {
+    Ionicons: Icon,
+    MaterialIcons: Icon,
+    AntDesign: Icon,
   };
 });
 

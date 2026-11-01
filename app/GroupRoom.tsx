@@ -1,18 +1,34 @@
+import * as Haptics from "expo-haptics";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  PanResponder,
   StyleSheet,
   TextInput,
   View,
 } from "react-native";
+import { useSharedValue } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import {
+  HoldRecordControls,
+  LOCK_DRAG_PX,
+  type HoldRecordControlsHandle,
+} from "@/components/hold-record-controls";
+import { ReactionPicker } from "@/components/reactions/reaction-picker";
+import { TextMessageBubble } from "@/components/reactions/text-message-bubble";
 import { ThemedText } from "@/components/themed-text";
 import { ScalePressable } from "@/components/ui/scale-pressable";
+import { useReactions } from "@/hooks/use-reactions";
+import { useVoiceRecorder } from "@/hooks/use-voice-recorder";
+import { VOICE_RECORD_MAX_MS } from "@/lib/config";
 import { useAppServices } from "@/lib/services/app-services-context";
 import { useColors } from "@/stores/theme-store";
+
+const HOLD_MS = 320;
+const FAB_CANCEL_DRAG_PX = 100;
 
 type Row = {
   id: string;
@@ -24,9 +40,15 @@ type Row = {
   status: string;
   senderDeviceId: string;
   serverEnvelopeId?: string;
+  kind: string;
   receiptLabel?: string;
   receiptInfo?: string;
 };
+
+function formatTime(ms: number): string {
+  const d = new Date(ms);
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
 
 export default function GroupRoomScreen() {
   const { id, name } = useLocalSearchParams<{ id: string; name?: string }>();
@@ -42,9 +64,60 @@ export default function GroupRoomScreen() {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [expandedReceiptId, setExpandedReceiptId] = useState<string | null>(null);
+  const [expandedReceiptId, setExpandedReceiptId] = useState<string | null>(
+    null,
+  );
+  const [pickerVisible, setPickerVisible] = useState(false);
+  const [pickerMessageId, setPickerMessageId] = useState<string | null>(null);
+  const [pickerAnchor, setPickerAnchor] = useState({ x: 0, y: 0 });
+  const [highlightEmoji, setHighlightEmoji] = useState<string | null>(null);
+  const [dragY, setDragY] = useState(0);
+
+  const holdControlsRef = useRef<HoldRecordControlsHandle>(null);
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdArmedRef = useRef(false);
+  const recordingLiveRef = useRef(false);
+  const slideFabX = useSharedValue(0);
 
   const title = name || "Group";
+  const groupId = id ?? "";
+
+  const { reactionsByMessageId, sendReaction, currentUserId } = useReactions({
+    conversationId: id,
+    groupId: id,
+  });
+
+  const sendVoiceResult = useCallback(
+    async (result: { uri: string; durationMs: number }) => {
+      if (!id) return;
+      try {
+        await syncService.sendGroupOutgoingMedia(id, {
+          uri: result.uri,
+          kind: "voice",
+          mimeType: "audio/mp4",
+          durationMs: result.durationMs,
+        });
+        await reloadRef.current();
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [id, syncService],
+  );
+
+  const voice = useVoiceRecorder({
+    conversationId: groupId || "group",
+    maxDurationMs: VOICE_RECORD_MAX_MS,
+    onMaxDuration: (result) => {
+      void sendVoiceResult(result);
+    },
+    onError: (message) => setError(message),
+  });
+  const voiceRef = useRef(voice);
+  voiceRef.current = voice;
+
+  const reloadRef = useRef<() => Promise<void>>(async () => undefined);
 
   const reload = useCallback(async () => {
     if (!id) return;
@@ -113,6 +186,7 @@ export default function GroupRoomScreen() {
           status: m.status,
           senderDeviceId: m.senderDeviceId,
           serverEnvelopeId: m.serverEnvelopeId,
+          kind: m.kind,
           receiptLabel,
           receiptInfo,
         });
@@ -126,9 +200,106 @@ export default function GroupRoomScreen() {
     }
   }, [id, messageStore, identityStore, syncService, groupStore]);
 
+  reloadRef.current = reload;
+
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  const clearHoldTimer = useCallback(() => {
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+  }, []);
+
+  const finishAndSendVoice = useCallback(async () => {
+    recordingLiveRef.current = false;
+    holdArmedRef.current = false;
+    const result = await voiceRef.current.finish();
+    holdControlsRef.current?.resetLayout();
+    setDragY(0);
+    if (result) await sendVoiceResult(result);
+  }, [sendVoiceResult]);
+
+  const discardVoice = useCallback(async () => {
+    recordingLiveRef.current = false;
+    holdArmedRef.current = false;
+    await voiceRef.current.discard();
+    holdControlsRef.current?.resetLayout();
+    setDragY(0);
+  }, []);
+
+  const recordPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => text.trim().length === 0,
+        onMoveShouldSetPanResponder: () =>
+          recordingLiveRef.current || holdArmedRef.current,
+        onPanResponderGrant: () => {
+          if (voiceRef.current.isLocked) return;
+          slideFabX.value = 0;
+          holdArmedRef.current = false;
+          recordingLiveRef.current = false;
+          setDragY(0);
+          clearHoldTimer();
+          holdTimerRef.current = setTimeout(() => {
+            holdTimerRef.current = null;
+            holdArmedRef.current = true;
+            void (async () => {
+              const ok = await voiceRef.current.start();
+              if (ok) recordingLiveRef.current = true;
+              else holdArmedRef.current = false;
+            })();
+          }, HOLD_MS);
+        },
+        onPanResponderMove: (_, g) => {
+          if (voiceRef.current.isLocked) return;
+          if (!recordingLiveRef.current && !holdArmedRef.current) return;
+          setDragY(g.dy);
+          if (g.dy <= -LOCK_DRAG_PX && recordingLiveRef.current) {
+            voiceRef.current.lock();
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          }
+          if (recordingLiveRef.current && !voiceRef.current.isLocked) {
+            slideFabX.value = Math.max(
+              -FAB_CANCEL_DRAG_PX * 1.25,
+              Math.min(0, g.dx),
+            );
+          }
+        },
+        onPanResponderRelease: () => {
+          const dx = slideFabX.value;
+          const shouldCancel =
+            recordingLiveRef.current &&
+            !voiceRef.current.isLocked &&
+            dx <= -FAB_CANCEL_DRAG_PX;
+          slideFabX.value = 0;
+          setDragY(0);
+          clearHoldTimer();
+          if (shouldCancel) {
+            void discardVoice();
+            return;
+          }
+          if (voiceRef.current.isLocked) {
+            holdArmedRef.current = false;
+            return;
+          }
+          if (recordingLiveRef.current) {
+            void finishAndSendVoice();
+            return;
+          }
+          holdArmedRef.current = false;
+        },
+        onPanResponderTerminate: () => {
+          clearHoldTimer();
+          if (recordingLiveRef.current && !voiceRef.current.isLocked) {
+            void discardVoice();
+          }
+        },
+      }),
+    [clearHoldTimer, discardVoice, finishAndSendVoice, slideFabX, text],
+  );
 
   const send = async () => {
     const trimmed = text.trim();
@@ -139,10 +310,7 @@ export default function GroupRoomScreen() {
       await syncService.sendGroupOutgoing(id, trimmed);
       setText("");
       await reload();
-      const g = await groupStore.getGroup(id);
-      if (g) {
-        await groupStore.touchPreview(id, trimmed.slice(0, 120), Date.now());
-      }
+      await groupStore.touchPreview(id, trimmed.slice(0, 120), Date.now());
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       await reload();
@@ -151,39 +319,26 @@ export default function GroupRoomScreen() {
     }
   };
 
-  const sendSampleMedia = async () => {
-    if (!id || sending) return;
-    setSending(true);
-    setError(null);
-    try {
-      await syncService.sendGroupOutgoingMedia(id, {
-        uri: "file:///group-sample.m4a",
-        kind: "voice",
-        mimeType: "audio/mp4",
-        durationMs: 1000,
-      });
-      await reload();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSending(false);
-    }
-  };
+  const handleMessageLongPress = useCallback(
+    (messageId: string, layout: { x: number; y: number }) => {
+      setPickerMessageId(messageId);
+      setPickerAnchor(layout);
+      setPickerVisible(true);
+    },
+    [],
+  );
 
-  const reactTo = async (item: Row) => {
-    if (!id || !item.serverEnvelopeId) return;
-    try {
-      await syncService.sendReaction({
-        conversationId: id,
-        targetServerEnvelopeId: item.serverEnvelopeId,
-        emoji: "👍",
-        op: "add",
-        groupId: id,
-      });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  };
+  const handleReactionPress = useCallback(
+    (messageId: string, emoji: string) => {
+      const msg = rows.find((m) => m.id === messageId);
+      setHighlightEmoji(emoji);
+      void sendReaction(messageId, emoji, "group", msg?.serverEnvelopeId);
+      setTimeout(() => setHighlightEmoji(null), 500);
+    },
+    [rows, sendReaction],
+  );
+
+  const showMic = text.trim().length === 0;
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
@@ -211,46 +366,71 @@ export default function GroupRoomScreen() {
           data={rows}
           keyExtractor={(i) => i.id}
           contentContainerStyle={{ padding: 12, gap: 8 }}
-          renderItem={({ item }) => (
-            <ScalePressable
-              testID={`group-message-${item.id}`}
-              onLongPress={() => void reactTo(item)}
-              style={[
-                styles.bubble,
-                {
-                  backgroundColor: colors.surfaceElevated,
-                  borderColor: colors.surfaceBorder,
-                },
-              ]}
-            >
-              <ThemedText style={styles.sender}>{item.senderName}</ThemedText>
-              <ThemedText>{item.text}</ThemedText>
-              {item.receiptLabel ? (
-                <ScalePressable
-                  testID={`group-receipt-${item.id}`}
-                  onPress={() =>
-                    setExpandedReceiptId((cur) =>
-                      cur === item.id ? null : item.id,
-                    )
-                  }
-                >
-                  <ThemedText
-                    style={{ opacity: 0.6, fontSize: 12, marginTop: 4 }}
-                  >
-                    {item.receiptLabel}
-                  </ThemedText>
-                </ScalePressable>
-              ) : null}
-              {expandedReceiptId === item.id && item.receiptInfo ? (
+          renderItem={({ item }) => {
+            if (item.senderDeviceId === "system") {
+              return (
                 <ThemedText
-                  testID={`group-receipt-info-${item.id}`}
-                  style={{ opacity: 0.55, fontSize: 11, marginTop: 4 }}
+                  testID={`group-system-${item.id}`}
+                  style={{ textAlign: "center", opacity: 0.6 }}
                 >
-                  {item.receiptInfo}
+                  {item.text}
                 </ThemedText>
-              ) : null}
-            </ScalePressable>
-          )}
+              );
+            }
+            const isMine = item.direction === "outgoing";
+            return (
+              <View>
+                {!isMine ? (
+                  <ThemedText style={styles.sender}>{item.senderName}</ThemedText>
+                ) : null}
+                <TextMessageBubble
+                  messageId={item.id}
+                  text={item.text}
+                  time={formatTime(item.createdAt)}
+                  isMine={isMine}
+                  primaryColor={colors.text}
+                  timeColor={colors.textMuted}
+                  deliveryStatus={item.status}
+                  bubbleStyle={[
+                    styles.bubble,
+                    {
+                      backgroundColor: colors.surfaceElevated,
+                      borderColor: colors.surfaceBorder,
+                    },
+                  ]}
+                  reactions={reactionsByMessageId[item.id] ?? []}
+                  myId={currentUserId}
+                  highlightEmoji={highlightEmoji}
+                  onLongPress={handleMessageLongPress}
+                  onReactionPress={handleReactionPress}
+                />
+                {item.receiptLabel ? (
+                  <ScalePressable
+                    testID={`group-receipt-${item.id}`}
+                    onPress={() =>
+                      setExpandedReceiptId((cur) =>
+                        cur === item.id ? null : item.id,
+                      )
+                    }
+                  >
+                    <ThemedText
+                      style={{ opacity: 0.6, fontSize: 12, marginTop: 4 }}
+                    >
+                      {item.receiptLabel}
+                    </ThemedText>
+                  </ScalePressable>
+                ) : null}
+                {expandedReceiptId === item.id && item.receiptInfo ? (
+                  <ThemedText
+                    testID={`group-receipt-info-${item.id}`}
+                    style={{ opacity: 0.55, fontSize: 11, marginTop: 4 }}
+                  >
+                    {item.receiptInfo}
+                  </ThemedText>
+                ) : null}
+              </View>
+            );
+          }}
           ListEmptyComponent={
             <ThemedText style={{ opacity: 0.6, textAlign: "center" }}>
               No messages yet
@@ -263,26 +443,13 @@ export default function GroupRoomScreen() {
           </ThemedText>
         ) : null}
         <View style={styles.composer}>
-          <ScalePressable
-            testID="group-attach-media"
-            disabled={sending}
-            onPress={() => void sendSampleMedia()}
-            style={[
-              styles.attach,
-              {
-                borderColor: colors.surfaceBorder,
-                backgroundColor: colors.surfaceElevated,
-              },
-            ]}
-          >
-            <ThemedText>📎</ThemedText>
-          </ScalePressable>
           <TextInput
             testID="group-composer-input"
             value={text}
             onChangeText={setText}
             placeholder="Message"
             placeholderTextColor={colors.textMuted}
+            editable={!voice.isRecording}
             style={[
               styles.input,
               {
@@ -292,21 +459,59 @@ export default function GroupRoomScreen() {
               },
             ]}
           />
-          <ScalePressable
-            testID="group-composer-send"
-            disabled={sending}
-            onPress={() => void send()}
-            style={[styles.send, { backgroundColor: colors.tint }]}
-          >
-            {sending ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <ThemedText style={{ color: "#fff", fontWeight: "700" }}>
-                Send
-              </ThemedText>
-            )}
-          </ScalePressable>
+          {showMic ? (
+            <View style={styles.micWrap} testID="group-voice-controls">
+              <HoldRecordControls
+                ref={holdControlsRef}
+                mode="voice"
+                recording={voice.isRecording}
+                locked={voice.isLocked}
+                dragY={dragY}
+                elapsedMs={voice.elapsedMs}
+                maxDurationMs={VOICE_RECORD_MAX_MS}
+                hideFloatingTimer={false}
+                panHandlers={recordPanResponder.panHandlers}
+                onSendLocked={() => void finishAndSendVoice()}
+                slideFabX={slideFabX}
+                accentColor={colors.tint}
+              />
+            </View>
+          ) : (
+            <ScalePressable
+              testID="group-composer-send"
+              disabled={sending}
+              onPress={() => void send()}
+              style={[styles.send, { backgroundColor: colors.tint }]}
+            >
+              {sending ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <ThemedText style={{ color: "#fff", fontWeight: "700" }}>
+                  Send
+                </ThemedText>
+              )}
+            </ScalePressable>
+          )}
         </View>
+        <ReactionPicker
+          visible={pickerVisible}
+          anchorX={pickerAnchor.x}
+          anchorY={pickerAnchor.y}
+          onClose={() => setPickerVisible(false)}
+          onSelect={(emoji) => {
+            if (pickerMessageId) {
+              const msg = rows.find((m) => m.id === pickerMessageId);
+              setHighlightEmoji(emoji);
+              void sendReaction(
+                pickerMessageId,
+                emoji,
+                "group",
+                msg?.serverEnvelopeId,
+              );
+              setTimeout(() => setHighlightEmoji(null), 500);
+            }
+          }}
+        />
       </SafeAreaView>
     </View>
   );
@@ -320,18 +525,12 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 10,
   },
-  sender: { fontWeight: "700", marginBottom: 4, opacity: 0.8 },
+  sender: { fontWeight: "700", marginBottom: 4, opacity: 0.8, fontSize: 12 },
   composer: {
     flexDirection: "row",
     gap: 8,
     padding: 12,
     alignItems: "center",
-  },
-  attach: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
   },
   input: {
     flex: 1,
@@ -344,5 +543,11 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 10,
+  },
+  micWrap: {
+    width: 56,
+    height: 56,
+    alignItems: "center",
+    justifyContent: "center",
   },
 });

@@ -7,9 +7,11 @@ import { useReactionsStore } from "@/stores/reactions-store";
 
 export type UseReactionsOptions = {
   conversationId: string | undefined;
+  /** When set, reactions fan out via Sender Keys. */
+  groupId?: string;
 };
 
-export function useReactions({ conversationId }: UseReactionsOptions) {
+export function useReactions({ conversationId, groupId }: UseReactionsOptions) {
   const { reactionStore, identityStore, syncService } = useAppServices();
   const setConversationReactions = useReactionsStore(
     (s) => s.setConversationReactions,
@@ -98,6 +100,7 @@ export function useReactions({ conversationId }: UseReactionsOptions) {
           targetServerEnvelopeId: serverEnvelopeId,
           emoji,
           op,
+          ...(groupId ? { groupId } : {}),
         });
       } catch {
         if (applied) {
@@ -115,6 +118,7 @@ export function useReactions({ conversationId }: UseReactionsOptions) {
     },
     [
       conversationId,
+      groupId,
       currentUserId,
       reactionStore,
       setMessageReactions,
