@@ -1,210 +1,317 @@
 import * as Haptics from "expo-haptics";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
-  ActivityIndicator,
   FlatList,
+  KeyboardAvoidingView,
+  LayoutChangeEvent,
   PanResponder,
+  Platform,
   StyleSheet,
   TextInput,
   View,
 } from "react-native";
-import { useSharedValue } from "react-native-reanimated";
+import { GestureDetector } from "react-native-gesture-handler";
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+  cancelAnimation,
+} from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { ChatMessageRow } from "@/components/chat/chat-message-row";
+import { ComposerFab } from "@/components/composer-fab";
+import { ErrorHandlerButton } from "@/components/error-handler-button";
 import {
   HoldRecordControls,
   LOCK_DRAG_PX,
   type HoldRecordControlsHandle,
 } from "@/components/hold-record-controls";
+import { RecordingSlideMeter } from "@/components/recording-slide-meter";
 import { ReactionPicker } from "@/components/reactions/reaction-picker";
-import { TextMessageBubble } from "@/components/reactions/text-message-bubble";
+import { ScreenTopAccent } from "@/components/screen-top-accent";
 import { ThemedText } from "@/components/themed-text";
 import { ScalePressable } from "@/components/ui/scale-pressable";
+import { VideoMessage, type VideoMessageHandle } from "@/components/video-message";
+import { useComposerDraft } from "@/hooks/use-composer-draft";
+import { useConversationMessages } from "@/hooks/use-conversation-messages";
 import { useReactions } from "@/hooks/use-reactions";
+import { useSwipeBackGesture } from "@/hooks/use-swipe-back";
 import { useVoiceRecorder } from "@/hooks/use-voice-recorder";
-import { VOICE_RECORD_MAX_MS } from "@/lib/config";
+import { localMessageToUi } from "@/lib/chat/local-message-ui";
+import { VIDEO_RECORD_MAX_MS, VOICE_RECORD_MAX_MS } from "@/lib/config";
+import {
+  assertMessageTextWithinLimit,
+  MAX_MESSAGE_TEXT_CHARS,
+  MESSAGE_TOO_LONG_ERROR,
+} from "@/lib/protocol/message-limits";
 import { useAppServices } from "@/lib/services/app-services-context";
+import {
+  useInputStore,
+  type ComposerMode as StoreComposerMode,
+} from "@/stores/input-store";
+import { useMessagesStore } from "@/stores/messages-store";
+import { useRecordingStore } from "@/stores/recording-store";
 import { useColors } from "@/stores/theme-store";
 
+const MIN_RECORD_MS = 1000;
 const HOLD_MS = 320;
+const TAP_MAX_MS = 260;
+const KEYBOARD_EXTRA_OFFSET = 100;
 const FAB_CANCEL_DRAG_PX = 100;
 
-type Row = {
-  id: string;
-  clientId: string;
-  senderName: string;
-  text: string;
-  createdAt: number;
-  direction: "incoming" | "outgoing";
-  status: string;
-  senderDeviceId: string;
-  serverEnvelopeId?: string;
-  kind: string;
-  receiptLabel?: string;
-  receiptInfo?: string;
-};
-
-function formatTime(ms: number): string {
-  const d = new Date(ms);
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
+type ComposerMode = StoreComposerMode;
 
 export default function GroupRoomScreen() {
   const { id, name } = useLocalSearchParams<{ id: string; name?: string }>();
-  const {
-    messageStore,
-    identityStore,
-    syncService,
-    groupStore,
-  } = useAppServices();
-  const colors = useColors();
+  const groupId = id || "";
+  const title = name || "Group";
+
+  const { syncService, groupStore, mediaTransfer } = useAppServices();
   const router = useRouter();
-  const [rows, setRows] = useState<Row[]>([]);
-  const [text, setText] = useState("");
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const colors = useColors();
+
+  const [composerError, setComposerError] = useState<string | null>(null);
+  const [isSending, setIsSending] = useState(false);
+  const [videoSessionActive, setVideoSessionActive] = useState(false);
+  const [videoLocked, setVideoLocked] = useState(false);
+  const [videoRecordingActive, setVideoRecordingActive] = useState(false);
+  const [dragY, setDragY] = useState(0);
+  const [recordHudTick, setRecordHudTick] = useState(0);
+  const [inputFocused, setInputFocused] = useState(false);
+  const [pickerVisible, setPickerVisible] = useState(false);
+  const [pickerAnchor, setPickerAnchor] = useState({ x: 0, y: 0 });
+  const [pickerMessageId, setPickerMessageId] = useState<string | null>(null);
+  const [highlightEmoji, setHighlightEmoji] = useState<string | null>(null);
+  const [receiptLabels, setReceiptLabels] = useState<
+    Record<string, { label: string; info: string }>
+  >({});
   const [expandedReceiptId, setExpandedReceiptId] = useState<string | null>(
     null,
   );
-  const [pickerVisible, setPickerVisible] = useState(false);
-  const [pickerMessageId, setPickerMessageId] = useState<string | null>(null);
-  const [pickerAnchor, setPickerAnchor] = useState({ x: 0, y: 0 });
-  const [highlightEmoji, setHighlightEmoji] = useState<string | null>(null);
-  const [dragY, setDragY] = useState(0);
 
-  const holdControlsRef = useRef<HoldRecordControlsHandle>(null);
+  const { draft, setDraft, clearDraft } = useComposerDraft(groupId);
+  const composerMode = useInputStore(
+    (s) => s.composerModesByChatId[groupId] ?? "send",
+  );
+  const setComposerMode = useInputStore((s) => s.setComposerMode);
+  const cycleComposerMode = useInputStore((s) => s.cycleComposerMode);
+
+  const {
+    messages: localMessages,
+    attachments,
+    reload: reloadMessages,
+  } = useConversationMessages(groupId || undefined);
+
+  const { reactionsByMessageId, sendReaction, currentUserId } = useReactions({
+    conversationId: groupId || undefined,
+    groupId: groupId || undefined,
+  });
+
+  const activePlaybackId = useMessagesStore((s) => s.activePlaybackId);
+  const setActivePlayback = useMessagesStore((s) => s.setActivePlayback);
+
+  const listRef = useRef<FlatList>(null);
+  const holdRecordControlsRef = useRef<HoldRecordControlsHandle>(null);
+  const videoRef = useRef<VideoMessageHandle>(null);
+  const videoRecordingActiveRef = useRef(false);
+  const videoLockedRef = useRef(false);
+  const videoSessionActiveRef = useRef(false);
+  const videoRecordStartedAt = useRef(0);
+  const videoStartGenRef = useRef(0);
+  const pressDownAt = useRef(0);
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const holdArmedRef = useRef(false);
   const recordingLiveRef = useRef(false);
-  const slideFabX = useSharedValue(0);
+  const composerModeRef = useRef<ComposerMode>(composerMode);
+  composerModeRef.current = composerMode;
 
-  const title = name || "Group";
-  const groupId = id ?? "";
+  const slideCancelFabX = useSharedValue(0);
+  const shellW = useSharedValue(260);
+  const sweep = useSharedValue(0);
+  const neonVisible = useSharedValue(0);
 
-  const { reactionsByMessageId, sendReaction, currentUserId } = useReactions({
-    conversationId: id,
-    groupId: id,
-  });
+  videoRecordingActiveRef.current = videoRecordingActive;
+  videoLockedRef.current = videoLocked;
+  videoSessionActiveRef.current = videoSessionActive;
 
   const sendVoiceResult = useCallback(
     async (result: { uri: string; durationMs: number }) => {
-      if (!id) return;
+      if (!groupId) return;
       try {
-        await syncService.sendGroupOutgoingMedia(id, {
+        await syncService.sendGroupOutgoingMedia(groupId, {
           uri: result.uri,
           kind: "voice",
           mimeType: "audio/mp4",
           durationMs: result.durationMs,
         });
-        await reloadRef.current();
+        clearDraft();
+        setComposerMode(groupId, "send");
+        await reloadMessages();
         void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setComposerError(
+          e instanceof Error ? e.message : "Failed to send voice message.",
+        );
       }
     },
-    [id, syncService],
+    [groupId, syncService, clearDraft, setComposerMode, reloadMessages],
   );
 
   const voice = useVoiceRecorder({
     conversationId: groupId || "group",
     maxDurationMs: VOICE_RECORD_MAX_MS,
-    onMaxDuration: (result) => {
-      void sendVoiceResult(result);
+    onMaxDuration: (r) => {
+      void sendVoiceResult(r);
     },
-    onError: (message) => setError(message),
+    onError: (m) => setComposerError(m),
   });
   const voiceRef = useRef(voice);
   voiceRef.current = voice;
 
-  const reloadRef = useRef<() => Promise<void>>(async () => undefined);
+  const recordingLive = voice.isRecording || videoRecordingActive;
+  const swipeBackGesture = useSwipeBackGesture(!recordingLive);
 
-  const reload = useCallback(async () => {
-    if (!id) return;
-    try {
-      const local = await identityStore.getLocalIdentity();
-      const msgs = await messageStore.listByConversation(id, 100);
-      const members = ((await groupStore.listMembers(id, true)) ?? []).filter(
-        (x) => x.userId !== local?.userId,
-      );
-      const next: Row[] = [];
-      const unreadIncoming: {
-        clientMessageId: string;
-        senderUserId: string;
-        senderDeviceId: string;
-      }[] = [];
-      for (const m of msgs) {
-        let receiptLabel: string | undefined;
-        let receiptInfo: string | undefined;
-        if (m.direction === "outgoing") {
-          const agg = await syncService.getGroupReceiptAggregate(id, m.clientId);
-          if (agg) {
-            const deliveredAll =
-              members.length > 0 &&
-              members.every((mem) => agg.deliveredUserIds.includes(mem.userId));
-            receiptLabel = deliveredAll
-              ? `Delivered to all · Read by ${agg.readUserIds.length}`
-              : `Delivered ${agg.deliveredUserIds.length}/${members.length} · Read ${agg.readUserIds.length}`;
-            const nameFor = (uid: string) =>
-              members.find((mem) => mem.userId === uid)?.username ??
-              uid.slice(0, 8);
-            receiptInfo = [
-              agg.deliveredUserIds.length
-                ? `Delivered: ${agg.deliveredUserIds.map(nameFor).join(", ")}`
-                : "Delivered: —",
-              agg.readUserIds.length
-                ? `Read: ${agg.readUserIds.map(nameFor).join(", ")}`
-                : "Read: —",
-            ].join("\n");
-          } else if (m.status === "delivered" || m.status === "sent") {
-            receiptLabel = m.status;
-          }
-        } else if (m.senderDeviceId !== "system" && m.senderUserId) {
-          unreadIncoming.push({
-            clientMessageId: m.clientId,
-            senderUserId: m.senderUserId,
-            senderDeviceId: m.senderDeviceId,
-          });
-        }
-        next.push({
-          id: m.id,
-          clientId: m.clientId,
-          senderName:
-            m.senderDeviceId === "system"
+  const messages = useMemo(
+    () =>
+      localMessages.map((m) =>
+        localMessageToUi(
+          m,
+          m.direction === "outgoing"
+            ? "You"
+            : m.senderDeviceId === "system"
               ? "System"
-              : m.direction === "outgoing"
-                ? "You"
-                : m.senderDeviceId.slice(0, 8),
-          text:
-            m.kind === "voice"
-              ? "Voice message"
-              : m.kind === "video"
-                ? "Video message"
-                : m.plaintext,
-          createdAt: m.createdAt,
-          direction: m.direction,
-          status: m.status,
-          senderDeviceId: m.senderDeviceId,
-          serverEnvelopeId: m.serverEnvelopeId,
-          kind: m.kind,
-          receiptLabel,
-          receiptInfo,
-        });
-      }
-      setRows(next);
-      if (unreadIncoming.length) {
-        void syncService.markGroupMessagesRead(id, unreadIncoming);
-      }
-    } catch {
-      setRows([]);
-    }
-  }, [id, messageStore, identityStore, syncService, groupStore]);
+              : (m.senderUserId ?? m.senderDeviceId).slice(0, 8),
+          reactionsByMessageId[m.id] ?? [],
+          m.attachmentId ? attachments[m.attachmentId] : null,
+        ),
+      ),
+    [localMessages, attachments, reactionsByMessageId],
+  );
 
-  reloadRef.current = reload;
+  // Group receipt aggregates for outgoing text
+  useEffect(() => {
+    if (!groupId) return;
+    let cancelled = false;
+    void (async () => {
+      const next: Record<string, { label: string; info: string }> = {};
+      const members = ((await groupStore.listMembers(groupId, true)) ?? []).filter(
+        (m) => m.userId !== currentUserId,
+      );
+      for (const m of localMessages) {
+        if (m.direction !== "outgoing" || m.kind !== "text") continue;
+        const agg = await syncService.getGroupReceiptAggregate(
+          groupId,
+          m.clientId,
+        );
+        if (!agg) continue;
+        const deliveredAll =
+          members.length > 0 &&
+          members.every((mem) => agg.deliveredUserIds.includes(mem.userId));
+        const label = deliveredAll
+          ? `Delivered to all · Read by ${agg.readUserIds.length}`
+          : `Delivered ${agg.deliveredUserIds.length}/${members.length} · Read ${agg.readUserIds.length}`;
+        const nameFor = (uid: string) =>
+          members.find((mem) => mem.userId === uid)?.username ?? uid.slice(0, 8);
+        next[m.id] = {
+          label,
+          info: [
+            agg.deliveredUserIds.length
+              ? `Delivered: ${agg.deliveredUserIds.map(nameFor).join(", ")}`
+              : "Delivered: —",
+            agg.readUserIds.length
+              ? `Read: ${agg.readUserIds.map(nameFor).join(", ")}`
+              : "Read: —",
+          ].join("\n"),
+        };
+      }
+      if (!cancelled) setReceiptLabels(next);
+
+      const unread = localMessages
+        .filter(
+          (m) =>
+            m.direction === "incoming" &&
+            m.senderDeviceId !== "system" &&
+            m.senderUserId,
+        )
+        .map((m) => ({
+          clientMessageId: m.clientId,
+          senderUserId: m.senderUserId!,
+          senderDeviceId: m.senderDeviceId,
+        }));
+      if (unread.length) {
+        void syncService.markGroupMessagesRead(groupId, unread);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [groupId, localMessages, groupStore, syncService, currentUserId]);
+
+  const prevMessageCount = useRef(messages.length);
+  useEffect(() => {
+    if (messages.length > prevMessageCount.current) {
+      requestAnimationFrame(() => {
+        listRef.current?.scrollToEnd({ animated: true });
+      });
+    }
+    prevMessageCount.current = messages.length;
+  }, [messages.length]);
 
   useEffect(() => {
-    void reload();
-  }, [reload]);
+    if (!inputFocused) {
+      cancelAnimation(sweep);
+      cancelAnimation(neonVisible);
+      neonVisible.value = 0;
+      return;
+    }
+    neonVisible.value = 1;
+    sweep.value = 0;
+    sweep.value = withTiming(1, { duration: 1600, easing: Easing.linear }, () => {
+      neonVisible.value = withTiming(0, { duration: 200 });
+    });
+  }, [inputFocused, sweep, neonVisible]);
+
+  const neonBarStyle = useAnimatedStyle(() => ({
+    position: "absolute" as const,
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 48,
+    transform: [{ translateX: (shellW.value + 48) * sweep.value - 48 }],
+    opacity: neonVisible.value,
+    backgroundColor: colors.accentGlow ?? colors.tint,
+  }));
+
+  const onInputShellLayout = useCallback(
+    (e: LayoutChangeEvent) => {
+      shellW.value = e.nativeEvent.layout.width;
+    },
+    [shellW],
+  );
+
+  const dismissError = useCallback(() => setComposerError(null), []);
+
+  const resetComposerAfterSend = useCallback(() => {
+    holdRecordControlsRef.current?.resetLayout();
+    setComposerMode(groupId, "send");
+    setDragY(0);
+    setVideoLocked(false);
+    setVideoRecordingActive(false);
+    videoRecordingActiveRef.current = false;
+    holdArmedRef.current = false;
+    recordingLiveRef.current = false;
+    useRecordingStore.getState().cancelRecording();
+  }, [groupId, setComposerMode]);
 
   const clearHoldTimer = useCallback(() => {
     if (holdTimerRef.current) {
@@ -213,111 +320,354 @@ export default function GroupRoomScreen() {
     }
   }, []);
 
+  const sendTextMessage = useCallback(() => {
+    const trimmed = draft.trim();
+    if (!trimmed || isSending || !groupId) return;
+    void (async () => {
+      setIsSending(true);
+      try {
+        try {
+          assertMessageTextWithinLimit(trimmed);
+        } catch {
+          setComposerError(MESSAGE_TOO_LONG_ERROR);
+          return;
+        }
+        await syncService.sendGroupOutgoing(groupId, trimmed);
+        clearDraft();
+        resetComposerAfterSend();
+        await reloadMessages();
+        await groupStore.touchPreview(groupId, trimmed.slice(0, 120), Date.now());
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } catch (e) {
+        setComposerError(e instanceof Error ? e.message : "Failed to send message.");
+      } finally {
+        setIsSending(false);
+      }
+    })();
+  }, [
+    draft,
+    isSending,
+    groupId,
+    syncService,
+    clearDraft,
+    resetComposerAfterSend,
+    reloadMessages,
+    groupStore,
+  ]);
+
   const finishAndSendVoice = useCallback(async () => {
     recordingLiveRef.current = false;
     holdArmedRef.current = false;
     const result = await voiceRef.current.finish();
-    holdControlsRef.current?.resetLayout();
+    holdRecordControlsRef.current?.resetLayout();
     setDragY(0);
     if (result) await sendVoiceResult(result);
-  }, [sendVoiceResult]);
+    else resetComposerAfterSend();
+  }, [sendVoiceResult, resetComposerAfterSend]);
 
   const discardVoice = useCallback(async () => {
     recordingLiveRef.current = false;
     holdArmedRef.current = false;
     await voiceRef.current.discard();
-    holdControlsRef.current?.resetLayout();
+    holdRecordControlsRef.current?.resetLayout();
     setDragY(0);
+    resetComposerAfterSend();
+  }, [resetComposerAfterSend]);
+
+  const finishVideoCapture = useCallback(async () => {
+    const durationMs = Date.now() - videoRecordStartedAt.current;
+    let recorded: { uri: string } | null = null;
+    try {
+      recorded = (await videoRef.current?.stopRecording()) ?? null;
+    } catch {
+      recorded = null;
+    }
+    setVideoSessionActive(false);
+    setVideoLocked(false);
+    setVideoRecordingActive(false);
+    videoRecordingActiveRef.current = false;
+    useRecordingStore.getState().stopRecording();
+    if (!recorded?.uri || durationMs < MIN_RECORD_MS) {
+      resetComposerAfterSend();
+      return;
+    }
+    try {
+      await syncService.sendGroupOutgoingMedia(groupId, {
+        uri: recorded.uri,
+        kind: "video",
+        mimeType: "video/mp4",
+        durationMs,
+      });
+      resetComposerAfterSend();
+      await reloadMessages();
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch (e) {
+      setComposerError(
+        e instanceof Error ? e.message : "Failed to send video message.",
+      );
+    }
+  }, [groupId, reloadMessages, resetComposerAfterSend, syncService]);
+
+  const discardVideoRecording = useCallback(async () => {
+    videoStartGenRef.current += 1;
+    useRecordingStore.getState().cancelRecording();
+    try {
+      await videoRef.current?.stopRecording();
+    } catch {
+      /* noop */
+    }
+    setVideoSessionActive(false);
+    setVideoLocked(false);
+    setVideoRecordingActive(false);
+    videoRecordingActiveRef.current = false;
+    setDragY(0);
+    holdRecordControlsRef.current?.resetLayout();
+    resetComposerAfterSend();
+  }, [resetComposerAfterSend]);
+
+  const startVideoRecording = useCallback(async (): Promise<boolean> => {
+    if (Platform.OS === "web") {
+      setComposerError("Video messages are not available on web.");
+      return false;
+    }
+    const gen = ++videoStartGenRef.current;
+    setVideoSessionActive(true);
+    setVideoLocked(false);
+    await new Promise((r) => setTimeout(r, 160));
+    if (gen !== videoStartGenRef.current) return false;
+    try {
+      const ok = await videoRef.current?.ensurePermissions();
+      if (gen !== videoStartGenRef.current) return false;
+      if (!ok) {
+        setVideoSessionActive(false);
+        setComposerError(
+          "Camera and microphone permission are required for video messages.",
+        );
+        return false;
+      }
+      await videoRef.current?.startRecording();
+      if (gen !== videoStartGenRef.current) {
+        try {
+          await videoRef.current?.stopRecording();
+        } catch {
+          /* noop */
+        }
+        return false;
+      }
+      videoRecordStartedAt.current = Date.now();
+      return true;
+    } catch {
+      if (gen === videoStartGenRef.current) {
+        setVideoSessionActive(false);
+        setComposerError("Could not start the camera.");
+      }
+      return false;
+    }
   }, []);
+
+  useEffect(() => {
+    if (!recordingLive) return;
+    const id = setInterval(() => {
+      setRecordHudTick((n) => n + 1);
+      const ms = voice.isRecording
+        ? voice.elapsedMs
+        : videoRecordingActive
+          ? Date.now() - videoRecordStartedAt.current
+          : 0;
+      useRecordingStore.getState().updateRecordingTime(ms);
+    }, 200);
+    return () => clearInterval(id);
+  }, [recordingLive, voice.isRecording, voice.elapsedMs, videoRecordingActive]);
+
+  useEffect(() => {
+    if (!videoRecordingActive) return;
+    const id = setTimeout(() => {
+      if (videoRecordingActiveRef.current) void finishVideoCapture();
+    }, VIDEO_RECORD_MAX_MS);
+    return () => clearTimeout(id);
+  }, [videoRecordingActive, finishVideoCapture]);
+
+  const lockFromDrag = useCallback((dy: number) => {
+    if (dy >= -LOCK_DRAG_PX || !recordingLiveRef.current) return;
+    const mode = composerModeRef.current;
+    if (mode === "voice" && !voiceRef.current.isLocked) {
+      voiceRef.current.lock();
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } else if (mode === "video" && !videoLockedRef.current) {
+      setVideoLocked(true);
+      useRecordingStore.getState().lockRecording();
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    }
+  }, []);
+
+  const onComposerPressOut = useCallback(async () => {
+    clearHoldTimer();
+    const elapsed = Date.now() - pressDownAt.current;
+    const mode = composerModeRef.current;
+
+    if (mode === "voice" && voiceRef.current.isRecording) {
+      if (voiceRef.current.isLocked) {
+        holdArmedRef.current = false;
+        return;
+      }
+      holdArmedRef.current = false;
+      recordingLiveRef.current = false;
+      await finishAndSendVoice();
+      return;
+    }
+
+    if (mode === "video" && videoSessionActive && videoRecordingActiveRef.current) {
+      if (videoLockedRef.current) {
+        holdArmedRef.current = false;
+        return;
+      }
+      holdArmedRef.current = false;
+      recordingLiveRef.current = false;
+      await finishVideoCapture();
+      return;
+    }
+
+    if (holdArmedRef.current && !recordingLiveRef.current) {
+      holdArmedRef.current = false;
+      videoStartGenRef.current += 1;
+      setVideoSessionActive(false);
+      try {
+        await videoRef.current?.stopRecording();
+      } catch {
+        /* noop */
+      }
+      await voiceRef.current.discard();
+      return;
+    }
+
+    if (elapsed <= TAP_MAX_MS) {
+      if (mode === "voice") setComposerMode(groupId, "video");
+      else if (mode === "video") setComposerMode(groupId, "send");
+    }
+  }, [
+    clearHoldTimer,
+    finishAndSendVoice,
+    finishVideoCapture,
+    videoSessionActive,
+    groupId,
+    setComposerMode,
+  ]);
 
   const recordPanResponder = useMemo(
     () =>
       PanResponder.create({
-        onStartShouldSetPanResponder: () => text.trim().length === 0,
+        onStartShouldSetPanResponder: () => {
+          const mode = composerModeRef.current;
+          return mode === "voice" || mode === "video";
+        },
         onMoveShouldSetPanResponder: () =>
           recordingLiveRef.current || holdArmedRef.current,
         onPanResponderGrant: () => {
-          if (voiceRef.current.isLocked) return;
-          slideFabX.value = 0;
+          slideCancelFabX.value = 0;
+          if (voiceRef.current.isLocked || videoLockedRef.current) return;
+          pressDownAt.current = Date.now();
           holdArmedRef.current = false;
           recordingLiveRef.current = false;
           setDragY(0);
           clearHoldTimer();
-          holdTimerRef.current = setTimeout(() => {
+          holdTimerRef.current = setTimeout(async () => {
             holdTimerRef.current = null;
             holdArmedRef.current = true;
-            void (async () => {
-              const ok = await voiceRef.current.start();
-              if (ok) recordingLiveRef.current = true;
-              else holdArmedRef.current = false;
-            })();
+            const mode = composerModeRef.current;
+            try {
+              if (mode === "voice") {
+                const ok = await voiceRef.current.start();
+                recordingLiveRef.current = ok;
+              } else if (mode === "video") {
+                const ok = await startVideoRecording();
+                if (ok) {
+                  recordingLiveRef.current = true;
+                  setVideoRecordingActive(true);
+                  videoRecordingActiveRef.current = true;
+                  useRecordingStore.getState().startRecording(groupId);
+                }
+              }
+            } catch {
+              holdArmedRef.current = false;
+              recordingLiveRef.current = false;
+              setVideoSessionActive(false);
+              setComposerError("Recording could not start.");
+            }
           }, HOLD_MS);
         },
         onPanResponderMove: (_, g) => {
-          if (voiceRef.current.isLocked) return;
+          if (voiceRef.current.isLocked || videoLockedRef.current) return;
           if (!recordingLiveRef.current && !holdArmedRef.current) return;
           setDragY(g.dy);
-          if (g.dy <= -LOCK_DRAG_PX && recordingLiveRef.current) {
-            voiceRef.current.lock();
-            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          }
-          if (recordingLiveRef.current && !voiceRef.current.isLocked) {
-            slideFabX.value = Math.max(
+          lockFromDrag(g.dy);
+          if (
+            recordingLiveRef.current &&
+            !voiceRef.current.isLocked &&
+            !videoLockedRef.current
+          ) {
+            slideCancelFabX.value = Math.max(
               -FAB_CANCEL_DRAG_PX * 1.25,
               Math.min(0, g.dx),
             );
           }
         },
         onPanResponderRelease: () => {
-          const dx = slideFabX.value;
-          const shouldCancel =
+          const dx = slideCancelFabX.value;
+          const shouldSlideCancel =
             recordingLiveRef.current &&
             !voiceRef.current.isLocked &&
+            !videoLockedRef.current &&
             dx <= -FAB_CANCEL_DRAG_PX;
-          slideFabX.value = 0;
+          slideCancelFabX.value = withSpring(0, { damping: 22, stiffness: 320 });
           setDragY(0);
-          clearHoldTimer();
-          if (shouldCancel) {
-            void discardVoice();
+          if (shouldSlideCancel) {
+            const mode = composerModeRef.current;
+            if (mode === "voice") void discardVoice();
+            else if (mode === "video") void discardVideoRecording();
             return;
           }
-          if (voiceRef.current.isLocked) {
-            holdArmedRef.current = false;
-            return;
-          }
-          if (recordingLiveRef.current) {
-            void finishAndSendVoice();
-            return;
-          }
-          holdArmedRef.current = false;
+          void onComposerPressOut();
         },
         onPanResponderTerminate: () => {
-          clearHoldTimer();
-          if (recordingLiveRef.current && !voiceRef.current.isLocked) {
-            void discardVoice();
+          const dx = slideCancelFabX.value;
+          const shouldSlideCancel =
+            recordingLiveRef.current &&
+            !voiceRef.current.isLocked &&
+            !videoLockedRef.current &&
+            dx <= -FAB_CANCEL_DRAG_PX;
+          slideCancelFabX.value = withSpring(0, { damping: 22, stiffness: 320 });
+          setDragY(0);
+          if (shouldSlideCancel) {
+            const mode = composerModeRef.current;
+            if (mode === "voice") void discardVoice();
+            else if (mode === "video") void discardVideoRecording();
+            return;
           }
+          void onComposerPressOut();
         },
       }),
-    [clearHoldTimer, discardVoice, finishAndSendVoice, slideFabX, text],
+    [
+      clearHoldTimer,
+      discardVideoRecording,
+      discardVoice,
+      groupId,
+      lockFromDrag,
+      onComposerPressOut,
+      slideCancelFabX,
+      startVideoRecording,
+    ],
   );
 
-  const send = async () => {
-    const trimmed = text.trim();
-    if (!trimmed || !id || sending) return;
-    setSending(true);
-    setError(null);
-    try {
-      await syncService.sendGroupOutgoing(id, trimmed);
-      setText("");
-      await reload();
-      await groupStore.touchPreview(id, trimmed.slice(0, 120), Date.now());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      await reload();
-    } finally {
-      setSending(false);
+  const recordElapsedMs = useMemo(() => {
+    void recordHudTick;
+    if (voice.isRecording) return voice.elapsedMs;
+    if (videoRecordingActive) {
+      return Date.now() - videoRecordStartedAt.current;
     }
-  };
+    return 0;
+  }, [voice.isRecording, voice.elapsedMs, videoRecordingActive, recordHudTick]);
+
+  const isSendOnly = draft.trim().length > 0;
 
   const handleMessageLongPress = useCallback(
     (messageId: string, layout: { x: number; y: number }) => {
@@ -330,224 +680,375 @@ export default function GroupRoomScreen() {
 
   const handleReactionPress = useCallback(
     (messageId: string, emoji: string) => {
-      const msg = rows.find((m) => m.id === messageId);
+      const msg = messages.find((m) => m.id === messageId);
       setHighlightEmoji(emoji);
       void sendReaction(messageId, emoji, "group", msg?.serverEnvelopeId);
       setTimeout(() => setHighlightEmoji(null), 500);
     },
-    [rows, sendReaction],
+    [messages, sendReaction],
   );
 
-  const showMic = text.trim().length === 0;
-
   return (
-    <View style={[styles.root, { backgroundColor: colors.background }]}>
-      <Stack.Screen
-        options={{
-          title,
-          headerRight: () => (
-            <ScalePressable
-              testID="group-info-button"
-              onPress={() =>
-                router.push({
-                  pathname: "/GroupInfo" as never,
-                  params: { id: id!, name: title },
-                })
-              }
-            >
-              <ThemedText style={{ color: colors.tint }}>Info</ThemedText>
-            </ScalePressable>
-          ),
-        }}
-      />
-      <SafeAreaView style={styles.safe} edges={["bottom"]}>
-        <FlatList
-          testID="group-message-list"
-          data={rows}
-          keyExtractor={(i) => i.id}
-          contentContainerStyle={{ padding: 12, gap: 8 }}
-          renderItem={({ item }) => {
-            if (item.senderDeviceId === "system") {
-              return (
-                <ThemedText
-                  testID={`group-system-${item.id}`}
-                  style={{ textAlign: "center", opacity: 0.6 }}
-                >
-                  {item.text}
-                </ThemedText>
-              );
+    <SafeAreaView
+      style={[styles.safeArea, { backgroundColor: colors.background }]}
+      edges={["bottom"]}
+    >
+      <GestureDetector gesture={swipeBackGesture}>
+        <View style={styles.gestureFill}>
+          <ScreenTopAccent />
+          <KeyboardAvoidingView
+            style={styles.keyboardRoot}
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            keyboardVerticalOffset={
+              Platform.OS === "ios" ? 100 : KEYBOARD_EXTRA_OFFSET
             }
-            const isMine = item.direction === "outgoing";
-            return (
-              <View>
-                {!isMine ? (
-                  <ThemedText style={styles.sender}>{item.senderName}</ThemedText>
-                ) : null}
-                <TextMessageBubble
-                  messageId={item.id}
-                  text={item.text}
-                  time={formatTime(item.createdAt)}
-                  isMine={isMine}
-                  primaryColor={colors.text}
-                  timeColor={colors.textMuted}
-                  deliveryStatus={item.status}
-                  bubbleStyle={[
-                    styles.bubble,
-                    {
-                      backgroundColor: colors.surfaceElevated,
-                      borderColor: colors.surfaceBorder,
-                    },
-                  ]}
-                  reactions={reactionsByMessageId[item.id] ?? []}
-                  myId={currentUserId}
-                  highlightEmoji={highlightEmoji}
-                  onLongPress={handleMessageLongPress}
-                  onReactionPress={handleReactionPress}
-                />
-                {item.receiptLabel ? (
-                  <ScalePressable
-                    testID={`group-receipt-${item.id}`}
-                    onPress={() =>
-                      setExpandedReceiptId((cur) =>
-                        cur === item.id ? null : item.id,
-                      )
-                    }
-                  >
-                    <ThemedText
-                      style={{ opacity: 0.6, fontSize: 12, marginTop: 4 }}
+          >
+            <View style={styles.container}>
+              <Stack.Screen
+                options={{
+                  title,
+                  headerBackTitle: "Chats",
+                  headerStyle: { backgroundColor: colors.surfaceElevated },
+                  headerTintColor: colors.text,
+                  headerShadowVisible: false,
+                  headerRight: () => (
+                    <ScalePressable
+                      testID="group-info-button"
+                      onPress={() =>
+                        router.push({
+                          pathname: "/GroupInfo" as never,
+                          params: { id: groupId, name: title },
+                        })
+                      }
                     >
-                      {item.receiptLabel}
-                    </ThemedText>
-                  </ScalePressable>
-                ) : null}
-                {expandedReceiptId === item.id && item.receiptInfo ? (
-                  <ThemedText
-                    testID={`group-receipt-info-${item.id}`}
-                    style={{ opacity: 0.55, fontSize: 11, marginTop: 4 }}
-                  >
-                    {item.receiptInfo}
-                  </ThemedText>
-                ) : null}
-              </View>
-            );
-          }}
-          ListEmptyComponent={
-            <ThemedText style={{ opacity: 0.6, textAlign: "center" }}>
-              No messages yet
-            </ThemedText>
-          }
-        />
-        {error ? (
-          <ThemedText style={{ color: colors.error, paddingHorizontal: 12 }}>
-            {error}
-          </ThemedText>
-        ) : null}
-        <View style={styles.composer}>
-          <TextInput
-            testID="group-composer-input"
-            value={text}
-            onChangeText={setText}
-            placeholder="Message"
-            placeholderTextColor={colors.textMuted}
-            editable={!voice.isRecording}
-            style={[
-              styles.input,
-              {
-                color: colors.text,
-                borderColor: colors.surfaceBorder,
-                backgroundColor: colors.surfaceElevated,
-              },
-            ]}
-          />
-          {showMic ? (
-            <View style={styles.micWrap} testID="group-voice-controls">
-              <HoldRecordControls
-                ref={holdControlsRef}
-                mode="voice"
-                recording={voice.isRecording}
-                locked={voice.isLocked}
-                dragY={dragY}
-                elapsedMs={voice.elapsedMs}
-                maxDurationMs={VOICE_RECORD_MAX_MS}
-                hideFloatingTimer={false}
-                panHandlers={recordPanResponder.panHandlers}
-                onSendLocked={() => void finishAndSendVoice()}
-                slideFabX={slideFabX}
-                accentColor={colors.tint}
+                      <ThemedText style={{ color: colors.tint }}>Info</ThemedText>
+                    </ScalePressable>
+                  ),
+                }}
               />
+
+              {Platform.OS !== "web" && videoSessionActive ? (
+                <VideoMessage
+                  ref={videoRef}
+                  active={videoSessionActive}
+                  elapsedMs={recordElapsedMs}
+                />
+              ) : null}
+
+              <FlatList
+                ref={listRef}
+                testID="group-message-list"
+                data={messages}
+                keyExtractor={(item) => item.id}
+                contentContainerStyle={styles.messageList}
+                keyboardShouldPersistTaps="handled"
+                windowSize={9}
+                maxToRenderPerBatch={12}
+                initialNumToRender={14}
+                removeClippedSubviews={Platform.OS === "android"}
+                ListEmptyComponent={
+                  <ThemedText style={{ opacity: 0.6, textAlign: "center" }}>
+                    No messages yet
+                  </ThemedText>
+                }
+                renderItem={({ item }) => {
+                  const receipt = receiptLabels[item.id];
+                  const isSystem = item.sender === "System";
+                  if (isSystem) {
+                    return (
+                      <ThemedText
+                        testID={`group-system-${item.id}`}
+                        style={{ textAlign: "center", opacity: 0.6 }}
+                      >
+                        {item.text}
+                      </ThemedText>
+                    );
+                  }
+                  return (
+                    <ChatMessageRow
+                      item={item}
+                      currentUserId={currentUserId}
+                      activePlaybackId={activePlaybackId}
+                      highlightEmoji={highlightEmoji}
+                      pickerMessageId={pickerMessageId}
+                      onLongPress={handleMessageLongPress}
+                      onReactionPress={handleReactionPress}
+                      onActivatePlayback={(mid) => setActivePlayback(mid)}
+                      onDeactivatePlayback={(mid) => {
+                        if (activePlaybackId === mid) setActivePlayback(null);
+                      }}
+                      onDownloadMedia={(attachmentId) => {
+                        void mediaTransfer
+                          .downloadAttachment(attachmentId)
+                          .then(() => reloadMessages())
+                          .catch((e: unknown) => {
+                            setComposerError(
+                              e instanceof Error
+                                ? e.message
+                                : "Download failed.",
+                            );
+                          });
+                      }}
+                      header={
+                        !(item.isMine ?? item.sender === "me") &&
+                        item.sender !== "me" &&
+                        item.sender !== "System" ? (
+                          <ThemedText style={styles.senderLabel}>
+                            {item.sender}
+                          </ThemedText>
+                        ) : null
+                      }
+                      footer={
+                        receipt ? (
+                          <View>
+                            <ScalePressable
+                              testID={`group-receipt-${item.id}`}
+                              onPress={() =>
+                                setExpandedReceiptId((cur) =>
+                                  cur === item.id ? null : item.id,
+                                )
+                              }
+                            >
+                              <ThemedText
+                                style={{
+                                  opacity: 0.6,
+                                  fontSize: 12,
+                                  marginTop: 4,
+                                  alignSelf: item.isMine
+                                    ? "flex-end"
+                                    : "flex-start",
+                                }}
+                              >
+                                {receipt.label}
+                              </ThemedText>
+                            </ScalePressable>
+                            {expandedReceiptId === item.id ? (
+                              <ThemedText
+                                testID={`group-receipt-info-${item.id}`}
+                                style={{
+                                  opacity: 0.55,
+                                  fontSize: 11,
+                                  marginTop: 4,
+                                  alignSelf: item.isMine
+                                    ? "flex-end"
+                                    : "flex-start",
+                                }}
+                              >
+                                {receipt.info}
+                              </ThemedText>
+                            ) : null}
+                          </View>
+                        ) : null
+                      }
+                    />
+                  );
+                }}
+              />
+
+              <ReactionPicker
+                visible={pickerVisible}
+                anchorX={pickerAnchor.x}
+                anchorY={pickerAnchor.y}
+                onClose={() => setPickerVisible(false)}
+                onSelect={(emoji) => {
+                  if (pickerMessageId) {
+                    const msg = messages.find((m) => m.id === pickerMessageId);
+                    setHighlightEmoji(emoji);
+                    void sendReaction(
+                      pickerMessageId,
+                      emoji,
+                      "group",
+                      msg?.serverEnvelopeId,
+                    );
+                    setTimeout(() => setHighlightEmoji(null), 500);
+                  }
+                }}
+              />
+
+              <View
+                style={[
+                  styles.composerShell,
+                  {
+                    borderTopColor: colors.surfaceBorder,
+                    backgroundColor: colors.surfaceElevated,
+                  },
+                ]}
+              >
+                <ErrorHandlerButton
+                  message={composerError}
+                  onDismiss={dismissError}
+                />
+                <View style={styles.inputRow}>
+                  <View
+                    style={[
+                      styles.inputShell,
+                      {
+                        borderColor: colors.inputBorder,
+                        backgroundColor: colors.inputFill,
+                      },
+                    ]}
+                    onLayout={onInputShellLayout}
+                  >
+                    {voice.isRecording ? (
+                      <RecordingSlideMeter
+                        variant="voice"
+                        locked={voice.isLocked}
+                        elapsedMs={recordElapsedMs}
+                        onSlideCancel={() => {
+                          void discardVoice();
+                        }}
+                      />
+                    ) : videoRecordingActive ? (
+                      <RecordingSlideMeter
+                        variant="video"
+                        locked={videoLocked}
+                        elapsedMs={recordElapsedMs}
+                        onSlideCancel={() => {
+                          void discardVideoRecording();
+                        }}
+                      />
+                    ) : (
+                      <>
+                        {inputFocused ? (
+                          <View pointerEvents="auto" style={styles.neonClip}>
+                            <Animated.View style={neonBarStyle} />
+                          </View>
+                        ) : null}
+                        <TextInput
+                          testID="group-composer-input"
+                          value={draft}
+                          onChangeText={setDraft}
+                          placeholder="Type a message..."
+                          placeholderTextColor={colors.textMuted}
+                          editable={!recordingLive}
+                          maxLength={MAX_MESSAGE_TEXT_CHARS}
+                          onFocus={() => setInputFocused(true)}
+                          onBlur={() => setInputFocused(false)}
+                          style={[styles.input, { color: colors.text }]}
+                        />
+                      </>
+                    )}
+                  </View>
+                  <View style={styles.actionSlot} testID="group-composer-actions">
+                    {!isSendOnly &&
+                    (composerMode === "voice" || composerMode === "video") ? (
+                      <View testID="group-voice-controls">
+                        <HoldRecordControls
+                          ref={holdRecordControlsRef}
+                          mode={composerMode}
+                          recording={
+                            composerMode === "voice"
+                              ? voice.isRecording
+                              : videoRecordingActive
+                          }
+                          locked={
+                            composerMode === "voice"
+                              ? voice.isLocked
+                              : videoLocked
+                          }
+                          dragY={dragY}
+                          elapsedMs={recordElapsedMs}
+                          maxDurationMs={
+                            composerMode === "video"
+                              ? VIDEO_RECORD_MAX_MS
+                              : VOICE_RECORD_MAX_MS
+                          }
+                          hideFloatingTimer={
+                            voice.isRecording || videoRecordingActive
+                          }
+                          panHandlers={recordPanResponder.panHandlers}
+                          onSendLocked={() => {
+                            if (composerMode === "voice") {
+                              void finishAndSendVoice();
+                            } else {
+                              void finishVideoCapture();
+                            }
+                          }}
+                          slideFabX={slideCancelFabX}
+                          accentColor={colors.primary}
+                          iconColor={colors.onPrimary}
+                        />
+                      </View>
+                    ) : (
+                      <View testID="group-composer-send">
+                        <ComposerFab
+                          isSendOnly={isSendOnly}
+                          composerMode={composerMode}
+                          onSendText={sendTextMessage}
+                          onCycleSendEmpty={() => cycleComposerMode(groupId)}
+                          fabColor={colors.primary}
+                          iconColor={colors.onPrimary}
+                        />
+                      </View>
+                    )}
+                  </View>
+                </View>
+              </View>
             </View>
-          ) : (
-            <ScalePressable
-              testID="group-composer-send"
-              disabled={sending}
-              onPress={() => void send()}
-              style={[styles.send, { backgroundColor: colors.tint }]}
-            >
-              {sending ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <ThemedText style={{ color: "#fff", fontWeight: "700" }}>
-                  Send
-                </ThemedText>
-              )}
-            </ScalePressable>
-          )}
+          </KeyboardAvoidingView>
         </View>
-        <ReactionPicker
-          visible={pickerVisible}
-          anchorX={pickerAnchor.x}
-          anchorY={pickerAnchor.y}
-          onClose={() => setPickerVisible(false)}
-          onSelect={(emoji) => {
-            if (pickerMessageId) {
-              const msg = rows.find((m) => m.id === pickerMessageId);
-              setHighlightEmoji(emoji);
-              void sendReaction(
-                pickerMessageId,
-                emoji,
-                "group",
-                msg?.serverEnvelopeId,
-              );
-              setTimeout(() => setHighlightEmoji(null), 500);
-            }
-          }}
-        />
-      </SafeAreaView>
-    </View>
+      </GestureDetector>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
-  safe: { flex: 1 },
-  bubble: {
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 10,
+  safeArea: { flex: 1 },
+  keyboardRoot: { flex: 1 },
+  container: { flex: 1 },
+  messageList: { padding: 16, gap: 12 },
+  composerShell: {
+    borderTopWidth: 1,
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 10,
+    zIndex: 14,
+    elevation: 14,
   },
-  sender: { fontWeight: "700", marginBottom: 4, opacity: 0.8, fontSize: 12 },
-  composer: {
+  inputRow: {
     flexDirection: "row",
-    gap: 8,
-    padding: 12,
-    alignItems: "center",
+    alignItems: "flex-end",
+    position: "relative",
+    backgroundColor: "transparent",
+  },
+  inputShell: {
+    flex: 1,
+    marginRight: 52,
+    minHeight: 44,
+    justifyContent: "center",
+    borderWidth: 1.5,
+    borderRadius: 22,
+    overflow: "hidden",
+    position: "relative",
+  },
+  neonClip: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 20,
+    overflow: "hidden",
+    zIndex: 1,
+    pointerEvents: "box-none",
   },
   input: {
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  send: {
-    borderRadius: 12,
+    borderRadius: 20,
     paddingHorizontal: 14,
     paddingVertical: 10,
+    fontSize: 16,
+    backgroundColor: "transparent",
+    minHeight: 40,
+    zIndex: 2,
   },
-  micWrap: {
-    width: 56,
-    height: 56,
-    alignItems: "center",
-    justifyContent: "center",
+  actionSlot: {
+    position: "absolute",
+    right: 0,
+    bottom: 0,
+    zIndex: 16,
+    elevation: 16,
+  },
+  gestureFill: { flex: 1 },
+  senderLabel: {
+    fontWeight: "700",
+    marginBottom: 4,
+    opacity: 0.8,
+    fontSize: 12,
   },
 });

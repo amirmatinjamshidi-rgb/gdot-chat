@@ -1,11 +1,4 @@
-﻿import { useFocusEffect } from "@react-navigation/native";
-import {
-  RecordingPresets,
-  requestRecordingPermissionsAsync,
-  setAudioModeAsync,
-  useAudioRecorder,
-  type AudioRecorder,
-} from "expo-audio";
+import { useFocusEffect } from "@react-navigation/native";
 import * as Haptics from "expo-haptics";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import React, {
@@ -16,23 +9,20 @@ import React, {
   useState,
 } from "react";
 import {
-  ActivityIndicator,
   FlatList,
   KeyboardAvoidingView,
   LayoutChangeEvent,
   PanResponder,
   Platform,
-  Pressable,
   StyleSheet,
   TextInput,
   View,
 } from "react-native";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   cancelAnimation,
   Easing,
   interpolate,
-  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
@@ -40,6 +30,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { ChatMessageRow } from "@/components/chat/chat-message-row";
 import { ComposerFab } from "@/components/composer-fab";
 import { ErrorHandlerButton } from "@/components/error-handler-button";
 import {
@@ -49,35 +40,30 @@ import {
 } from "@/components/hold-record-controls";
 import { RecordingSlideMeter } from "@/components/recording-slide-meter";
 import { ReactionPicker } from "@/components/reactions/reaction-picker";
-import { TextMessageBubble } from "@/components/reactions/text-message-bubble";
 import { ScreenTopAccent } from "@/components/screen-top-accent";
 import { ThemedText } from "@/components/themed-text";
 import { ScalePressable } from "@/components/ui/scale-pressable";
 import { VideoMessage, type VideoMessageHandle } from "@/components/video-message";
-import { VIDEO_RECORD_MAX_MS, VOICE_RECORD_MAX_MS } from "@/lib/config";
-import {
-  VIDEO_BUBBLE_PLAY_SCALE,
-  VIDEO_BUBBLE_SIZE,
-  VideoMessageBubble,
-} from "@/components/video-message-bubble";
-import { VoiceMessageBubble } from "@/components/voice-message-bubble";
 import { useComposerDraft } from "@/hooks/use-composer-draft";
+import { useConversationMessages } from "@/hooks/use-conversation-messages";
+import { useReactions } from "@/hooks/use-reactions";
+import { useSwipeBackGesture } from "@/hooks/use-swipe-back";
+import { useVoiceRecorder } from "@/hooks/use-voice-recorder";
+import { localMessageToUi } from "@/lib/chat/local-message-ui";
+import { VIDEO_RECORD_MAX_MS, VOICE_RECORD_MAX_MS } from "@/lib/config";
 import {
   assertMessageTextWithinLimit,
   MAX_MESSAGE_TEXT_CHARS,
   MESSAGE_TOO_LONG_ERROR,
 } from "@/lib/protocol/message-limits";
-import { useConversationMessages } from "@/hooks/use-conversation-messages";
-import { useReactions } from "@/hooks/use-reactions";
-import { localMessageToUi } from "@/lib/chat/local-message-ui";
 import { useAppServices } from "@/lib/services/app-services-context";
 import {
   useInputStore,
   type ComposerMode as StoreComposerMode,
 } from "@/stores/input-store";
-import { useMessagesStore, type Message } from "@/stores/messages-store";
+import { useMessagesStore } from "@/stores/messages-store";
 import { useRecordingStore } from "@/stores/recording-store";
-import { useColors, useThemeStore } from "@/stores/theme-store";
+import { useColors } from "@/stores/theme-store";
 const MIN_RECORD_MS = 1000;
 const HOLD_MS = 320;
 const TAP_MAX_MS = 260;
@@ -85,22 +71,7 @@ const KEYBOARD_EXTRA_OFFSET = 100;
 /** Swipe FAB left by this distance (px) then release to cancel recording. */
 const FAB_CANCEL_DRAG_PX = 100;
 
-/** Min row height when a video bubble is scaled up during playback (avoids clip / layout jump). */
-const VIDEO_BUBBLE_PLAYING_MIN_HEIGHT = Math.max(
-  160,
-  Math.ceil(VIDEO_BUBBLE_SIZE * VIDEO_BUBBLE_PLAY_SCALE) + 28,
-);
-
 type ComposerMode = StoreComposerMode;
-
-function formatDuration(ms: number) {
-  const s = Math.max(0, Math.round(ms / 1000));
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  return m > 0
-    ? `${m}:${r.toString().padStart(2, "0")}`
-    : `0:${r.toString().padStart(2, "0")}`;
-}
 
 export default function ChatRoomScreen() {
   const { id, name } = useLocalSearchParams<{ id: string; name: string }>();
@@ -109,7 +80,6 @@ export default function ChatRoomScreen() {
   const [composerError, setComposerError] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [videoSessionActive, setVideoSessionActive] = useState(false);
-  const [voiceRecordingActive, setVoiceRecordingActive] = useState(false);
 
   const { syncService, conversationStore, mediaTransfer, signalService } =
     useAppServices();
@@ -124,14 +94,31 @@ export default function ChatRoomScreen() {
   );
   const setComposerMode = useInputStore((state) => state.setComposerMode);
   const cycleComposerMode = useInputStore((state) => state.cycleComposerMode);
-  const [voiceLocked, setVoiceLocked] = useState(false);
   const [videoLocked, setVideoLocked] = useState(false);
   const [videoRecordingActive, setVideoRecordingActive] = useState(false);
+  const sendVoiceMediaRef = useRef<
+    (result: { uri: string; durationMs: number }) => Promise<void>
+  >(async () => undefined);
+
+  const voice = useVoiceRecorder({
+    conversationId: chatId || "chat",
+    maxDurationMs: VOICE_RECORD_MAX_MS,
+    onMaxDuration: (r) => {
+      void sendVoiceMediaRef.current(r);
+    },
+    onError: (m) => setComposerError(m),
+  });
+  const voiceRef = useRef(voice);
+  voiceRef.current = voice;
+
+  const voiceRecordingActive = voice.isRecording;
+  const voiceLocked = voice.isLocked;
+
   const recordingLive = voiceRecordingActive || videoRecordingActive;
   const [dragY, setDragY] = useState(0);
   const [recordHudTick, setRecordHudTick] = useState(0);
   const [inputFocused, setInputFocused] = useState(false);
-  const listRef = useRef<FlatList<Message>>(null);
+  const listRef = useRef<FlatList>(null);
   const inputRef = useRef<TextInput>(null);
   const holdRecordControlsRef = useRef<HoldRecordControlsHandle>(null);
   const slideCancelFabX = useSharedValue(0);
@@ -141,8 +128,6 @@ export default function ChatRoomScreen() {
 
   const router = useRouter();
   const colors = useColors();
-  const mode = useThemeStore((state) => state.mode);
-  const isDark = mode === "dark";
   const contactName = useMemo(() => name || "Chat", [name]);
   const {
     messages: localMessages,
@@ -236,19 +221,7 @@ export default function ChatRoomScreen() {
     [messages, peerDeviceId, sendReaction],
   );
 
-  const swipeBackGesture = useMemo(
-    () =>
-      Gesture.Pan()
-        .enabled(!recordingLive)
-        .activeOffsetX(-14)
-        .failOffsetY([-40, 40])
-        .onEnd((e) => {
-          if (e.translationX < -88) {
-            runOnJS(router.back)();
-          }
-        }),
-    [router, recordingLive],
-  );
+  const swipeBackGesture = useSwipeBackGesture(!recordingLive);
 
   useEffect(() => {
     const id = requestAnimationFrame(() => {
@@ -331,16 +304,9 @@ export default function ChatRoomScreen() {
     videoLockedRef.current = videoLocked;
   }, [videoLocked]);
 
-  const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
-  const audioRecorderRef = useRef<AudioRecorder>(audioRecorder);
-  audioRecorderRef.current = audioRecorder;
-
   const voiceRecordingLiveRef = useRef(false);
-  const voiceRecordStartedAt = useRef(0);
   const videoRecordStartedAt = useRef(0);
   const videoStartGenRef = useRef(0);
-  const voiceStartGenRef = useRef(0);
-  const voiceRecorderStoppedRef = useRef(false);
   const pressDownAt = useRef(0);
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** True after the hold threshold fired (user held long enough to attempt capture). */
@@ -356,9 +322,7 @@ export default function ChatRoomScreen() {
     holdRecordControlsRef.current?.resetLayout();
     setComposerMode(chatId, "send");
     setDragY(0);
-    setVoiceLocked(false);
     setVideoLocked(false);
-    setVoiceRecordingActive(false);
     setVideoRecordingActive(false);
     videoRecordingActiveRef.current = false;
     holdArmedRef.current = false;
@@ -374,48 +338,27 @@ export default function ChatRoomScreen() {
     }
   }, []);
 
-  const safeStopVoiceRecording = useCallback(async () => {
-    if (voiceRecorderStoppedRef.current) return;
-    const recorder = audioRecorderRef.current;
-    try {
-      let recording = false;
-      try {
-        recording = recorder.isRecording;
-      } catch {
-        voiceRecorderStoppedRef.current = true;
-        return;
-      }
-      if (recording) {
-        await recorder.stop();
-      }
-      voiceRecorderStoppedRef.current = true;
-    } catch {
-      voiceRecorderStoppedRef.current = true;
-    }
-  }, []);
-
   const videoSessionActiveRef = useRef(false);
   videoSessionActiveRef.current = videoSessionActive;
 
   useFocusEffect(
     useCallback(() => {
       return () => {
-        voiceStartGenRef.current += 1;
         clearHoldTimer();
         useRecordingStore.getState().cancelRecording();
         if (voiceRecordingLiveRef.current) {
           voiceRecordingLiveRef.current = false;
-          void safeStopVoiceRecording();
+          void voiceRef.current.discard();
         }
       };
-    }, [clearHoldTimer, safeStopVoiceRecording]),
+    }, [clearHoldTimer]),
   );
 
   useEffect(() => {
     return () => {
       clearHoldTimer();
       useRecordingStore.getState().cancelRecording();
-      voiceStartGenRef.current += 1;
+      videoStartGenRef.current += 1;
       if (videoSessionActiveRef.current) {
         void Promise.resolve(videoRef.current?.stopRecording()).catch(() => {});
       }
@@ -472,93 +415,71 @@ export default function ChatRoomScreen() {
     identityKeyChanged,
   ]);
 
-  const finishVoiceCapture = useCallback(async () => {
-    const durationMs = Date.now() - voiceRecordStartedAt.current;
-    voiceRecordingLiveRef.current = false;
-    setVoiceRecordingActive(false);
-    setVoiceLocked(false);
-    useRecordingStore.getState().stopRecording();
-    await safeStopVoiceRecording();
-    const uri = audioRecorderRef.current.uri;
-    if (!uri || durationMs < MIN_RECORD_MS) {
-      resetComposerAfterSend();
-      return;
-    }
-    try {
-      if (identityKeyChanged) {
-        setComposerError("Cannot send until you accept the new safety number.");
-        return;
+  const sendVoiceMedia = useCallback(
+    async (result: { uri: string; durationMs: number }) => {
+      try {
+        if (identityKeyChanged) {
+          setComposerError("Cannot send until you accept the new safety number.");
+          return;
+        }
+        await syncService.sendOutgoingMedia(chatId, {
+          uri: result.uri,
+          kind: "voice",
+          mimeType: "audio/mp4",
+          durationMs: result.durationMs,
+        });
+        resetComposerAfterSend();
+        await reloadMessages();
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } catch (e) {
+        setComposerError(
+          e instanceof Error ? e.message : "Failed to send voice message.",
+        );
       }
-      await syncService.sendOutgoingMedia(chatId, {
-        uri,
-        kind: "voice",
-        mimeType: "audio/mp4",
-        durationMs,
-      });
-      resetComposerAfterSend();
-      await reloadMessages();
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    } catch (e) {
-      setComposerError(
-        e instanceof Error ? e.message : "Failed to send voice message.",
-      );
-    }
-  }, [chatId, reloadMessages, resetComposerAfterSend, safeStopVoiceRecording, syncService, identityKeyChanged]);
+    },
+    [
+      chatId,
+      identityKeyChanged,
+      reloadMessages,
+      resetComposerAfterSend,
+      syncService,
+    ],
+  );
+  sendVoiceMediaRef.current = sendVoiceMedia;
+
+  const finishVoiceCapture = useCallback(async () => {
+    voiceRecordingLiveRef.current = false;
+    recordingLiveRef.current = false;
+    holdArmedRef.current = false;
+    const result = await voiceRef.current.finish();
+    holdRecordControlsRef.current?.resetLayout();
+    setDragY(0);
+    if (result) await sendVoiceMedia(result);
+    else resetComposerAfterSend();
+  }, [resetComposerAfterSend, sendVoiceMedia]);
 
   const discardVoiceRecording = useCallback(async () => {
     voiceRecordingLiveRef.current = false;
-    useRecordingStore.getState().cancelRecording();
-    await safeStopVoiceRecording();
-    setVoiceRecordingActive(false);
-    setVoiceLocked(false);
+    recordingLiveRef.current = false;
+    holdArmedRef.current = false;
+    await voiceRef.current.discard();
     setDragY(0);
     holdRecordControlsRef.current?.resetLayout();
-  }, [safeStopVoiceRecording]);
+    resetComposerAfterSend();
+  }, [resetComposerAfterSend]);
 
   const onVoiceSlideCancel = useCallback(() => {
     void discardVoiceRecording();
   }, [discardVoiceRecording]);
 
-  const startVoiceRecording = useCallback(async () => {
-    const gen = ++voiceStartGenRef.current;
-    if (Platform.OS === "web") {
-      setComposerError("Voice messages are not available on web.");
-      return;
+  const startVoiceRecording = useCallback(async (): Promise<boolean> => {
+    const ok = await voiceRef.current.start();
+    if (ok) {
+      voiceRecordingLiveRef.current = true;
+      recordingLiveRef.current = true;
     }
-    const { granted } = await requestRecordingPermissionsAsync();
-    if (gen !== voiceStartGenRef.current) return;
-    if (!granted) {
-      setComposerError("Microphone permission is required for voice messages.");
-      return;
-    }
-    await setAudioModeAsync({
-      allowsRecording: true,
-      playsInSilentMode: true,
-
-      interruptionMode: "mixWithOthers",
-      shouldPlayInBackground: true,
-      shouldRouteThroughEarpiece: true,
-    });
-    if (gen !== voiceStartGenRef.current) return;
-    const recorder = audioRecorderRef.current;
-    voiceRecorderStoppedRef.current = false;
-    await recorder.prepareToRecordAsync();
-    if (gen !== voiceStartGenRef.current) {
-      await safeStopVoiceRecording();
-      return;
-    }
-    await recorder.record();
-    if (gen !== voiceStartGenRef.current) {
-      voiceRecordingLiveRef.current = false;
-      await safeStopVoiceRecording();
-      return;
-    }
-    voiceRecordingLiveRef.current = true;
-    voiceRecordStartedAt.current = Date.now();
-    setVoiceLocked(false);
-    setVoiceRecordingActive(true);
-    useRecordingStore.getState().startRecording(chatId);
-  }, [chatId, safeStopVoiceRecording]);
+    return ok;
+  }, []);
 
   const finishVideoCapture = useCallback(async () => {
     const durationMs = Date.now() - videoRecordStartedAt.current;
@@ -663,7 +584,7 @@ export default function ChatRoomScreen() {
     const id = setInterval(() => {
       setRecordHudTick((n) => n + 1);
       const ms = voiceRecordingActive
-        ? Date.now() - voiceRecordStartedAt.current
+        ? voiceRef.current.elapsedMs
         : videoRecordingActive
           ? Date.now() - videoRecordStartedAt.current
           : 0;
@@ -682,22 +603,12 @@ export default function ChatRoomScreen() {
     return () => clearTimeout(id);
   }, [videoRecordingActive, finishVideoCapture]);
 
-  useEffect(() => {
-    if (!voiceRecordingActive) return;
-    const id = setTimeout(() => {
-      if (voiceRecordingLiveRef.current) {
-        void finishVoiceCapture();
-      }
-    }, VOICE_RECORD_MAX_MS);
-    return () => clearTimeout(id);
-  }, [voiceRecordingActive, finishVoiceCapture]);
 
   const lockFromDrag = useCallback((dy: number) => {
     if (dy >= -LOCK_DRAG_PX || !recordingLiveRef.current) return;
     const mode = composerModeRef.current;
-    if (mode === "voice" && !voiceLockedRef.current) {
-      setVoiceLocked(true);
-      useRecordingStore.getState().lockRecording();
+    if (mode === "voice" && !voiceRef.current.isLocked) {
+      voiceRef.current.lock();
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     } else if (mode === "video" && !videoLockedRef.current) {
       setVideoLocked(true);
@@ -739,7 +650,6 @@ export default function ChatRoomScreen() {
 
     if (holdArmedRef.current && !recordingLiveRef.current) {
       holdArmedRef.current = false;
-      voiceStartGenRef.current += 1;
       videoStartGenRef.current += 1;
       setVideoSessionActive(false);
       try {
@@ -748,7 +658,7 @@ export default function ChatRoomScreen() {
         /* noop */
       }
       voiceRecordingLiveRef.current = false;
-      await safeStopVoiceRecording();
+      await voiceRef.current.discard();
       return;
     }
 
@@ -763,8 +673,9 @@ export default function ChatRoomScreen() {
     clearHoldTimer,
     finishVoiceCapture,
     finishVideoCapture,
-    safeStopVoiceRecording,
     videoSessionActive,
+    chatId,
+    setComposerMode,
   ]);
 
   const recordPanResponder = useMemo(
@@ -887,7 +798,8 @@ export default function ChatRoomScreen() {
 
   const recordElapsedMs = useMemo(() => {
     if (voiceRecordingActive) {
-      return Date.now() - voiceRecordStartedAt.current + recordHudTick * 0;
+      void recordHudTick;
+      return voice.elapsedMs;
     }
     if (videoRecordingActive) {
       return Date.now() - videoRecordStartedAt.current + recordHudTick * 0;
@@ -993,187 +905,33 @@ export default function ChatRoomScreen() {
                 maxToRenderPerBatch={12}
                 initialNumToRender={14}
                 removeClippedSubviews={Platform.OS === "android"}
-                renderItem={({ item }) => {
-                  const isMyVideo =
-                    item.kind === "video" && item.sender === "me";
-                  const isMyVoice =
-                    item.kind === "voice" && item.sender === "me";
-                  const isMediaBubble =
-                    item.kind === "video" || item.kind === "voice";
-                  const bubbleBg = isMediaBubble
-                    ? "transparent"
-                    : item.sender === "me"
-                      ? colors.primary
-                      : colors.surfaceElevated;
-                  const primaryColor =
-                    item.sender === "me" && !isMediaBubble
-                      ? colors.onPrimary
-                      : colors.text;
-                  const timeColor = isMyVideo
-                    ? isDark
-                      ? "rgba(148,163,184,0.95)"
-                      : "rgba(71,85,105,0.9)"
-                    : isMyVoice
-                      ? "rgba(203,213,225,0.75)"
-                      : item.sender === "me"
-                        ? "rgba(255,255,255,0.7)"
-                        : "rgba(0,0,0,0.5)";
-
-                  if (item.kind === "text") {
-                    return (
-                      <TextMessageBubble
-                        messageId={item.id}
-                        text={item.text ?? ""}
-                        time={item.time}
-                        isMine={item.isMine ?? item.sender === "me"}
-                        deliveryStatus={item.deliveryStatus}
-                        primaryColor={primaryColor}
-                        timeColor={timeColor}
-                        bubbleStyle={[
-                          styles.messageBubble,
-                          item.sender === "me"
-                            ? styles.myMessage
-                            : styles.theirMessage,
-                          {
-                            backgroundColor: bubbleBg,
-                            borderWidth: item.sender === "me" ? 0 : 1,
-                            borderColor: colors.surfaceBorder,
-                          },
-                        ]}
-                        reactions={item.reactions ?? []}
-                        myId={currentUserId}
-                        highlightEmoji={
-                          pickerMessageId === item.id ? highlightEmoji : null
-                        }
-                        onLongPress={handleMessageLongPress}
-                        onReactionPress={handleReactionPress}
-                      />
-                    );
-                  }
-
-                  return (
-                    <View
-                      style={[
-                        styles.messageBubble,
-                        item.sender === "me"
-                          ? styles.myMessage
-                          : styles.theirMessage,
-                        isMyVideo && styles.myVideoBubble,
-                        item.kind === "video" && styles.videoMessageBubble,
-                        isMyVoice && styles.myVoiceBubble,
-                        {
-                          backgroundColor: bubbleBg,
-                          borderWidth:
-                            item.sender === "me" || isMediaBubble ? 0 : 1,
-                          borderColor: colors.surfaceBorder,
-                        },
-                      ]}
-                    >
-                      {item.kind === "voice" && item.mediaUri ? (
-                        <VoiceMessageBubble
-                          uri={item.mediaUri}
-                          seed={item.id}
-                          durationMs={item.durationMs}
-                          isMine={item.isMine ?? item.sender === "me"}
-                          isActive={activePlaybackId === item.id}
-                          onActivate={() => {
-                            setActivePlayback(item.id);
-                          }}
-                          onDeactivate={() => {
-                            if (activePlaybackId === item.id) {
-                              setActivePlayback(null);
-                            }
-                          }}
-                        />
-                      ) : null}
-                      {item.kind === "video" && item.mediaUri ? (
-                        <View
-                          style={[
-                            styles.videoBubbleWrap,
-                            activePlaybackId === item.id &&
-                              styles.videoBubbleWrapPlaying,
-                          ]}
-                        >
-                          <VideoMessageBubble
-                            uri={item.mediaUri}
-                            isMine={item.sender === "me"}
-                            durationMs={item.durationMs}
-                            isActive={activePlaybackId === item.id}
-                            onActivate={() => {
-                              setActivePlayback(item.id);
-                            }}
-                            onDeactivate={() => {
-                              if (activePlaybackId === item.id) {
-                                setActivePlayback(null);
-                              }
-                            }}
-                          />
-                        </View>
-                      ) : null}
-                      {isMediaBubble && !item.mediaUri ? (
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel={
-                            item.transferState === "uploading"
-                              ? "Uploading media"
-                              : item.transferState === "downloading"
-                                ? "Downloading media"
-                                : "Download media"
-                          }
-                          onPress={() => {
-                            if (!item.attachmentId) return;
-                            if (
-                              item.transferState === "uploading" ||
-                              item.transferState === "downloading"
-                            ) {
-                              return;
-                            }
-                            void mediaTransfer
-                              .downloadAttachment(item.attachmentId)
-                              .then(() => reloadMessages())
-                              .catch((e: unknown) => {
-                                setComposerError(
-                                  e instanceof Error
-                                    ? e.message
-                                    : "Download failed.",
-                                );
-                              });
-                          }}
-                          style={styles.mediaTransferCard}
-                        >
-                          {(item.transferState === "uploading" ||
-                            item.transferState === "downloading") && (
-                            <ActivityIndicator color={colors.primary} />
-                          )}
-                          <ThemedText style={{ color: colors.text }}>
-                            {item.transferState === "uploading"
-                              ? "Uploading…"
-                              : item.transferState === "downloading"
-                                ? "Downloading…"
-                                : item.transferState === "failed" ||
-                                    item.transferState === "download_failed"
-                                  ? "Tap to retry download"
-                                  : item.kind === "voice"
-                                    ? "Voice message — tap to download"
-                                    : "Video message — tap to download"}
-                          </ThemedText>
-                          {item.durationMs ? (
-                            <ThemedText
-                              style={[styles.timeText, { color: timeColor }]}
-                            >
-                              {formatDuration(item.durationMs)}
-                            </ThemedText>
-                          ) : null}
-                        </Pressable>
-                      ) : null}
-                      <ThemedText
-                        style={[styles.timeText, { color: timeColor }]}
-                      >
-                        {item.time}
-                      </ThemedText>
-                    </View>
-                  );
-                }}
+                renderItem={({ item }) => (
+                  <ChatMessageRow
+                    item={item}
+                    currentUserId={currentUserId}
+                    activePlaybackId={activePlaybackId}
+                    highlightEmoji={highlightEmoji}
+                    pickerMessageId={pickerMessageId}
+                    onLongPress={handleMessageLongPress}
+                    onReactionPress={handleReactionPress}
+                    onActivatePlayback={(mid) => setActivePlayback(mid)}
+                    onDeactivatePlayback={(mid) => {
+                      if (activePlaybackId === mid) setActivePlayback(null);
+                    }}
+                    onDownloadMedia={(attachmentId) => {
+                      void mediaTransfer
+                        .downloadAttachment(attachmentId)
+                        .then(() => reloadMessages())
+                        .catch((e: unknown) => {
+                          setComposerError(
+                            e instanceof Error
+                              ? e.message
+                              : "Download failed.",
+                          );
+                        });
+                    }}
+                  />
+                )}
               />
 
               <ReactionPicker
@@ -1327,54 +1085,9 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 12,
   },
-  myVideoBubble: {
-    paddingHorizontal: 4,
-    paddingTop: 4,
-    paddingBottom: 6,
-    overflow: "visible",
-  },
-  videoMessageBubble: {
-    overflow: "visible",
-  },
-  myVoiceBubble: {
-    paddingHorizontal: 2,
-    paddingTop: 2,
-    paddingBottom: 4,
-    backgroundColor: "transparent",
-    overflow: "visible",
-  },
   videoLabel: {
     fontSize: 0,
     marginTop: 1,
-  },
-  messageBubble: {
-    padding: 4,
-    borderRadius: 10,
-    maxWidth: "80%",
-  },
-  myMessage: {
-    alignSelf: "flex-end",
-    borderBottomRightRadius: 4,
-  },
-  theirMessage: {
-    alignSelf: "flex-start",
-    borderBottomLeftRadius: 4,
-  },
-  timeText: {
-    fontSize: 10,
-    alignSelf: "flex-end",
-    marginTop: 4,
-  },
-  videoBubbleWrap: {
-    marginBottom: 12,
-    alignItems: "center",
-    backgroundColor: "transparent",
-    overflow: "visible",
-    minHeight: VIDEO_BUBBLE_SIZE + 16,
-  },
-  videoBubbleWrapPlaying: {
-    minHeight: VIDEO_BUBBLE_PLAYING_MIN_HEIGHT,
-    marginVertical: 40,
   },
   composerShell: {
     borderTopWidth: 1,
@@ -1434,14 +1147,6 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 2 },
     elevation: 3,
-  },
-  mediaTransferCard: {
-    minWidth: 160,
-    maxWidth: 240,
-    padding: 12,
-    gap: 8,
-    borderRadius: 12,
-    alignItems: "flex-start",
   },
   gestureFill: {
     flex: 1,

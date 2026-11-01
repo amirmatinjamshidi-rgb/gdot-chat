@@ -59,7 +59,20 @@ export function mockAppServices(
     appLockStore: {
       lock: jest.fn(),
     },
-    mediaTransfer: {},
+    mediaTransfer: {
+      downloadAttachment: jest.fn(async () => undefined),
+    },
+    messageStore: {
+      listByConversation: jest.fn(async () => []),
+    },
+    attachmentStore: {
+      get: jest.fn(async () => null),
+    },
+    draftStore: {
+      get: jest.fn(async () => ""),
+      set: jest.fn(async () => undefined),
+      clear: jest.fn(async () => undefined),
+    },
     reactionStore: {
       listForConversation: jest.fn(async () => new Map()),
       userHasReaction: jest.fn(async () => false),

@@ -141,9 +141,9 @@ describe("GroupRoomScreen", () => {
 
     await user.type(screen.getByTestId("group-composer-input"), text);
     await waitFor(() => {
-      expect(screen.getByTestId("group-composer-send")).toBeTruthy();
+      expect(screen.getByLabelText("Send message")).toBeTruthy();
     });
-    await user.press(screen.getByTestId("group-composer-send"));
+    await user.press(screen.getByLabelText("Send message"));
 
     await waitFor(() => {
       expect(sendGroupOutgoing).toHaveBeenCalledWith(groupId, text);
@@ -153,14 +153,20 @@ describe("GroupRoomScreen", () => {
     });
   });
 
-  it("shows hold-to-record controls when composer is empty", async () => {
+  it("cycles ComposerFab to voice and shows hold-to-record controls", async () => {
     const groupId = randomId("gid");
     expoRouter.useLocalSearchParams.mockReturnValue({
       id: groupId,
       name: "Voice",
     });
     const { services } = baseVoiceMocks(groupId);
+    const user = userEvent.setup();
     renderWithServices(<GroupRoomScreen />, services);
+    await waitFor(() => {
+      expect(screen.getByTestId("group-composer-send")).toBeTruthy();
+    });
+    // Empty composer starts in send mode; cycle send -> voice
+    await user.press(screen.getByLabelText("Switch to voice message"));
     await waitFor(() => {
       expect(screen.getByTestId("group-voice-controls")).toBeTruthy();
     });
@@ -319,3 +325,123 @@ describe("GroupRoomScreen", () => {
     });
   });
 });
+
+  it("enforces message length limit on the composer input", async () => {
+    const groupId = randomId("gid");
+    expoRouter.useLocalSearchParams.mockReturnValue({
+      id: groupId,
+      name: "Limit",
+    });
+    const { services } = baseVoiceMocks(groupId);
+    renderWithServices(<GroupRoomScreen />, services);
+    await waitFor(() => {
+      expect(screen.getByTestId("group-composer-input")).toBeTruthy();
+    });
+    const input = screen.getByTestId("group-composer-input");
+    expect(input.props.maxLength).toBeGreaterThan(0);
+  });
+
+  it("shows dismissible composer error via ErrorHandlerButton", async () => {
+    const groupId = randomId("gid");
+    expoRouter.useLocalSearchParams.mockReturnValue({
+      id: groupId,
+      name: "Err",
+    });
+    const sendGroupOutgoing = jest.fn(async () => {
+      throw new Error("boom-send");
+    });
+    const { services } = baseVoiceMocks(groupId);
+    (services.syncService as unknown as { sendGroupOutgoing: jest.Mock }).sendGroupOutgoing =
+      sendGroupOutgoing;
+    const user = userEvent.setup();
+    renderWithServices(<GroupRoomScreen />, services);
+    await waitFor(() => {
+      expect(screen.getByTestId("group-composer-input")).toBeTruthy();
+    });
+    await user.type(screen.getByTestId("group-composer-input"), "x");
+    await waitFor(() => {
+      expect(screen.getByTestId("group-composer-send")).toBeTruthy();
+    });
+    await user.press(screen.getByLabelText("Send message"));
+    await waitFor(() => {
+      expect(screen.getByText("boom-send")).toBeTruthy();
+    });
+  });
+
+  it("renders downloadable media transfer card for inbound voice without uri", async () => {
+    const groupId = randomId("gid");
+    const msgId = randomId("msg");
+    const attId = randomId("att");
+    expoRouter.useLocalSearchParams.mockReturnValue({
+      id: groupId,
+      name: "Media",
+    });
+    const downloadAttachment = jest.fn(async () => undefined);
+    const services = mockAppServices({
+      messageStore: {
+        listByConversation: jest.fn(async () => [
+          {
+            id: msgId,
+            clientId: randomId("c"),
+            conversationId: groupId,
+            direction: "incoming",
+            kind: "voice",
+            plaintext: "",
+            status: "delivered",
+            senderDeviceId: "dev",
+            senderUserId: randomId("peer"),
+            serverEnvelopeId: randomId("env"),
+            attachmentId: attId,
+            createdAt: Date.now(),
+          },
+        ]),
+      } as never,
+      attachmentStore: {
+        get: jest.fn(async () => ({
+          attachmentId: attId,
+          messageId: msgId,
+          kind: "voice",
+          mimeType: "audio/mp4",
+          durationMs: 1500,
+          transferState: "pending",
+          localUri: undefined,
+        })),
+      } as never,
+      mediaTransfer: { downloadAttachment } as never,
+      syncService: {
+        sendGroupOutgoing: jest.fn(),
+        sendGroupOutgoingMedia: jest.fn(),
+        sendReaction: jest.fn(),
+        getGroupReceiptAggregate: jest.fn(async () => null),
+        markGroupMessagesRead: jest.fn(async () => undefined),
+        setReactionAppliedHandler: jest.fn(),
+      } as never,
+      identityStore: {
+        getLocalIdentity: jest.fn(async () => ({
+          userId: randomId("u"),
+          deviceId: randomId("d"),
+        })),
+      } as never,
+      groupStore: {
+        getGroup: jest.fn(async () => ({ id: groupId })),
+        touchPreview: jest.fn(),
+        listMembers: jest.fn(async () => []),
+      } as never,
+      draftStore: {
+        get: jest.fn(async () => ""),
+        set: jest.fn(async () => undefined),
+        clear: jest.fn(async () => undefined),
+      } as never,
+    });
+
+    const user = userEvent.setup();
+    renderWithServices(<GroupRoomScreen />, services);
+    await waitFor(() => {
+      expect(screen.getByTestId(`media-transfer-${msgId}`)).toBeTruthy();
+    });
+    await user.press(screen.getByTestId(`media-transfer-${msgId}`));
+    await waitFor(() => {
+      expect(downloadAttachment).toHaveBeenCalledWith(attId);
+    });
+  });
+

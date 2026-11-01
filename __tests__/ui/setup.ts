@@ -1,3 +1,54 @@
+
+
+jest.mock("@/components/voice-message-bubble", () => {
+  const React = require("react");
+  return {
+    VoiceMessageBubble: (props: Record<string, unknown>) =>
+      React.createElement("VoiceMessageBubble", props),
+  };
+});
+
+jest.mock("@/components/video-message-bubble", () => {
+  const React = require("react");
+  return {
+    VIDEO_BUBBLE_SIZE: 120,
+    VIDEO_BUBBLE_PLAY_SCALE: 1.2,
+    VideoMessageBubble: (props: Record<string, unknown>) =>
+      React.createElement("VideoMessageBubble", props),
+  };
+});
+
+jest.mock("@/components/video-message", () => {
+  const React = require("react");
+  return {
+    VideoMessage: React.forwardRef((_props: unknown, _ref: unknown) => null),
+  };
+});
+
+jest.mock("expo-video", () => {
+  const React = require("react");
+  return {
+    useVideoPlayer: () => ({
+      play: jest.fn(),
+      pause: jest.fn(),
+      replace: jest.fn(),
+    }),
+    VideoView: (props: Record<string, unknown>) =>
+      React.createElement("VideoView", props),
+  };
+});
+
+jest.mock("expo-camera", () => {
+  const React = require("react");
+  return {
+    CameraView: React.forwardRef((props: Record<string, unknown>, ref: React.Ref<unknown>) =>
+      React.createElement("CameraView", { ...props, ref }),
+    ),
+    useCameraPermissions: () => [{ granted: true }, jest.fn(async () => ({ granted: true }))],
+    useMicrophonePermissions: () => [{ granted: true }, jest.fn(async () => ({ granted: true }))],
+  };
+});
+
 jest.mock("expo-audio", () => {
   const recorder = {
     isRecording: false,
@@ -137,6 +188,21 @@ jest.mock("@expo/vector-icons", () => {
 jest.mock("expo-symbols", () => ({
   SymbolView: () => null,
 }));
+
+
+jest.mock("@/lib/providers/app-lock-provider", () => {
+  const React = require("react");
+  return {
+    AppLockProvider: ({ children }: { children: React.ReactNode }) => children,
+    useAppLock: () => ({
+      isUnlocked: true,
+      dbReady: true,
+      lockEpoch: 0,
+      unlock: jest.fn(async () => ({ ok: true })),
+      lock: jest.fn(),
+    }),
+  };
+});
 
 beforeEach(() => {
   jest.useFakeTimers({ advanceTimers: true });
