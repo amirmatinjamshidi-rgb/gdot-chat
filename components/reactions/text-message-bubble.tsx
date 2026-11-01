@@ -3,6 +3,7 @@ import { useRef } from "react";
 import { Pressable, StyleSheet, View, type ViewStyle } from "react-native";
 
 import { ReactionList } from "@/components/reactions/reaction-list";
+import { deliveryTicksForStatus } from "@/components/reactions/delivery-status";
 import type { Reaction } from "@/components/reactions/types";
 import { ThemedText } from "@/components/themed-text";
 
@@ -58,11 +59,7 @@ export function TextMessageBubble({
         <ThemedText style={{ color: primaryColor }}>{text}</ThemedText>
         <ThemedText style={[styles.timeText, { color: timeColor }]}>
           {time}
-          {isMine && deliveryStatus === "delivered"
-            ? " ✓✓"
-            : isMine && (deliveryStatus === "sent" || deliveryStatus === "pending")
-              ? " ✓"
-              : ""}
+          {deliveryTicksForStatus(isMine, deliveryStatus)}
         </ThemedText>
       </Pressable>
       <ReactionList

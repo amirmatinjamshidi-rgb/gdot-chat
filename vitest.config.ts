@@ -7,7 +7,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["lib/**/*.test.ts"],
+    include: ["lib/**/*.test.ts", "components/**/*.test.ts"],
     setupFiles: ["lib/test/setup.ts"],
   },
   resolve: {
@@ -17,6 +17,10 @@ export default defineConfig({
       "expo-crypto": path.resolve(__dirname, "lib/test/expo-crypto-stub.ts"),
       "expo-constants": path.resolve(__dirname, "lib/test/expo-constants-stub.ts"),
       "expo-secure-store": path.resolve(__dirname, "lib/test/expo-secure-store-stub.ts"),
+      "expo-local-authentication": path.resolve(
+        __dirname,
+        "lib/test/expo-local-authentication-stub.ts",
+      ),
       "@react-native-async-storage/async-storage": path.resolve(
         __dirname,
         "lib/test/async-storage-stub.ts",

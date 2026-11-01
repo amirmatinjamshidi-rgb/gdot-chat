@@ -1,6 +1,4 @@
 using System;
-using GdotChat.Infrastructure.Persistence;
-using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -8,8 +6,6 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace GdotChat.Infrastructure.Migrations
 {
     /// <inheritdoc />
-    [DbContext(typeof(AppDbContext))]
-    [Migration("20260818120000_AddAttachments")]
     public partial class AddAttachments : Migration
     {
         /// <inheritdoc />

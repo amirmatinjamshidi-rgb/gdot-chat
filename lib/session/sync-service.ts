@@ -20,6 +20,8 @@ import type { IEnvelopeQuarantineStore } from "@/lib/db/envelope-quarantine-stor
 import type { IIdentityStore } from "@/lib/db/identity-store";
 import type { IMessageStore } from "@/lib/db/message-store";
 import type { IOutboxStore, OutboxEntry } from "@/lib/db/outbox-store";
+import type { IPendingReceiptStore } from "@/lib/db/pending-receipt-store";
+import { ReceiptRetryService } from "@/lib/session/receipt-retry";
 import type { IMediaBlobCache } from "@/lib/media/media-blob-cache";
 import type { IReactionStore } from "@/lib/db/reaction-store";
 import type { ISessionStore } from "@/lib/db/session-store";
@@ -60,6 +62,8 @@ export type SyncServiceInboundDeps = {
   sessionResetApi: SessionResetApi;
   sessionStore: ISessionStore;
   outboxStore: IOutboxStore;
+  /** Durable E2EE delivery-receipt retry queue (SQLCipher). */
+  pendingReceiptStore?: IPendingReceiptStore;
   clock?: Clock;
   resolveUsername?: (userId: string) => Promise<string | null>;
   /** When set, encryptAndPost fans out to all peer + own other devices. */
@@ -96,6 +100,7 @@ export class SyncService {
   private readonly clock: Clock;
   private readonly sessionResetCooldown = new MemorySessionResetCooldownStore();
   private readonly outboxStore: IOutboxStore;
+  private readonly receiptRetry: ReceiptRetryService | null;
   private readonly deviceDirectory: SyncServiceDeviceDirectory | null;
   private readonly mediaBlobCache: IMediaBlobCache | null;
   private readonly reuploadMediaBlob:
@@ -127,6 +132,15 @@ export class SyncService {
     this.reuploadMediaBlob = inboundDeps.reuploadMediaBlob ?? null;
     this.attachmentExists = inboundDeps.attachmentExists ?? null;
     this.clock = inboundDeps.clock ?? systemClock;
+    this.receiptRetry = inboundDeps.pendingReceiptStore
+      ? new ReceiptRetryService({
+          store: inboundDeps.pendingReceiptStore,
+          sendEncrypted: (conversation, plaintext) =>
+            this.encryptAndPost(conversation, plaintext).then(() => undefined),
+          getConversation: (id) => this.conversationStore.getById(id),
+          clock: this.clock,
+        })
+      : null;
     this.inbound = new InboundEnvelopeProcessor({
       messagesApi,
       signalService,
@@ -141,6 +155,7 @@ export class SyncService {
       outboxStore: this.outboxStore,
       sendEncrypted: (conversation, plaintext) =>
         this.encryptAndPost(conversation, plaintext).then(() => undefined),
+      receiptRetry: this.receiptRetry,
       isDbReady: () => appLockStore.isUnlocked,
       clock: this.clock,
       resolveUsername: inboundDeps.resolveUsername,
@@ -226,6 +241,7 @@ export class SyncService {
       if (connected) {
         this.stopPolling();
         this.schedulePullPending();
+        void this.receiptRetry?.flushDue();
       } else {
         // Live push lost (or SignalR disabled path) — poll until reconnect.
         this.startPolling();
@@ -235,6 +251,7 @@ export class SyncService {
     await this.applyTransportPolicy({ syncIfConnected: true });
     // Always try one inbox pull on start (covers poll-only and SignalR race).
     void this.pullPending();
+    void this.receiptRetry?.flushDue();
   }
 
   async stop(): Promise<void> {
@@ -265,6 +282,7 @@ export class SyncService {
     this.appInForeground = true;
     await this.applyTransportPolicy({ syncIfConnected: true });
     void this.pullPending();
+    void this.receiptRetry?.flushDue();
   }
 
   private schedulePullPending(): void {

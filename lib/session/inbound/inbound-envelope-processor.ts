@@ -33,6 +33,7 @@ import {
   type Clock,
   systemClock,
 } from "./constants";
+import type { ReceiptRetryService } from "@/lib/session/receipt-retry";
 import { isInvalidStructuredPayload } from "./structured-payload";
 
 export type InboundLogFn = (event: {
@@ -67,6 +68,11 @@ export type InboundProcessorDeps = {
     conversation: Conversation,
     plaintext: string,
   ) => Promise<void>;
+  /**
+   * When set, failed delivery receipts are persisted and retried with backoff.
+   * Preferred over fire-and-forget sendEncrypted alone.
+   */
+  receiptRetry?: ReceiptRetryService | null;
   /** Fired when an outgoing message is marked delivered via receipt. */
   onMessageDelivered?: (conversationId: string, localMessageId: string) => void;
   /** Returns whether the app lock / DB is available for crypto + SQL. */
@@ -617,7 +623,13 @@ export class InboundEnvelopeProcessor {
     conversation: Conversation,
     messageIds: string[],
   ): Promise<void> {
-    if (!this.deps.sendEncrypted || messageIds.length === 0) return;
+    if (messageIds.length === 0) return;
+    const retry = this.deps.receiptRetry;
+    if (retry) {
+      await retry.enqueueAndFlush(conversation, messageIds);
+      return;
+    }
+    if (!this.deps.sendEncrypted) return;
     try {
       await this.deps.sendEncrypted(
         conversation,
