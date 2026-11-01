@@ -1,12 +1,12 @@
-import Constants from "expo-constants";
+import { resolveApiBaseUrl } from "@/lib/config/api-base-url";
 
-/** REST API base including /v1 suffix */
-export const API_BASE_URL =
-  (Constants.expoConfig?.extra?.apiBaseUrl as string | undefined) ??
-  process.env.EXPO_PUBLIC_API_URL ??
-  "http://192.168.0.177:5067/v1";
+export { resolveApiBaseUrl } from "@/lib/config/api-base-url";
 
-export const SIGNALR_HUB_URL = API_BASE_URL.replace(/\/v1\/?$/, "") + "/hubs/messages";
+/** REST API base including /v1 suffix — must come from EXPO_PUBLIC_API_URL (or expo extra). */
+export const API_BASE_URL = resolveApiBaseUrl();
+
+export const SIGNALR_HUB_URL =
+  API_BASE_URL.replace(/\/v1\/?$/, "") + "/hubs/messages";
 
 export const APP_LOCK_BACKGROUND_MS = 60_000;
 

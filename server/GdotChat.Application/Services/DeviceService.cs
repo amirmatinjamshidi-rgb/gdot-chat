@@ -2,6 +2,7 @@ using GdotChat.Application.DTOs;
 using GdotChat.Application.Interfaces;
 using GdotChat.Application.Mapping;
 using GdotChat.Application.Options;
+using GdotChat.Application.Security;
 using GdotChat.Domain.Entities;
 using GdotChat.Domain.Exceptions;
 using Microsoft.EntityFrameworkCore;
@@ -44,13 +45,17 @@ public class DeviceService : IDeviceService
         };
         _db.Set<Device>().Add(device);
 
+        var spkPublic = DtoMapper.FromBase64(request.SignedPreKey.PublicKeyBase64);
+        var spkSignature = DtoMapper.FromBase64(request.SignedPreKey.SignatureBase64);
+        SignedPreKeySignature.EnsureValid(device.IdentityKeyPublic, spkPublic, spkSignature);
+
         var spk = new SignedPreKey
         {
             Id = Guid.NewGuid(),
             DeviceId = device.Id,
             KeyId = request.SignedPreKey.KeyId,
-            PublicKey = DtoMapper.FromBase64(request.SignedPreKey.PublicKeyBase64),
-            Signature = DtoMapper.FromBase64(request.SignedPreKey.SignatureBase64),
+            PublicKey = spkPublic,
+            Signature = spkSignature,
             CreatedAt = now,
         };
         _db.Set<SignedPreKey>().Add(spk);
@@ -85,6 +90,10 @@ public class DeviceService : IDeviceService
 
         var now = DateTimeOffset.UtcNow;
 
+        var spkPublic = DtoMapper.FromBase64(request.SignedPreKey.PublicKeyBase64);
+        var spkSignature = DtoMapper.FromBase64(request.SignedPreKey.SignatureBase64);
+        SignedPreKeySignature.EnsureValid(device.IdentityKeyPublic, spkPublic, spkSignature);
+
         // Upsert signed pre-key by (device, keyId) so rotation with a new keyId always
         // inserts, and a retry with the same keyId does not violate the unique index.
         var existingSpk = await _db.Set<SignedPreKey>()
@@ -99,15 +108,15 @@ public class DeviceService : IDeviceService
                 Id = Guid.NewGuid(),
                 DeviceId = device.Id,
                 KeyId = request.SignedPreKey.KeyId,
-                PublicKey = DtoMapper.FromBase64(request.SignedPreKey.PublicKeyBase64),
-                Signature = DtoMapper.FromBase64(request.SignedPreKey.SignatureBase64),
+                PublicKey = spkPublic,
+                Signature = spkSignature,
                 CreatedAt = now,
             });
         }
         else
         {
-            existingSpk.PublicKey = DtoMapper.FromBase64(request.SignedPreKey.PublicKeyBase64);
-            existingSpk.Signature = DtoMapper.FromBase64(request.SignedPreKey.SignatureBase64);
+            existingSpk.PublicKey = spkPublic;
+            existingSpk.Signature = spkSignature;
             existingSpk.CreatedAt = now;
         }
 

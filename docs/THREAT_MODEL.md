@@ -15,7 +15,7 @@
 | Media plaintext | Client-side AES-256-GCM; MinIO stores ciphertext only ([e2ee-media.md](./e2ee-media.md)) |
 | Message history on device | SQLCipher `gdot.db`; plaintext columns inside DB after unlock |
 | Identity / session keys | SQLCipher tables + `crypto_prekeys`; identity private key in `local_identity` |
-| JWT / refresh tokens | `expo-secure-store` |
+| JWT / refresh tokens | `expo-secure-store` with `keychainAccessible: WHEN_UNLOCKED_THIS_DEVICE_ONLY` (device-bound; unavailable while phone locked). Not biometric-gated / not KEK-wrapped so background sync can still refresh. |
 | DB encryption key (KEK) | **Biometric mode:** `expo-secure-store` with `requireAuthentication` (Strong / Class 3). **PIN mode** (only when Strong biometrics are unavailable): KEK wrapped with scrypt (`N=2^15`, `r=8`, `p=1`) + AES-256-GCM; wrapped blob in SecureStore without biometric gate. |
 
 ## App lock modes

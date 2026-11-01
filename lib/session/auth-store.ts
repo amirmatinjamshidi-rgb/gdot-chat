@@ -8,6 +8,25 @@ const ACCESS_TOKEN_EXPIRES_KEY = "gdot.auth.accessExpires";
 const USER_ID_KEY = "gdot.auth.userId";
 const DEVICE_ID_KEY = "gdot.auth.deviceId";
 
+/**
+ * Refresh token SecureStore options.
+ *
+ * Tradeoff (documented): use `WHEN_UNLOCKED_THIS_DEVICE_ONLY` so the refresh
+ * token is device-bound and unavailable while the phone is locked (iOS
+ * keychain). We intentionally do **not** set `requireAuthentication` and do
+ * **not** wrap the refresh token with the app KEK — those would block
+ * background / headless token refresh and inbox sync until the user unlocks
+ * the app with biometrics/PIN. Access token uses the same accessibility so
+ * short-lived credentials match; identity ids stay at default accessibility.
+ */
+export const REFRESH_TOKEN_SECURE_STORE_OPTIONS: SecureStore.SecureStoreOptions = {
+  keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+};
+
+export const ACCESS_TOKEN_SECURE_STORE_OPTIONS: SecureStore.SecureStoreOptions = {
+  keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+};
+
 type AuthStoreListener = () => void;
 
 export class AuthStore {
@@ -58,11 +77,20 @@ export class AuthStore {
   }
 
   async setTokens(auth: AuthResult): Promise<void> {
-    await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, auth.accessToken);
-    await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, auth.refreshToken);
+    await SecureStore.setItemAsync(
+      ACCESS_TOKEN_KEY,
+      auth.accessToken,
+      ACCESS_TOKEN_SECURE_STORE_OPTIONS,
+    );
+    await SecureStore.setItemAsync(
+      REFRESH_TOKEN_KEY,
+      auth.refreshToken,
+      REFRESH_TOKEN_SECURE_STORE_OPTIONS,
+    );
     await SecureStore.setItemAsync(
       ACCESS_TOKEN_EXPIRES_KEY,
       auth.accessTokenExpiresAt,
+      ACCESS_TOKEN_SECURE_STORE_OPTIONS,
     );
     await SecureStore.setItemAsync(USER_ID_KEY, auth.userId);
     await SecureStore.setItemAsync(DEVICE_ID_KEY, auth.deviceId);

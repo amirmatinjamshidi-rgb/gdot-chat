@@ -1,5 +1,3 @@
-import { agentDebugLog } from "@/lib/debug-agent-log";
-
 import { API_BASE_URL } from "@/lib/config";
 
 import type { AuthResult } from "@/lib/api/api-types";
@@ -10,15 +8,11 @@ import type { AuthStore } from "@/lib/session/auth-store";
 
 import { isOfflineToken } from "@/lib/session/auth-store";
 
-
-
 const REQUEST_TIMEOUT_MS = 45_000;
 
 const REFRESH_TIMEOUT_MS = 15_000;
 
 const TOKEN_REFRESH_BUFFER_MS = 60_000;
-
-
 
 export class ApiError extends Error {
 
@@ -38,8 +32,6 @@ export class ApiError extends Error {
 
 }
 
-
-
 function isAuthPath(path: string): boolean {
 
   return (
@@ -54,15 +46,11 @@ function isAuthPath(path: string): boolean {
 
 }
 
-
-
 function isPendingPath(path: string): boolean {
 
   return path.startsWith("/messages/pending");
 
 }
-
-
 
 export class ApiClient {
 
@@ -72,31 +60,11 @@ export class ApiClient {
 
   private httpTail: Promise<unknown> = Promise.resolve();
 
-
-
   constructor(private readonly authStore: AuthStore) {}
-
-
 
   /** Cancel in-flight pullPending fetch and wait for it to release the HTTP slot. */
 
   async abortBackgroundRequests(): Promise<void> {
-
-    // #region agent log
-
-    agentDebugLog(
-
-      "api-client.ts:abortBackgroundRequests",
-
-      "aborting sync requests",
-
-      {},
-
-      "L",
-
-      "post-fix",
-
-    );
 
     // #endregion
 
@@ -105,8 +73,6 @@ export class ApiClient {
     await this.httpTail;
 
   }
-
-
 
   private scheduleHttp<T>(
 
@@ -130,15 +96,11 @@ export class ApiClient {
 
   }
 
-
-
   async get<T>(path: string): Promise<T> {
 
     return this.request<T>("GET", path, undefined, false, "sync");
 
   }
-
-
 
   /** Send-path GET — not queued behind background sync. */
 
@@ -148,15 +110,11 @@ export class ApiClient {
 
   }
 
-
-
   async post<T>(path: string, body?: unknown): Promise<T> {
 
     return this.request<T>("POST", path, body, false, "sync");
 
   }
-
-
 
   /** Message send and other user-critical POSTs. */
 
@@ -165,8 +123,6 @@ export class ApiClient {
     return this.request<T>("POST", path, body, false, "priority");
 
   }
-
-
 
   async put<T>(path: string, body?: unknown): Promise<T> {
 
@@ -260,43 +216,19 @@ export class ApiClient {
     return this.scheduleHttp("priority", run);
   }
 
-
-
   private async ensureAccessTokenFresh(): Promise<void> {
 
     const expiresAtStr = await this.authStore.getAccessTokenExpiresAt();
 
     if (!expiresAtStr) return;
 
-
-
     const msLeft = new Date(expiresAtStr).getTime() - Date.now();
 
     if (msLeft > TOKEN_REFRESH_BUFFER_MS) return;
 
-
-
     const tokenExpired = msLeft <= 0;
 
-
-
     if (!tokenExpired) {
-
-      // #region agent log
-
-      agentDebugLog(
-
-        "api-client.ts:ensureAccessTokenFresh",
-
-        "proactive refresh deferred",
-
-        { msLeft },
-
-        "G",
-
-        "post-fix",
-
-      );
 
       // #endregion
 
@@ -306,27 +238,7 @@ export class ApiClient {
 
     }
 
-
-
-    // #region agent log
-
-    agentDebugLog(
-
-      "api-client.ts:ensureAccessTokenFresh",
-
-      "token expired refresh required",
-
-      { msLeft },
-
-      "G",
-
-      "post-fix",
-
-    );
-
     // #endregion
-
-
 
     const ok = await this.tryRefreshToken();
 
@@ -340,13 +252,9 @@ export class ApiClient {
 
   }
 
-
-
   private async tryRefreshToken(): Promise<boolean> {
 
     if (this.refreshInFlight) return this.refreshInFlight;
-
-
 
     this.refreshInFlight = this.refreshTokenInner().finally(() => {
 
@@ -358,63 +266,19 @@ export class ApiClient {
 
   }
 
-
-
   private async refreshTokenInner(): Promise<boolean> {
 
-    // #region agent log
-
-    agentDebugLog(
-
-      "api-client.ts:tryRefreshToken",
-
-      "refresh start",
-
-      {},
-
-      "G",
-
-      "post-fix",
-
-    );
-
     // #endregion
-
-
 
     const refreshToken = await this.authStore.getRefreshToken();
 
     if (!refreshToken || refreshToken.startsWith("offline.")) {
-
-      // #region agent log
-
-      agentDebugLog(
-
-        "api-client.ts:tryRefreshToken",
-
-        "refresh skipped",
-
-        {
-
-          hasToken: Boolean(refreshToken),
-
-          offline: refreshToken?.startsWith("offline.") ?? false,
-
-        },
-
-        "G",
-
-        "post-fix",
-
-      );
 
       // #endregion
 
       return false;
 
     }
-
-
 
     try {
 
@@ -431,22 +295,6 @@ export class ApiClient {
 
       if (res.status !== 200) {
 
-        // #region agent log
-
-        agentDebugLog(
-
-          "api-client.ts:tryRefreshToken",
-
-          "refresh failed",
-
-          { status: res.status },
-
-          "G",
-
-          "post-fix",
-
-        );
-
         // #endregion
 
         return false;
@@ -457,43 +305,11 @@ export class ApiClient {
 
       await this.authStore.setTokens(auth);
 
-      // #region agent log
-
-      agentDebugLog(
-
-        "api-client.ts:tryRefreshToken",
-
-        "refresh success",
-
-        { expiresAt: auth.accessTokenExpiresAt },
-
-        "G",
-
-        "post-fix",
-
-      );
-
       // #endregion
 
       return true;
 
     } catch (e) {
-
-      // #region agent log
-
-      agentDebugLog(
-
-        "api-client.ts:tryRefreshToken",
-
-        "refresh error",
-
-        { error: e instanceof Error ? e.message : String(e) },
-
-        "G",
-
-        "post-fix",
-
-      );
 
       // #endregion
 
@@ -502,8 +318,6 @@ export class ApiClient {
     }
 
   }
-
-
 
   private async request<T>(
 
@@ -527,8 +341,6 @@ export class ApiClient {
 
   }
 
-
-
   private async requestOnce<T>(
 
     method: string,
@@ -549,29 +361,9 @@ export class ApiClient {
 
     }
 
-
-
     const url = `${API_BASE_URL}${path}`;
 
-    // #region agent log
-
-    agentDebugLog(
-
-      "api-client.ts:request",
-
-      "request start",
-
-      { method, path, url, lane },
-
-      "I",
-
-      "post-fix",
-
-    );
-
     // #endregion
-
-
 
     const token = await this.authStore.getAccessToken();
 
@@ -595,8 +387,6 @@ export class ApiClient {
 
     }
 
-
-
     const controller = new AbortController();
 
     if (lane === "sync" && isPendingPath(path)) {
@@ -606,8 +396,6 @@ export class ApiClient {
       this.pendingAbort = controller;
 
     }
-
-
 
     let status: number;
 
@@ -641,22 +429,6 @@ export class ApiClient {
 
       const detail = e instanceof Error ? e.message : String(e);
 
-      // #region agent log
-
-      agentDebugLog(
-
-        "api-client.ts:request",
-
-        "fetch failed",
-
-        { method, path, lane, apiBaseUrl: API_BASE_URL, error: detail },
-
-        "F",
-
-        "post-fix",
-
-      );
-
       // #endregion
 
       throw new Error(
@@ -677,47 +449,11 @@ export class ApiClient {
 
     }
 
-
-
-    // #region agent log
-
-    agentDebugLog(
-
-      "api-client.ts:request",
-
-      "request response",
-
-      { method, path, lane, status },
-
-      "I",
-
-      "post-fix",
-
-    );
-
     // #endregion
-
-
 
     if (status === 401 && !isRetry && !isAuthPath(path)) {
 
       if (isOfflineToken(token)) {
-
-        // #region agent log
-
-        agentDebugLog(
-
-          "api-client.ts:request",
-
-          "401 offline token rejected",
-
-          { method, path, lane },
-
-          "O",
-
-          "post-fix",
-
-        );
 
         // #endregion
 
@@ -726,22 +462,6 @@ export class ApiClient {
         throw new ApiError("Session expired. Please sign in again.", 401);
 
       }
-
-      // #region agent log
-
-      agentDebugLog(
-
-        "api-client.ts:request",
-
-        "401 received, attempting refresh",
-
-        { method, path, lane },
-
-        "G",
-
-        "post-fix",
-
-      );
 
       // #endregion
 
@@ -759,15 +479,11 @@ export class ApiClient {
 
     }
 
-
-
     if (status < 200 || status >= 300) {
 
       throw new ApiError(bodyText || statusText, status);
 
     }
-
-
 
     if (status === 204 || bodyText.length === 0) {
 
@@ -775,12 +491,9 @@ export class ApiClient {
 
     }
 
-
-
     return JSON.parse(bodyText) as T;
 
   }
 
 }
-
 

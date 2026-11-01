@@ -2,7 +2,6 @@ import * as signalR from "@microsoft/signalr";
 import { Platform } from "react-native";
 
 import { SIGNALR_HUB_URL } from "@/lib/config";
-import { agentDebugLog } from "@/lib/debug-agent-log";
 import type { AuthStore } from "@/lib/session/auth-store";
 import { isOfflineToken } from "@/lib/session/auth-store";
 
@@ -99,13 +98,6 @@ export class SignalRClient {
     if (Platform.OS === "web") {
       this.connection = builder.withUrl(SIGNALR_HUB_URL, options).build();
     } else {
-      agentDebugLog(
-        "signalr-client.ts:connectInner",
-        "using websockets transport",
-        { platform: Platform.OS },
-        "K",
-        "post-fix",
-      );
       this.connection = builder
         .withUrl(SIGNALR_HUB_URL, {
           ...options,
@@ -188,26 +180,12 @@ export class SignalRClient {
     const wasDesired = this.desireConnected;
     const wasConnected = this.isConnected();
     if (wasConnected || wasDesired) {
-      agentDebugLog(
-        "signalr-client.ts:runWithTransportPaused",
-        "pausing signalr",
-        {},
-        "K",
-        "post-fix",
-      );
       await this.disconnect();
     }
     try {
       return await fn();
     } finally {
       if (wasDesired) {
-        agentDebugLog(
-          "signalr-client.ts:runWithTransportPaused",
-          "resuming signalr",
-          {},
-          "K",
-          "post-fix",
-        );
         await this.connect();
       }
     }

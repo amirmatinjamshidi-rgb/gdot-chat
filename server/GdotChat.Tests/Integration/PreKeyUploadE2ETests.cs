@@ -22,7 +22,8 @@ public sealed class PreKeyUploadE2ETests
     [Fact]
     public async Task Exhaust_ReplenishWithNewSpk_FetchSucceeds()
     {
-        var target = await _client.RegisterAsync(TestData.CreateRegisterRequest(oneTimePreKeyCount: 1));
+        var (targetReg, targetKeys) = TestData.CreateRegisterRequestWithKeys(oneTimePreKeyCount: 1);
+        var target = await _client.RegisterAsync(targetReg);
         var caller = await _client.RegisterAsync();
         using var callerClient = _factory.CreateClient();
         callerClient.SetBearer(caller.AccessToken);
@@ -37,11 +38,11 @@ public sealed class PreKeyUploadE2ETests
         using var targetClient = _factory.CreateClient();
         targetClient.SetBearer(target.AccessToken);
         var upload = new UploadPreKeysRequest(
-            new SignedPreKeyDto(2, TestData.B64(32), TestData.B64(64)),
+            targetKeys.CreateSignedPreKey(2),
             new List<OneTimePreKeyDto>
             {
-                new(5001, TestData.B64(32)),
-                new(5002, TestData.B64(32)),
+                targetKeys.CreateOneTimePreKey(5001),
+                targetKeys.CreateOneTimePreKey(5002),
             });
         var put = await targetClient.PutAsJsonAsync($"/v1/devices/{target.DeviceId}/prekeys", upload);
         Assert.Equal(HttpStatusCode.NoContent, put.StatusCode);

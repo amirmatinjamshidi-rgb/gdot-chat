@@ -1,7 +1,4 @@
 import { Platform } from "react-native";
-
-import { agentDebugLog } from "@/lib/debug-agent-log";
-
 export type HttpFetchBody = string | Uint8Array | ArrayBuffer;
 
 export type HttpFetchInit = {
@@ -26,41 +23,7 @@ export async function httpFetch(
   init: HttpFetchInit,
 ): Promise<HttpFetchResponse> {
   const useXhr = Platform.OS !== "web";
-  const started = Date.now();
-  agentDebugLog(
-    "http-fetch.ts:httpFetch",
-    "transport start",
-    { method: init.method, useXhr, url: url.replace(/access_token=[^&]+/, "access_token=*") },
-    "P",
-    "post-fix",
-  );
-
-  try {
-    const res = useXhr
-      ? await xhrFetch(url, init)
-      : await globalFetch(url, init);
-    agentDebugLog(
-      "http-fetch.ts:httpFetch",
-      "transport end",
-      { method: init.method, status: res.status, ms: Date.now() - started },
-      "P",
-      "post-fix",
-    );
-    return res;
-  } catch (e) {
-    agentDebugLog(
-      "http-fetch.ts:httpFetch",
-      "transport error",
-      {
-        method: init.method,
-        ms: Date.now() - started,
-        error: e instanceof Error ? e.message : String(e),
-      },
-      "P",
-      "post-fix",
-    );
-    throw e;
-  }
+  return useXhr ? xhrFetch(url, init) : globalFetch(url, init);
 }
 
 function toArrayBuffer(body: Uint8Array | ArrayBuffer): ArrayBuffer {

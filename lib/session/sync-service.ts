@@ -18,7 +18,6 @@ import type { IMessageStore } from "@/lib/db/message-store";
 import type { IReactionStore } from "@/lib/db/reaction-store";
 import type { ISessionStore } from "@/lib/db/session-store";
 import type { Conversation, LocalMessage } from "@/lib/db/types";
-import { agentDebugLog } from "@/lib/debug-agent-log";
 import type { MediaTransferService } from "@/lib/media/media-transfer";
 import {
   serializeReactionPayload,
@@ -145,30 +144,12 @@ export class SyncService {
   private async startInner(): Promise<void> {
     if (this.started) return;
     this.started = true;
-    // #region agent log
-    agentDebugLog(
-      "sync-service.ts:startInner",
-      "sync started",
-      { instanceId: this.instanceId },
-      "J",
-      "post-fix",
-    );
-    // #endregion
 
     await this.signalService.replenishLocalPreKeysIfNeeded();
     void this.mediaTransfer?.resumeInterrupted();
 
     const accessToken = await this.authStore.getAccessToken();
     if (isOfflineToken(accessToken)) {
-      // #region agent log
-      agentDebugLog(
-        "sync-service.ts:startInner",
-        "offline tokens cleared",
-        {},
-        "O",
-        "post-fix",
-      );
-      // #endregion
       await this.authStore.clearSessionExpired();
       this.started = false;
       return;
@@ -281,7 +262,6 @@ export class SyncService {
     }
   }
 
-
   private async applyTransportPolicy(opts?: {
     syncIfConnected?: boolean;
   }): Promise<void> {
@@ -339,34 +319,15 @@ export class SyncService {
 
   private async pullPendingInner(): Promise<void> {
     if (this.outboundInFlight > 0) {
-      agentDebugLog(
-        "sync-service.ts:pullPending",
-        "pullPending skipped during send",
-        { outboundInFlight: this.outboundInFlight },
-        "K",
-        "post-fix",
-      );
       return;
     }
     if (!appLockStore.isUnlocked) {
-      agentDebugLog(
-        "sync-service.ts:pullPending",
-        "pullPending paused while locked",
-        {},
-        "B",
-      );
       return;
     }
     const now = this.clock();
     if (now < this.transientBackoffUntil) {
       return;
     }
-    agentDebugLog(
-      "sync-service.ts:pullPending",
-      "pullPending start",
-      {},
-      "B",
-    );
     try {
       await this.inbound.expireStaleMessageRequests();
       const envelopes = await this.messagesApi.getPending();
@@ -394,33 +355,14 @@ export class SyncService {
         this.outboundInFlight > 0 &&
         (msg.includes("Aborted") || msg.includes("abort"));
       if (abortedForSend) {
-        agentDebugLog(
-          "sync-service.ts:pullPending",
-          "pullPending aborted for send",
-          {},
-          "L",
-          "post-fix",
-        );
         return;
       }
-      agentDebugLog(
-        "sync-service.ts:pullPending",
-        "pullPending error",
-        { error: msg },
-        "B",
-      );
       // Network etc. — transient backoff without ack.
       this.transientBackoffUntil = this.clock() + 5_000;
       if (__DEV__) {
         console.warn("[SyncService] pullPending failed", msg);
       }
     } finally {
-      agentDebugLog(
-        "sync-service.ts:pullPending",
-        "pullPending end",
-        {},
-        "B",
-      );
     }
   }
 
@@ -468,15 +410,6 @@ export class SyncService {
     text: string,
   ): Promise<void> {
     assertMessageTextWithinLimit(text);
-    // #region agent log
-    agentDebugLog(
-      "sync-service.ts:sendOutgoing",
-      "sendOutgoing start",
-      { conversationId },
-      "A",
-      "post-fix",
-    );
-    // #endregion
     const conversation = await this.conversationStore.getById(conversationId);
     if (!conversation) throw new Error("Conversation not found");
 
@@ -498,14 +431,6 @@ export class SyncService {
       createdAt,
     };
     await this.messageStore.insert(optimistic);
-    // #region agent log
-    agentDebugLog(
-      "sync-service.ts:sendOutgoing",
-      "after message insert",
-      { messageId: id },
-      "A",
-    );
-    // #endregion
 
     await this.messagesApi.abortBackground();
     this.outboundInFlight++;
@@ -516,26 +441,6 @@ export class SyncService {
           conversation.peerDeviceId,
           serializeTextPayload(text),
         );
-        // #region agent log
-        agentDebugLog(
-          "sync-service.ts:sendOutgoing",
-          "after encrypt",
-          { messageType: payload.messageType },
-          "A",
-        );
-        // #endregion
-        // #region agent log
-        agentDebugLog(
-          "sync-service.ts:sendOutgoing",
-          "posting message to server",
-          {
-            recipientUserId: payload.recipientUserId,
-            recipientDeviceId: payload.recipientDeviceId,
-          },
-          "A",
-          "post-fix",
-        );
-        // #endregion
         const result = await this.messagesApi.send({
           recipientUserId: payload.recipientUserId,
           recipientDeviceId: payload.recipientDeviceId,
@@ -551,23 +456,7 @@ export class SyncService {
         });
         void result;
       });
-      // #region agent log
-      agentDebugLog(
-        "sync-service.ts:sendOutgoing",
-        "sendOutgoing success",
-        { messageId: id },
-        "A",
-      );
-      // #endregion
     } catch (e) {
-      // #region agent log
-      agentDebugLog(
-        "sync-service.ts:sendOutgoing",
-        "sendOutgoing error",
-        { error: e instanceof Error ? e.message : String(e) },
-        "A",
-      );
-      // #endregion
       await this.messageStore.updateStatus(id, "failed");
       throw e instanceof Error
         ? e
@@ -640,7 +529,5 @@ export class SyncService {
     });
     await this.encryptAndPost(conversation, plaintext);
   }
-
-
 
 }

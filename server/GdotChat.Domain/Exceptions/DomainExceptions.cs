@@ -75,3 +75,9 @@ public class SessionResetRateLimitedException : Exception
     public SessionResetRateLimitedException() : base("Session reset rate limit exceeded") { }
 }
 
+public class InvalidSignedPreKeySignatureException : Exception
+{
+    public InvalidSignedPreKeySignatureException()
+        : base("Signed pre-key signature is invalid") { }
+}
+

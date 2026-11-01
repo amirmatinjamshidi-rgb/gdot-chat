@@ -1,7 +1,6 @@
 import type { DevicesApi } from "@/lib/api/devices-api";
 import { ApiError } from "@/lib/api/api-client";
 import type { PreKeyBundleDto } from "@/lib/api/api-types";
-import { agentDebugLog } from "@/lib/debug-agent-log";
 import type { IIdentityStore } from "@/lib/db/identity-store";
 import type { ISessionStore } from "@/lib/db/session-store";
 
@@ -56,36 +55,15 @@ export class SignalService {
 
     const addr = protocolAddressId(peerUserId);
     const hasSession = await this.crypto.hasSession(addr);
-    agentDebugLog(
-      "signal-service.ts:ensureSession",
-      "session check",
-      { peerUserId, hasSession },
-      "H",
-      "post-fix",
-    );
     if (hasSession) {
       return;
     }
-    agentDebugLog(
-      "signal-service.ts:ensureSession",
-      "fetching prekey bundle",
-      { peerUserId, peerDeviceId },
-      "H",
-      "post-fix",
-    );
     const bundle = await this.fetchBundleWithReplenish(peerUserId, peerDeviceId);
     await this.ingestBundleIdentity(peerUserId, peerDeviceId, bundle);
     if ((await this.getIdentityTrust(peerUserId)).keyChanged) {
       throw new IdentityKeyChangedError(peerUserId);
     }
     await this.crypto.ensureSession(addr, bundle);
-    agentDebugLog(
-      "signal-service.ts:ensureSession",
-      "session established",
-      { peerUserId },
-      "H",
-      "post-fix",
-    );
   }
 
   async encryptOutgoing(
@@ -99,24 +77,10 @@ export class SignalService {
     }
     await this.ensureSession(peerUserId, peerDeviceId);
     const addr = protocolAddressId(peerUserId);
-    agentDebugLog(
-      "signal-service.ts:encryptOutgoing",
-      "encrypt start",
-      { peerUserId },
-      "H",
-      "post-fix",
-    );
     const result = await this.crypto.encrypt(addr, plaintext);
     if (result.ciphertext.length === 0) {
       throw new Error("Encryption produced empty ciphertext");
     }
-    agentDebugLog(
-      "signal-service.ts:encryptOutgoing",
-      "encrypt done",
-      { messageType: result.messageType, bytes: result.ciphertext.length },
-      "H",
-      "post-fix",
-    );
     return {
       recipientUserId: peerUserId,
       recipientDeviceId: peerDeviceId,

@@ -12,7 +12,14 @@ Encrypted 1:1 text and media: [docs/PROTOCOL.md](docs/PROTOCOL.md), [docs/e2ee-m
    npm install
    ```
 
-2. Start the app
+2. Configure the API base URL (required — there is no hardcoded LAN IP)
+
+   ```bash
+   cp .env.example .env
+   # Set EXPO_PUBLIC_API_URL, e.g. http://127.0.0.1:5066/v1 or your LAN IP
+   ```
+
+3. Start the app
 
    ```bash
    npx expo start

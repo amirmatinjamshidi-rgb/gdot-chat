@@ -22,16 +22,17 @@ public sealed class PreKeyUploadTests
     [Fact]
     public async Task UploadPreKeys_SameSignedKeyId_Upserts_AndOtksAppend()
     {
-        var auth = await _client.RegisterAsync(TestData.CreateRegisterRequest(oneTimePreKeyCount: 3));
+        var (reg, keys) = TestData.CreateRegisterRequestWithKeys(oneTimePreKeyCount: 3);
+        var auth = await _client.RegisterAsync(reg);
         using var authed = _factory.CreateClient();
         authed.SetBearer(auth.AccessToken);
 
         var body = new UploadPreKeysRequest(
-            new SignedPreKeyDto(1, TestData.B64(32), TestData.B64(64)),
+            keys.CreateSignedPreKey(1),
             new List<OneTimePreKeyDto>
             {
-                new(1001, TestData.B64(32)),
-                new(1002, TestData.B64(32)),
+                keys.CreateOneTimePreKey(1001),
+                keys.CreateOneTimePreKey(1002),
             });
 
         var first = await authed.PutAsJsonAsync($"/v1/devices/{auth.DeviceId}/prekeys", body);
@@ -54,13 +55,14 @@ public sealed class PreKeyUploadTests
     [Fact]
     public async Task UploadPreKeys_NewSignedKeyId_Rotates()
     {
-        var auth = await _client.RegisterAsync(TestData.CreateRegisterRequest(oneTimePreKeyCount: 2));
+        var (reg, keys) = TestData.CreateRegisterRequestWithKeys(oneTimePreKeyCount: 2);
+        var auth = await _client.RegisterAsync(reg);
         using var authed = _factory.CreateClient();
         authed.SetBearer(auth.AccessToken);
 
         var body = new UploadPreKeysRequest(
-            new SignedPreKeyDto(2, TestData.B64(32), TestData.B64(64)),
-            new List<OneTimePreKeyDto> { new(2001, TestData.B64(32)) });
+            keys.CreateSignedPreKey(2),
+            new List<OneTimePreKeyDto> { keys.CreateOneTimePreKey(2001) });
 
         var response = await authed.PutAsJsonAsync($"/v1/devices/{auth.DeviceId}/prekeys", body);
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
