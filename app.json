@@ -72,7 +72,8 @@
           "faceIDPermission": "Allow GDOT chat to use Face ID for app lock."
         }
       ],
-      "expo-font"
+      "expo-font",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true,
