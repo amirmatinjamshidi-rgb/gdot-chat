@@ -26,9 +26,10 @@ export interface LocalMessage {
   kind: LocalMessageKind;
   plaintext: string;
   ciphertext?: Uint8Array;
-  messageType?: 2 | 3;
+  messageType?: 2 | 3 | 4;
   status: MessageStatus;
   senderDeviceId: string;
+  senderUserId?: string;
   createdAt: number;
   serverEnvelopeId?: string;
   attachmentId?: string;

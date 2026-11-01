@@ -33,7 +33,7 @@ export function mockAppServices(
     cryptoKeyStore: {},
     crypto: {},
     groupsApi: { listMine: jest.fn(async () => []) },
-    groupStore: { upsertGroup: jest.fn(), upsertMember: jest.fn(), getGroup: jest.fn(async () => null), touchPreview: jest.fn() },
+    groupStore: { upsertGroup: jest.fn(), upsertMember: jest.fn(), getGroup: jest.fn(async () => null), touchPreview: jest.fn(), listMembers: jest.fn(async () => []) },
     groupSenderKeyService: { setLocalIdentity: jest.fn(), rotateOwnSenderKey: jest.fn() },
     conversationStore: {
       listAll: jest.fn(async () => []),

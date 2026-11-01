@@ -8,7 +8,12 @@ export const MEDIA_KEY_BYTES = 32;
 export const DEFAULT_MEDIA_CHUNK_SIZE = 4 * 1024 * 1024;
 export const MAX_ATTACHMENT_BYTES = 1024 * 1024 * 1024;
 
-export type SignalPayloadType = "text" | "media" | "reaction" | "receipt";
+export type SignalPayloadType =
+  | "text"
+  | "media"
+  | "reaction"
+  | "receipt"
+  | "group_control";
 export type MediaKind = "voice" | "video";
 export type ReactionOp = "add" | "remove";
 
@@ -53,22 +58,40 @@ export interface ReactionPayload {
 export interface ReceiptPayload {
   v: 1;
   t: "receipt";
-  /** Sender client message ids that were successfully decrypted. */
+  /** delivered (default) or read */
+  kind?: "delivered" | "read";
+  /** Sender client message ids that were successfully decrypted / read. */
   messageIds: string[];
+  /** When set, receipt is about a group message (still sent pairwise E2EE). */
+  groupId?: string;
+}
+
+export type GroupControlEvent = "added" | "removed" | "left" | "renamed";
+
+export interface GroupControlPayload {
+  v: 1;
+  t: "group_control";
+  event: GroupControlEvent;
+  actorUserId: string;
+  subjectUserId?: string;
+  /** Opaque/display name for renamed */
+  name?: string;
 }
 
 export type TypedSignalPayload =
   | TextPayload
   | MediaPayload
   | ReactionPayload
-  | ReceiptPayload;
+  | ReceiptPayload
+  | GroupControlPayload;
 
 export type ParsedSignalPlaintext =
   | { kind: "legacy-text"; text: string }
   | { kind: "text"; payload: TextPayload }
   | { kind: "media"; payload: MediaPayload }
   | { kind: "reaction"; payload: ReactionPayload }
-  | { kind: "receipt"; payload: ReceiptPayload };
+  | { kind: "receipt"; payload: ReceiptPayload }
+  | { kind: "group_control"; payload: GroupControlPayload };
 
 export function serializeTextPayload(
   text: string,
@@ -79,12 +102,31 @@ export function serializeTextPayload(
   return JSON.stringify(payload);
 }
 
-export function serializeReceiptPayload(messageIds: string[]): string {
+export function serializeReceiptPayload(
+  messageIds: string[],
+  opts?: { kind?: "delivered" | "read"; groupId?: string },
+): string {
   const payload: ReceiptPayload = {
     v: 1,
     t: "receipt",
     messageIds: [...messageIds],
   };
+  if (opts?.kind) payload.kind = opts.kind;
+  if (opts?.groupId) payload.groupId = opts.groupId;
+  return JSON.stringify(payload);
+}
+
+export function serializeGroupControlPayload(
+  input: Omit<GroupControlPayload, "v" | "t">,
+): string {
+  const payload: GroupControlPayload = {
+    v: 1,
+    t: "group_control",
+    event: input.event,
+    actorUserId: input.actorUserId,
+  };
+  if (input.subjectUserId) payload.subjectUserId = input.subjectUserId;
+  if (input.name) payload.name = input.name;
   return JSON.stringify(payload);
 }
 
@@ -139,6 +181,10 @@ export function parseSignalPlaintext(plaintext: string): ParsedSignalPlaintext {
   if (raw.t === "receipt") {
     const receipt = parseReceiptPayload(raw);
     if (receipt) return { kind: "receipt", payload: receipt };
+  }
+  if (raw.t === "group_control") {
+    const control = parseGroupControlPayload(raw);
+    if (control) return { kind: "group_control", payload: control };
   }
   return { kind: "legacy-text", text: plaintext };
 }
@@ -226,7 +272,35 @@ export function parseReceiptPayload(
     if (typeof id !== "string" || id.length < 8 || id.length > 128) return null;
     messageIds.push(id);
   }
-  return { v: 1, t: "receipt", messageIds };
+  const out: ReceiptPayload = { v: 1, t: "receipt", messageIds };
+  if (raw.kind === "delivered" || raw.kind === "read") out.kind = raw.kind;
+  if (typeof raw.groupId === "string") out.groupId = raw.groupId;
+  return out;
+}
+
+export function parseGroupControlPayload(
+  raw: Record<string, unknown>,
+): GroupControlPayload | null {
+  if (raw.t !== "group_control" || raw.v !== 1) return null;
+  if (typeof raw.actorUserId !== "string") return null;
+  const event = raw.event;
+  if (
+    event !== "added" &&
+    event !== "removed" &&
+    event !== "left" &&
+    event !== "renamed"
+  ) {
+    return null;
+  }
+  const out: GroupControlPayload = {
+    v: 1,
+    t: "group_control",
+    event,
+    actorUserId: raw.actorUserId,
+  };
+  if (typeof raw.subjectUserId === "string") out.subjectUserId = raw.subjectUserId;
+  if (typeof raw.name === "string") out.name = raw.name;
+  return out;
 }
 
 export function mediaPreviewLabel(kind: MediaKind): string {

@@ -35,6 +35,7 @@ import {
   parseSignalPlaintext,
   serializeMediaPayload,
   serializeReactionPayload,
+  serializeReceiptPayload,
   serializeTextPayload,
   type MediaPayload,
   type ReactionOp,
@@ -45,6 +46,7 @@ import { appLockStore } from "@/lib/session/app-lock-store";
 import { InboundEnvelopeProcessor } from "@/lib/session/inbound/inbound-envelope-processor";
 import type { GroupSenderKeyService } from "@/lib/session/group-sender-key-service";
 import type { IGroupStore } from "@/lib/db/group-store";
+import type { IGroupReceiptStore } from "@/lib/db/group-receipt-store";
 import { systemClock, type Clock } from "@/lib/session/inbound/constants";
 import {
   OUTBOX_MAX_PER_CONVERSATION,
@@ -95,6 +97,7 @@ export type SyncServiceInboundDeps = {
   ingestSenderKeyDistribution?: (plaintext: string) => Promise<boolean>;
   groupSenderKeyService?: GroupSenderKeyService | null;
   groupStore?: IGroupStore | null;
+  groupReceiptStore?: IGroupReceiptStore | null;
 };
 
 export class SyncService {
@@ -129,6 +132,7 @@ export class SyncService {
     | null;
   private groupSenderKeyService: GroupSenderKeyService | null;
   private readonly groupStore: IGroupStore | null;
+  private readonly groupReceiptStore: IGroupReceiptStore | null;
 
   constructor(
     private readonly messagesApi: MessagesApi,
@@ -153,6 +157,7 @@ export class SyncService {
     this.attachmentExists = inboundDeps.attachmentExists ?? null;
     this.groupSenderKeyService = inboundDeps.groupSenderKeyService ?? null;
     this.groupStore = inboundDeps.groupStore ?? null;
+    this.groupReceiptStore = inboundDeps.groupReceiptStore ?? null;
     this.clock = inboundDeps.clock ?? systemClock;
     this.receiptRetry = inboundDeps.pendingReceiptStore
       ? new ReceiptRetryService({
@@ -248,6 +253,13 @@ export class SyncService {
           : this.groupSenderKeyService
             ? this.groupSenderKeyService.ingestControlPlaintext(plaintext)
             : Promise.resolve(false),
+      groupStore: this.groupStore,
+      groupReceiptStore: this.groupReceiptStore,
+      applyGroupControl: (args) =>
+        this.groupSenderKeyService
+          ? this.groupSenderKeyService.applyVerifiedGroupControl(args)
+          : Promise.resolve(),
+      localUserId: () => this.authStore.getUserId(),
       logFailure: ({ envelopeId, errorClass, errorName }) => {
         if (__DEV__) {
           console.warn(
@@ -873,6 +885,7 @@ export class SyncService {
       durationMs?: number;
       width?: number;
       height?: number;
+      groupId?: string;
     },
   ): Promise<void> {
     if (!this.mediaTransfer) throw new Error("Media transfer is not initialized");
@@ -884,6 +897,20 @@ export class SyncService {
     );
     this.sendChain = run.catch(() => {});
     return run;
+  }
+
+  async sendGroupOutgoingMedia(
+    groupId: string,
+    input: {
+      uri: string;
+      kind: "voice" | "video";
+      mimeType: string;
+      durationMs?: number;
+      width?: number;
+      height?: number;
+    },
+  ): Promise<void> {
+    return this.sendOutgoingMedia(groupId, { ...input, groupId });
   }
 
   async encryptAndPost(
@@ -986,15 +1013,84 @@ export class SyncService {
     targetServerEnvelopeId: string;
     emoji: string;
     op: ReactionOp;
+    /** When set, reaction is fan-out via Sender Keys. */
+    groupId?: string;
   }): Promise<void> {
-    const conversation = await this.conversationStore.getById(input.conversationId);
-    if (!conversation) throw new Error("Conversation not found");
     const plaintext = serializeReactionPayload({
       op: input.op,
       targetServerEnvelopeId: input.targetServerEnvelopeId,
       emoji: input.emoji,
     });
+    if (input.groupId) {
+      if (!this.groupSenderKeyService) throw new Error("Group crypto not ready");
+      await this.groupSenderKeyService.encryptAndSendGroupPlaintext(
+        input.groupId,
+        plaintext,
+      );
+      return;
+    }
+    const conversation = await this.conversationStore.getById(input.conversationId);
+    if (!conversation) throw new Error("Conversation not found");
     await this.encryptAndPost(conversation, plaintext);
+  }
+
+  async sendGroupControl(
+    groupId: string,
+    event: "added" | "removed" | "left" | "renamed",
+    opts?: { subjectUserId?: string; name?: string },
+  ): Promise<void> {
+    if (!this.groupSenderKeyService) throw new Error("Group crypto not ready");
+    await this.groupSenderKeyService.sendGroupControl(groupId, event, opts);
+  }
+
+  /** Mark outgoing group messages as read by us; send E2EE read receipts to each sender. */
+  async markGroupMessagesRead(
+    groupId: string,
+    messages: { clientMessageId: string; senderUserId: string; senderDeviceId: string }[],
+  ): Promise<void> {
+    if (!this.groupReceiptStore || messages.length === 0) return;
+    const local = await this.identityStore.getLocalIdentity();
+    if (!local) return;
+    const bySender = new Map<string, { userId: string; deviceId: string; ids: string[] }>();
+    const now = this.clock();
+    for (const m of messages) {
+      if (m.senderUserId === local.userId) continue;
+      await this.groupReceiptStore.upsert({
+        groupId,
+        clientMessageId: m.clientMessageId,
+        fromUserId: local.userId,
+        fromDeviceId: local.deviceId,
+        kind: "read",
+        at: now,
+      });
+      const key = `${m.senderUserId}:${m.senderDeviceId}`;
+      const bucket = bySender.get(key) ?? {
+        userId: m.senderUserId,
+        deviceId: m.senderDeviceId,
+        ids: [],
+      };
+      bucket.ids.push(m.clientMessageId);
+      bySender.set(key, bucket);
+    }
+    for (const bucket of bySender.values()) {
+      const conversation = {
+        id: groupId,
+        peerUserId: bucket.userId,
+        peerUsername: bucket.userId.slice(0, 8),
+        peerDeviceId: bucket.deviceId,
+        lastMessagePreview: "",
+        lastMessageAt: 0,
+        unreadCount: 0,
+      };
+      await this.encryptAndPost(
+        conversation,
+        serializeReceiptPayload(bucket.ids, { kind: "read", groupId }),
+      );
+    }
+  }
+
+  getGroupReceiptAggregate(groupId: string, clientMessageId: string) {
+    return this.groupReceiptStore?.aggregate(groupId, clientMessageId) ?? null;
   }
 
 }

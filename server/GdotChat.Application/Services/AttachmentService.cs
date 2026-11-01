@@ -39,13 +39,33 @@ public class AttachmentService : IAttachmentService
         if (request.SizeBytes > _options.MaxSizeBytes)
             throw new AttachmentTooLargeException();
 
-        var recipient = await _db.Set<Device>()
-            .FirstOrDefaultAsync(
-                d => d.Id == request.RecipientDeviceId
-                     && d.UserId == request.RecipientUserId
-                     && d.IsActive,
-                ct)
-            ?? throw new DeviceNotFoundException();
+        Guid recipientDeviceId;
+        Guid? groupId = request.GroupId;
+
+        if (groupId is Guid gid)
+        {
+            var senderUserId = await _db.Set<Device>()
+                .Where(d => d.Id == senderDeviceId)
+                .Select(d => d.UserId)
+                .FirstAsync(ct);
+            var member = await _db.Set<GroupMember>()
+                .AnyAsync(m => m.GroupId == gid && m.UserId == senderUserId && m.LeftAt == null, ct);
+            if (!member)
+                throw new ForbiddenDeviceException();
+            // Sentinel recipient = sender device (FK); access gated by GroupId membership.
+            recipientDeviceId = senderDeviceId;
+        }
+        else
+        {
+            var recipient = await _db.Set<Device>()
+                .FirstOrDefaultAsync(
+                    d => d.Id == request.RecipientDeviceId
+                         && d.UserId == request.RecipientUserId
+                         && d.IsActive,
+                    ct)
+                ?? throw new DeviceNotFoundException();
+            recipientDeviceId = recipient.Id;
+        }
 
         var activeCount = await _db.Set<Attachment>().CountAsync(
             a => a.SenderDeviceId == senderDeviceId
@@ -62,7 +82,8 @@ public class AttachmentService : IAttachmentService
         {
             Id = Guid.NewGuid(),
             SenderDeviceId = senderDeviceId,
-            RecipientDeviceId = recipient.Id,
+            RecipientDeviceId = recipientDeviceId,
+            GroupId = groupId,
             PlainSizeBytes = request.SizeBytes,
             ChunkSizeBytes = chunkSize,
             ChunkCount = chunkCount,
@@ -117,7 +138,7 @@ public class AttachmentService : IAttachmentService
         CancellationToken ct = default)
     {
         var attachment = await LoadFreshAsync(attachmentId, ct);
-        AssertParty(attachment, callerDeviceId);
+        await AssertPartyAsync(attachment, callerDeviceId, ct);
         var chunks = await _storage.ListChunksAsync(attachmentId, attachment.ChunkCount, ct);
         return new AttachmentStatusDto(
             attachment.Id,
@@ -162,8 +183,7 @@ public class AttachmentService : IAttachmentService
         CancellationToken ct = default)
     {
         var attachment = await LoadFreshAsync(attachmentId, ct);
-        if (attachment.RecipientDeviceId != recipientDeviceId)
-            throw new ForbiddenDeviceException();
+        await AssertCanDownloadAsync(attachment, recipientDeviceId, ct);
         if (attachment.Status != AttachmentStatus.Ready)
             throw new AttachmentConflictException("Attachment is not ready");
         if (chunkIndex < 0 || chunkIndex >= attachment.ChunkCount)
@@ -188,8 +208,7 @@ public class AttachmentService : IAttachmentService
             .FirstOrDefaultAsync(a => a.Id == attachmentId, ct);
         if (attachment is null)
             return;
-        if (attachment.RecipientDeviceId != recipientDeviceId)
-            throw new ForbiddenDeviceException();
+        await AssertCanDownloadAsync(attachment, recipientDeviceId, ct);
 
         await DeleteStorageAndRowAsync(attachment, ct);
     }
@@ -266,7 +285,47 @@ public class AttachmentService : IAttachmentService
 
     private static void AssertParty(Attachment attachment, Guid deviceId)
     {
+        if (attachment.GroupId is not null)
+            return; // refined in AssertPartyAsync for group attachments
         if (attachment.SenderDeviceId != deviceId && attachment.RecipientDeviceId != deviceId)
+            throw new ForbiddenDeviceException();
+    }
+
+    private async Task AssertPartyAsync(Attachment attachment, Guid deviceId, CancellationToken ct)
+    {
+        if (attachment.GroupId is Guid gid)
+        {
+            var userId = await _db.Set<Device>()
+                .Where(d => d.Id == deviceId)
+                .Select(d => (Guid?)d.UserId)
+                .FirstOrDefaultAsync(ct)
+                ?? throw new ForbiddenDeviceException();
+            var ok = await _db.Set<GroupMember>()
+                .AnyAsync(m => m.GroupId == gid && m.UserId == userId && m.LeftAt == null, ct);
+            if (!ok && attachment.SenderDeviceId != deviceId)
+                throw new ForbiddenDeviceException();
+            return;
+        }
+        AssertParty(attachment, deviceId);
+    }
+
+    private async Task AssertCanDownloadAsync(Attachment attachment, Guid deviceId, CancellationToken ct)
+    {
+        if (attachment.GroupId is Guid gid)
+        {
+            var userId = await _db.Set<Device>()
+                .Where(d => d.Id == deviceId)
+                .Select(d => (Guid?)d.UserId)
+                .FirstOrDefaultAsync(ct)
+                ?? throw new ForbiddenDeviceException();
+            var ok = await _db.Set<GroupMember>()
+                .AnyAsync(m => m.GroupId == gid && m.UserId == userId && m.LeftAt == null, ct);
+            if (!ok)
+                throw new ForbiddenDeviceException();
+            return;
+        }
+        // 1:1: only the designated recipient may download / complete.
+        if (attachment.RecipientDeviceId != deviceId)
             throw new ForbiddenDeviceException();
     }
 

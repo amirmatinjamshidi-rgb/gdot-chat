@@ -32,6 +32,10 @@ import {
   serializeSenderKeyRequest,
   type GroupSystemEvent,
 } from "@/lib/session/group-control-payload";
+import {
+  serializeGroupControlPayload,
+  type GroupControlEvent,
+} from "@/lib/protocol/payload";
 
 export type DistributeFn = (args: {
   recipientUserId: string;
@@ -232,17 +236,16 @@ export class GroupSenderKeyService {
   }
 
   /**
-   * Encrypt + fan-out via Groups API.
-   * Returns first envelope id for local bookkeeping.
+   * Encrypt arbitrary plaintext + fan-out via Groups API (Sender Keys).
    */
-  async encryptAndSendGroupText(
+  async encryptAndSendGroupPlaintext(
     groupId: string,
-    text: string,
+    plaintext: string,
   ): Promise<{ envelopeIds: string[] }> {
     const state = await this.ensureOwnSendingKey(groupId);
     const { wire, nextState } = await encryptSenderKey(
       state,
-      textToBytes(text),
+      textToBytes(plaintext),
     );
     await this.deps.store.upsert({
       groupId,
@@ -261,6 +264,32 @@ export class GroupSenderKeyService {
       ciphertextBase64: bytesToBase64(textToBytes(wireJson)),
     });
     return { envelopeIds: result.envelopeIds };
+  }
+
+  async encryptAndSendGroupText(
+    groupId: string,
+    text: string,
+  ): Promise<{ envelopeIds: string[] }> {
+    // Raw text for backwards-compatible decrypt helpers; structured
+    // payloads (media/reaction/control) use encryptAndSendGroupPlaintext.
+    return this.encryptAndSendGroupPlaintext(groupId, text);
+  }
+
+  /** Actor-authenticated membership/control event (E2EE via Sender Keys). */
+  async sendGroupControl(
+    groupId: string,
+    event: GroupControlEvent,
+    opts?: { subjectUserId?: string; name?: string },
+  ): Promise<{ envelopeIds: string[] }> {
+    return this.encryptAndSendGroupPlaintext(
+      groupId,
+      serializeGroupControlPayload({
+        event,
+        actorUserId: this.deps.localUserId,
+        subjectUserId: opts?.subjectUserId,
+        name: opts?.name,
+      }),
+    );
   }
 
   /**
@@ -392,7 +421,7 @@ export class GroupSenderKeyService {
       }
     }
 
-    await this.insertSystemMessage(groupId, change, payload.actorUserId, payload.subjectUserId);
+    // System messages are E2EE group_control payloads from the actor, not SignalR plaintext.
   }
 
   /** New linked device: ensure own key exists and request others' keys. */
@@ -413,21 +442,53 @@ export class GroupSenderKeyService {
     }
   }
 
-  private async insertSystemMessage(
-    groupId: string,
-    change: GroupSystemEvent,
-    actorUserId: string,
-    subjectUserId?: string | null,
-  ): Promise<void> {
+  /**
+   * Apply a verified group_control event as a local system row.
+   * Caller must authenticate the actor (admin / self-leave).
+   */
+  async applyVerifiedGroupControl(args: {
+    groupId: string;
+    event: GroupControlEvent;
+    actorUserId: string;
+    subjectUserId?: string | null;
+    name?: string | null;
+    serverEnvelopeId?: string;
+  }): Promise<void> {
     if (!this.deps.messageStore) return;
+    if (args.event === "renamed") {
+      const actor =
+        (await this.deps.resolveUsername?.(args.actorUserId)) ??
+        args.actorUserId.slice(0, 8);
+      const text = args.name
+        ? `${actor} renamed the group to "${args.name}"`
+        : `${actor} renamed the group`;
+      await this.insertSystemRow(args.groupId, text, args.serverEnvelopeId);
+      return;
+    }
+    const change = args.event as GroupSystemEvent;
     const actor =
-      (await this.deps.resolveUsername?.(actorUserId)) ??
-      actorUserId.slice(0, 8);
-    const subject = subjectUserId
-      ? ((await this.deps.resolveUsername?.(subjectUserId)) ??
-        subjectUserId.slice(0, 8))
+      (await this.deps.resolveUsername?.(args.actorUserId)) ??
+      args.actorUserId.slice(0, 8);
+    const subject = args.subjectUserId
+      ? ((await this.deps.resolveUsername?.(args.subjectUserId)) ??
+        args.subjectUserId.slice(0, 8))
       : null;
     const text = formatGroupSystemMessage(change, actor, subject);
+    await this.insertSystemRow(args.groupId, text, args.serverEnvelopeId);
+  }
+
+  private async insertSystemRow(
+    groupId: string,
+    text: string,
+    serverEnvelopeId?: string,
+  ): Promise<void> {
+    if (!this.deps.messageStore) return;
+    if (serverEnvelopeId) {
+      const existing = await this.deps.messageStore.getByServerEnvelopeId(
+        serverEnvelopeId,
+      );
+      if (existing) return;
+    }
     const now = this.clock();
     const row: LocalMessage = {
       id: randomUUID(),
@@ -438,9 +499,10 @@ export class GroupSenderKeyService {
       plaintext: text,
       status: "sent",
       senderDeviceId: "system",
+      serverEnvelopeId,
       createdAt: now,
     };
     await this.deps.messageStore.insert(row);
-    await this.deps.groupStore.touchPreview?.(groupId, text, now);
+    await this.deps.groupStore.touchPreview(groupId, text, now);
   }
 }

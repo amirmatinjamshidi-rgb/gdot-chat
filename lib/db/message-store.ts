@@ -27,6 +27,7 @@ type MessageRow = {
   message_type: number | null;
   status: string;
   sender_device_id: string;
+  sender_user_id: string | null;
   server_envelope_id: string | null;
   created_at: number;
   attachment_id: string | null;
@@ -44,11 +45,12 @@ function mapRow(row: MessageRow): LocalMessage {
     plaintext: row.plaintext,
     ciphertext: row.ciphertext ?? undefined,
     messageType:
-      row.message_type === 2 || row.message_type === 3
-        ? row.message_type
+      row.message_type === 2 || row.message_type === 3 || row.message_type === 4
+        ? (row.message_type as 2 | 3 | 4)
         : undefined,
     status: row.status as LocalMessage["status"],
     senderDeviceId: row.sender_device_id,
+    senderUserId: row.sender_user_id ?? undefined,
     serverEnvelopeId: row.server_envelope_id ?? undefined,
     createdAt: row.created_at,
     attachmentId: row.attachment_id ?? undefined,
@@ -61,8 +63,8 @@ export class MessageStore implements IMessageStore {
   async insert(m: LocalMessage): Promise<void> {
     await this.db.run(
       `INSERT INTO messages (id, client_id, conversation_id, direction, kind, plaintext,
-        ciphertext, message_type, status, sender_device_id, server_envelope_id, created_at, attachment_id)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        ciphertext, message_type, status, sender_device_id, sender_user_id, server_envelope_id, created_at, attachment_id)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         m.id,
         m.clientId,
@@ -74,6 +76,7 @@ export class MessageStore implements IMessageStore {
         m.messageType ?? null,
         m.status,
         m.senderDeviceId,
+        m.senderUserId ?? null,
         m.serverEnvelopeId ?? null,
         m.createdAt,
         m.attachmentId ?? null,

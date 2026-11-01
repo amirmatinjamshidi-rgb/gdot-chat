@@ -9,6 +9,7 @@ import { SignalRClient } from "@/lib/api/signalr-client";
 import { UsersApi } from "@/lib/api/users-api";
 import { GroupsApi } from "@/lib/api/groups-api";
 import { GroupStore } from "@/lib/db/group-store";
+import { GroupReceiptStore } from "@/lib/db/group-receipt-store";
 import { SenderKeyStore } from "@/lib/db/sender-key-store";
 import { LibSignalAdapter } from "@/lib/crypto/libsignal-adapter";
 import { PreKeyManager } from "@/lib/crypto/pre-key-manager";
@@ -58,6 +59,7 @@ const sessionResetApi = new SessionResetApi(apiClient);
 const usersApi = new UsersApi(apiClient);
 const groupsApi = new GroupsApi(apiClient);
 const groupStore = new GroupStore(sqlCipherDatabase);
+const groupReceiptStore = new GroupReceiptStore(sqlCipherDatabase);
 const senderKeyStore = new SenderKeyStore(sqlCipherDatabase);
 const envelopeQuarantineStore = new EnvelopeQuarantineStore(sqlCipherDatabase);
 const envelopeAttemptStore = new EnvelopeAttemptStore(sqlCipherDatabase);
@@ -165,6 +167,7 @@ const syncService = new SyncService(
     },
     groupSenderKeyService,
     groupStore,
+    groupReceiptStore,
   },
 );
 syncService.setGroupSenderKeyService(groupSenderKeyService);
@@ -176,7 +179,16 @@ const mediaTransfer = new MediaTransferService(
   identityStore,
   (conversation, plaintext) => syncService.encryptAndPost(conversation, plaintext),
   undefined,
-  { outboxStore, mediaBlobCache },
+  {
+    outboxStore,
+    mediaBlobCache,
+    sendGroupPlaintext: (groupId, plaintext) => {
+      if (!groupSenderKeyService) {
+        return Promise.reject(new Error("Group crypto not ready"));
+      }
+      return groupSenderKeyService.encryptAndSendGroupPlaintext(groupId, plaintext);
+    },
+  },
 );
 mediaTransferRef.current = mediaTransfer;
 syncService.setMediaTransfer(mediaTransfer);

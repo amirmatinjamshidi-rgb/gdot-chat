@@ -138,4 +138,134 @@ describe("GroupSenderKeyService", () => {
     });
     expect(result).toBe("missing_key");
   });
+
+  it("sends E2EE group_control and applies verified control as system row", async () => {
+    let now = 9_000_000;
+    const store = new MemorySenderKeyStore();
+    const groupStore = new MemoryGroupStore();
+    const groupId = crypto.randomUUID();
+    const alice = crypto.randomUUID();
+    const aliceDev = crypto.randomUUID();
+    const bob = crypto.randomUUID();
+    const bobDev = crypto.randomUUID();
+    const messages: { plaintext: string; senderDeviceId: string }[] = [];
+
+    await groupStore.upsertGroup({
+      id: groupId,
+      encryptedMetadata: null,
+      createdByUserId: alice,
+      createdAt: now,
+      myRole: "admin",
+      lastMessagePreview: "",
+      lastMessageAt: 0,
+      unreadCount: 0,
+    });
+    for (const [userId, username, role] of [
+      [alice, "alice", "admin"],
+      [bob, "bob", "member"],
+    ] as const) {
+      await groupStore.upsertMember({
+        groupId,
+        userId,
+        username,
+        role,
+        joinedAt: now,
+        leftAt: null,
+      });
+    }
+
+    const sent: { groupId: string; body: unknown }[] = [];
+    const aliceSvc = new GroupSenderKeyService({
+      store,
+      groupStore,
+      groupsApi: mockGroupsApi(sent),
+      localUserId: alice,
+      localDeviceId: aliceDev,
+      clock: () => now,
+      listMemberDevices: async (userId) =>
+        userId === bob ? [{ deviceId: bobDev }] : [{ deviceId: aliceDev }],
+      distribute: async () => undefined,
+      messageStore: {
+        insert: async (m: { plaintext: string; senderDeviceId: string }) => {
+          messages.push({ plaintext: m.plaintext, senderDeviceId: m.senderDeviceId });
+        },
+        getByServerEnvelopeId: async () => null,
+      } as never,
+      resolveUsername: async (id) => (id === alice ? "alice" : id === bob ? "bob" : null),
+    });
+
+    await aliceSvc.rotateOwnSenderKey(groupId);
+    // Share key with bob store clone via distribution parse is heavy; instead applyVerified directly:
+    await aliceSvc.applyVerifiedGroupControl({
+      groupId,
+      event: "removed",
+      actorUserId: alice,
+      subjectUserId: bob,
+      serverEnvelopeId: crypto.randomUUID(),
+    });
+    expect(messages.some((m: { plaintext: string; senderDeviceId: string }) => m.plaintext.includes("removed") && m.senderDeviceId === "system")).toBe(
+      true,
+    );
+
+    await aliceSvc.sendGroupControl(groupId, "removed", { subjectUserId: bob });
+    expect(sent.length).toBeGreaterThan(0);
+  });
+
+
+  it("encryptAndSendGroupPlaintext fans out structured reaction/media payloads", async () => {
+    let now = 11_000_000;
+    const store = new MemorySenderKeyStore();
+    const groupStore = new MemoryGroupStore();
+    const groupId = crypto.randomUUID();
+    const alice = crypto.randomUUID();
+    const aliceDev = crypto.randomUUID();
+    const bob = crypto.randomUUID();
+    const sent: { groupId: string; body: unknown }[] = [];
+
+    await groupStore.upsertGroup({
+      id: groupId,
+      encryptedMetadata: null,
+      createdByUserId: alice,
+      createdAt: now,
+      myRole: "admin",
+      lastMessagePreview: "",
+      lastMessageAt: 0,
+      unreadCount: 0,
+    });
+    await groupStore.upsertMember({
+      groupId,
+      userId: alice,
+      username: "alice",
+      role: "admin",
+      joinedAt: now,
+      leftAt: null,
+    });
+    await groupStore.upsertMember({
+      groupId,
+      userId: bob,
+      username: "bob",
+      role: "member",
+      joinedAt: now,
+      leftAt: null,
+    });
+
+    const aliceSvc = new GroupSenderKeyService({
+      store,
+      groupStore,
+      groupsApi: mockGroupsApi(sent),
+      localUserId: alice,
+      localDeviceId: aliceDev,
+      clock: () => now,
+      listMemberDevices: async () => [{ deviceId: aliceDev }],
+      distribute: async () => undefined,
+    });
+    await aliceSvc.rotateOwnSenderKey(groupId);
+    const before = sent.length;
+    await aliceSvc.encryptAndSendGroupPlaintext(
+      groupId,
+      JSON.stringify({ v: 1, t: "reaction", op: "add", emoji: "👍", targetServerEnvelopeId: crypto.randomUUID() }),
+    );
+    expect(sent.length).toBeGreaterThan(before);
+  });
+
 });

@@ -11,7 +11,7 @@ import { useColors } from "@/stores/theme-store";
 
 export default function GroupInfoScreen() {
   const { id, name } = useLocalSearchParams<{ id: string; name?: string }>();
-  const { groupsApi } = useAppServices();
+  const { syncService, groupsApi } = useAppServices();
   const colors = useColors();
   const router = useRouter();
   const [members, setMembers] = useState<GroupMember[]>([]);
@@ -57,6 +57,13 @@ export default function GroupInfoScreen() {
                 onPress={() => {
                   void (async () => {
                     try {
+                      try {
+                        await syncService.sendGroupControl(id!, "removed", {
+                          subjectUserId: item.userId,
+                        });
+                      } catch {
+                        // best-effort authenticated notice before membership cut
+                      }
                       await groupsApi.removeMember(id!, item.userId);
                       await refresh();
                     } catch (e) {
@@ -77,6 +84,11 @@ export default function GroupInfoScreen() {
           testID="leave-group"
           onPress={() => {
             void (async () => {
+              try {
+                await syncService.sendGroupControl(id!, "left");
+              } catch {
+                // best-effort
+              }
               await groupsApi.leave(id!);
               router.replace("/(tabs)/chats");
             })();

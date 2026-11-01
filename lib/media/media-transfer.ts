@@ -48,6 +48,8 @@ export type SendMediaInput = {
   durationMs?: number;
   width?: number;
   height?: number;
+  /** When set, create a group-scoped attachment and send Signal payload via Sender Keys. */
+  groupId?: string;
 };
 
 export type MediaFileAccess = {
@@ -63,6 +65,11 @@ export type MediaTransferExtras = {
   outboxStore?: IOutboxStore;
   mediaBlobCache?: IMediaBlobCache;
   clock?: Clock;
+  /** Group fan-out for media Signal payload (Sender Keys). */
+  sendGroupPlaintext?: (
+    groupId: string,
+    plaintext: string,
+  ) => Promise<{ envelopeIds: string[] }>;
 };
 
 export class MediaTransferService {
@@ -70,6 +77,9 @@ export class MediaTransferService {
   private readonly outboxStore: IOutboxStore | null;
   private readonly mediaBlobCache: IMediaBlobCache | null;
   private readonly clock: Clock;
+  private sendGroupPlaintext:
+    | ((groupId: string, plaintext: string) => Promise<{ envelopeIds: string[] }>)
+    | null;
 
   constructor(
     private readonly attachmentsApi: AttachmentsApi,
@@ -91,12 +101,31 @@ export class MediaTransferService {
     this.outboxStore = extras?.outboxStore ?? null;
     this.mediaBlobCache = extras?.mediaBlobCache ?? null;
     this.clock = extras?.clock ?? systemClock;
+    this.sendGroupPlaintext = extras?.sendGroupPlaintext ?? null;
+  }
+
+  setGroupPlaintextSender(
+    fn: ((groupId: string, plaintext: string) => Promise<{ envelopeIds: string[] }>) | null,
+  ): void {
+    this.sendGroupPlaintext = fn;
   }
 
   async sendOutgoingMedia(input: SendMediaInput): Promise<void> {
-    const conversation = await this.conversationStore.getById(
+    let conversation = await this.conversationStore.getById(
       input.conversationId,
     );
+    if (!conversation && input.groupId) {
+      const localId = await this.identityStore.getLocalIdentity();
+      conversation = {
+        id: input.groupId,
+        peerUserId: localId?.userId ?? "group",
+        peerUsername: "group",
+        peerDeviceId: localId?.deviceId ?? "local-device",
+        lastMessagePreview: "",
+        lastMessageAt: 0,
+        unreadCount: 0,
+      };
+    }
     if (!conversation) throw new Error("Conversation not found");
     const local = await this.identityStore.getLocalIdentity();
     const source = await this.files.openExistingFile(input.uri);
@@ -150,6 +179,7 @@ export class MediaTransferService {
         recipientUserId: conversation.peerUserId,
         recipientDeviceId: conversation.peerDeviceId,
         sizeBytes: size,
+        ...(input.groupId ? { groupId: input.groupId } : {}),
       });
 
       const row: LocalAttachment = {
@@ -185,6 +215,7 @@ export class MediaTransferService {
         clientId,
         createdAt,
         encryptedBlob,
+        input.groupId,
       );
     } catch (e) {
       await this.messageStore.updateStatus(messageId, "failed");
@@ -204,9 +235,10 @@ export class MediaTransferService {
     conversation: Conversation;
     payload: MediaPayload;
     senderDeviceId: string;
+    senderUserId?: string;
     serverEnvelopeId: string;
     createdAt: number;
-    messageType: 2 | 3;
+    messageType: 2 | 3 | 4;
   }): Promise<void> {
     const existing = await this.messageStore.getByServerEnvelopeId(
       params.serverEnvelopeId,
@@ -247,6 +279,7 @@ export class MediaTransferService {
       messageType: params.messageType,
       status: transferState === "failed" ? "download_failed" : "delivered",
       senderDeviceId: params.senderDeviceId,
+      senderUserId: params.senderUserId,
       createdAt: params.createdAt,
       serverEnvelopeId: params.serverEnvelopeId,
       attachmentId: params.payload.attachmentId,
@@ -435,6 +468,7 @@ export class MediaTransferService {
     clientMessageId: string,
     createdAt: number,
     encryptedBlob: Uint8Array,
+    groupId?: string,
   ): Promise<void> {
     const descriptor: MediaPayload = {
       v: 1,
@@ -454,21 +488,31 @@ export class MediaTransferService {
       clientMessageId,
     };
     await this.messageStore.updateStatus(messageId, "sending");
-    const sent = await this.sendSignal(
-      conversation,
-      serializeMediaPayload(descriptor),
-    );
-    await this.messageStore.updateServerEnvelopeId(messageId, sent.envelopeId);
+    const plaintext = serializeMediaPayload(descriptor);
+    let envelopeId: string;
+    if (groupId) {
+      if (!this.sendGroupPlaintext) {
+        throw new Error("Group media sender is not configured");
+      }
+      const result = await this.sendGroupPlaintext(groupId, plaintext);
+      envelopeId = result.envelopeIds[0] ?? clientMessageId;
+    } else {
+      const sent = await this.sendSignal(conversation, plaintext);
+      envelopeId = sent.envelopeId;
+    }
+    await this.messageStore.updateServerEnvelopeId(messageId, envelopeId);
     await this.messageStore.updateStatus(messageId, "sent");
     await this.attachmentStore.updateTransfer(row.attachmentId, {
       transferState: "available",
       localUri: row.localUri ?? row.sourceUri,
     });
-    await this.conversationStore.upsert({
-      ...conversation,
-      lastMessagePreview: mediaPreviewLabel(row.kind),
-      lastMessageAt: createdAt,
-    });
+    if (!groupId) {
+      await this.conversationStore.upsert({
+        ...conversation,
+        lastMessagePreview: mediaPreviewLabel(row.kind),
+        lastMessageAt: createdAt,
+      });
+    }
 
     let blobCached = false;
     if (this.mediaBlobCache && encryptedBlob.byteLength > 0) {
@@ -479,14 +523,14 @@ export class MediaTransferService {
       );
       blobCached = result === "stored";
     }
-    if (this.outboxStore) {
+    if (this.outboxStore && !groupId) {
       await this.outboxStore.upsertPending({
         clientMessageId,
         localMessageId: messageId,
         conversationId: conversation.id,
         peerUserId: conversation.peerUserId,
         peerDeviceId: conversation.peerDeviceId,
-        plaintext: serializeMediaPayload(descriptor),
+        plaintext,
         payloadKind: "media",
         mediaAttachmentId: row.attachmentId,
         mediaBlobCached: blobCached,

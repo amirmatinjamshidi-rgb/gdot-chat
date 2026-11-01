@@ -100,6 +100,15 @@ export default function CreateGroupScreen() {
           leftAt: null,
         });
         await groupSenderKeyService.rotateOwnSenderKey(group.id);
+        for (const s of selected) {
+          try {
+            await groupSenderKeyService.sendGroupControl(group.id, "added", {
+              subjectUserId: s.userId,
+            });
+          } catch {
+            // best-effort
+          }
+        }
       }
       router.replace({
         pathname: "/GroupRoom" as never,

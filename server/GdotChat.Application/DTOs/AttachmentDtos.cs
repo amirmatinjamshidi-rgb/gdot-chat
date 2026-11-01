@@ -3,7 +3,8 @@ namespace GdotChat.Application.DTOs;
 public record CreateAttachmentRequest(
     Guid RecipientUserId,
     Guid RecipientDeviceId,
-    long SizeBytes);
+    long SizeBytes,
+    Guid? GroupId = null);
 
 public record CreateAttachmentResponse(
     Guid AttachmentId,

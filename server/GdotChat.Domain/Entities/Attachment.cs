@@ -9,6 +9,9 @@ public class Attachment
     public Device SenderDevice { get; set; } = null!;
     public Guid RecipientDeviceId { get; set; }
     public Device RecipientDevice { get; set; } = null!;
+    /// <summary>When set, any current group member may download; recipient device is a sentinel.</summary>
+    public Guid? GroupId { get; set; }
+    public ChatGroup? Group { get; set; }
     public long PlainSizeBytes { get; set; }
     public int ChunkSizeBytes { get; set; }
     public int ChunkCount { get; set; }

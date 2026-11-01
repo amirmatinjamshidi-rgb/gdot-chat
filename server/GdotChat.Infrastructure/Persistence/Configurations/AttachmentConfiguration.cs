@@ -18,5 +18,7 @@ public class AttachmentConfiguration : IEntityTypeConfiguration<Attachment>
         builder.HasIndex(a => new { a.SenderDeviceId, a.Status });
         builder.HasOne(a => a.SenderDevice).WithMany().HasForeignKey(a => a.SenderDeviceId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(a => a.RecipientDevice).WithMany().HasForeignKey(a => a.RecipientDeviceId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(a => a.Group).WithMany().HasForeignKey(a => a.GroupId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasIndex(a => a.GroupId);
     }
 }

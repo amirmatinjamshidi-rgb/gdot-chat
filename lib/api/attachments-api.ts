@@ -5,6 +5,8 @@ export interface CreateAttachmentRequest {
   recipientUserId: string;
   recipientDeviceId: string;
   sizeBytes: number;
+  /** When set, any current group member may download. */
+  groupId?: string;
 }
 
 export interface CreateAttachmentResponse {

@@ -18,8 +18,12 @@ import type { MediaTransferService } from "@/lib/media/media-transfer";
 import {
   parseSignalPlaintext,
   serializeReceiptPayload,
+  type GroupControlPayload,
   type ReactionOp,
+  type ReceiptPayload,
 } from "@/lib/protocol/payload";
+import type { IGroupStore } from "@/lib/db/group-store";
+import type { IGroupReceiptStore } from "@/lib/db/group-receipt-store";
 import { useMediaStore } from "@/stores/media-store";
 
 import {
@@ -94,6 +98,17 @@ export type InboundProcessorDeps = {
   }) => Promise<{ text: string } | "missing_key" | "failed">;
   /** Ingest sender_key_distribution plaintext from a 1:1 Signal session. */
   ingestSenderKeyDistribution?: (plaintext: string) => Promise<boolean>;
+  groupStore?: IGroupStore | null;
+  groupReceiptStore?: IGroupReceiptStore | null;
+  applyGroupControl?: (args: {
+    groupId: string;
+    event: GroupControlPayload["event"];
+    actorUserId: string;
+    subjectUserId?: string | null;
+    name?: string | null;
+    serverEnvelopeId?: string;
+  }) => Promise<void>;
+  localUserId?: () => string | null | Promise<string | null>;
 };
 
 export class InboundEnvelopeProcessor {
@@ -490,9 +505,10 @@ export class InboundEnvelopeProcessor {
         conversation,
         payload: parsed.payload,
         senderDeviceId: env.senderDeviceId,
+        senderUserId: env.senderUserId,
         serverEnvelopeId: env.id,
         createdAt: Date.parse(env.createdAt) || this.clock(),
-        messageType: env.messageType as 2 | 3,
+        messageType: (env.messageType === 4 ? 4 : env.messageType) as 2 | 3 | 4,
       });
       if (!opts?.skipAck) await this.deps.messagesApi.ack(env.id);
       if (useMediaStore.getState().autoDownloadPolicy !== "never") {
@@ -504,7 +520,12 @@ export class InboundEnvelopeProcessor {
     }
 
     if (parsed.kind === "receipt") {
-      await this.applyIncomingReceipt(conversation, parsed.payload.messageIds);
+      await this.applyIncomingReceipt(
+        conversation,
+        parsed.payload,
+        env.senderUserId,
+        env.senderDeviceId,
+      );
       if (!opts?.skipAck) await this.deps.messagesApi.ack(env.id);
       return;
     }
@@ -512,11 +533,24 @@ export class InboundEnvelopeProcessor {
     if (parsed.kind === "reaction") {
       await this.applyIncomingReaction(
         conversation,
-        conversation.peerUserId,
+        env.senderUserId || conversation.peerUserId,
         parsed.payload.op,
         parsed.payload.emoji,
         parsed.payload.targetServerEnvelopeId,
       );
+      if (!opts?.skipAck) await this.deps.messagesApi.ack(env.id);
+      return;
+    }
+
+    if (parsed.kind === "group_control") {
+      if (env.groupId) {
+        await this.applyIncomingGroupControl(
+          env.groupId,
+          env.senderUserId,
+          parsed.payload,
+          env.id,
+        );
+      }
       if (!opts?.skipAck) await this.deps.messagesApi.ack(env.id);
       return;
     }
@@ -529,7 +563,7 @@ export class InboundEnvelopeProcessor {
     if (clientMessageId) {
       const existing = await this.deps.messageStore.getByClientId(clientMessageId);
       if (existing) {
-        await this.maybeSendDeliveryReceipt(conversation, [clientMessageId]);
+        await this.maybeSendDeliveryReceipt(conversation, [clientMessageId], env.groupId);
         if (!opts?.skipAck) await this.deps.messagesApi.ack(env.id);
         return;
       }
@@ -542,9 +576,10 @@ export class InboundEnvelopeProcessor {
       direction: "incoming",
       kind: "text",
       plaintext: text,
-      messageType: env.messageType as 2 | 3,
+      messageType: (env.messageType === 4 ? 4 : env.messageType) as 2 | 3 | 4,
       status: "delivered",
       senderDeviceId: env.senderDeviceId,
+      senderUserId: env.senderUserId,
       serverEnvelopeId: env.id,
       createdAt: Date.parse(env.createdAt) || this.clock(),
     };
@@ -556,7 +591,7 @@ export class InboundEnvelopeProcessor {
       unreadCount: conversation.unreadCount + 1,
     });
     if (clientMessageId) {
-      await this.maybeSendDeliveryReceipt(conversation, [clientMessageId]);
+      await this.maybeSendDeliveryReceipt(conversation, [clientMessageId], env.groupId);
     }
     if (!opts?.skipAck) await this.deps.messagesApi.ack(env.id);
   }
@@ -622,21 +657,37 @@ export class InboundEnvelopeProcessor {
 
   private async applyIncomingReceipt(
     conversation: Conversation,
-    messageIds: string[],
+    payload: ReceiptPayload,
+    senderUserId: string,
+    senderDeviceId: string,
   ): Promise<void> {
+    const kind = payload.kind ?? "delivered";
     const outbox = this.deps.outboxStore;
     const now = this.clock();
-    for (const clientMessageId of messageIds) {
+    const groupId = payload.groupId;
+
+    for (const clientMessageId of payload.messageIds) {
+      if (groupId && this.deps.groupReceiptStore) {
+        await this.deps.groupReceiptStore.upsert({
+          groupId,
+          clientMessageId,
+          fromUserId: senderUserId,
+          fromDeviceId: senderDeviceId,
+          kind,
+          at: now,
+        });
+      }
       const local = await this.deps.messageStore.getByClientId(clientMessageId);
       if (
         local &&
         local.direction === "outgoing" &&
+        (kind === "delivered" || kind === "read") &&
         local.status !== "delivered"
       ) {
         await this.deps.messageStore.updateStatus(local.id, "delivered");
         this.deps.onMessageDelivered?.(conversation.id, local.id);
       }
-      if (outbox) {
+      if (outbox && kind === "delivered") {
         await outbox.markReceipted(clientMessageId, now);
       }
     }
@@ -645,13 +696,47 @@ export class InboundEnvelopeProcessor {
     }
   }
 
+  private async applyIncomingGroupControl(
+    groupId: string,
+    senderUserId: string,
+    payload: GroupControlPayload,
+    serverEnvelopeId: string,
+  ): Promise<void> {
+    if (payload.actorUserId !== senderUserId) return;
+
+    if (payload.event === "left") {
+      const subject = payload.subjectUserId ?? payload.actorUserId;
+      if (subject !== payload.actorUserId) return;
+    } else {
+      const members = await this.deps.groupStore?.listMembers(groupId, false);
+      const actor = members?.find((m) => m.userId === payload.actorUserId);
+      const group = await this.deps.groupStore?.getGroup(groupId);
+      const localId = (await this.deps.localUserId?.()) ?? "";
+      const actorIsAdmin =
+        actor?.role === "admin" ||
+        group?.createdByUserId === payload.actorUserId ||
+        (group?.myRole === "admin" && payload.actorUserId === localId);
+      if (!actorIsAdmin) return;
+    }
+
+    await this.deps.applyGroupControl?.({
+      groupId,
+      event: payload.event,
+      actorUserId: payload.actorUserId,
+      subjectUserId: payload.subjectUserId,
+      name: payload.name,
+      serverEnvelopeId,
+    });
+  }
+
   private async maybeSendDeliveryReceipt(
     conversation: Conversation,
     messageIds: string[],
+    groupId?: string | null,
   ): Promise<void> {
     if (messageIds.length === 0) return;
     const retry = this.deps.receiptRetry;
-    if (retry) {
+    if (retry && !groupId) {
       await retry.enqueueAndFlush(conversation, messageIds);
       return;
     }
@@ -659,7 +744,10 @@ export class InboundEnvelopeProcessor {
     try {
       await this.deps.sendEncrypted(
         conversation,
-        serializeReceiptPayload(messageIds),
+        serializeReceiptPayload(messageIds, {
+          kind: "delivered",
+          ...(groupId ? { groupId } : {}),
+        }),
       );
     } catch (e) {
       if (__DEV__) {
