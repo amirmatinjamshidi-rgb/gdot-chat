@@ -9,8 +9,12 @@ export interface ICryptoKeyStore {
   saveSignedPreKey(key: SignedPreKey): Promise<void>;
   getOneTimePreKey(keyId: number): Promise<PreKey | null>;
   saveOneTimePreKeys(keys: PreKey[]): Promise<void>;
+  /** Mark OTK consumed and clear private key material so it cannot be loaded again. */
+  removeOneTimePreKey(keyId: number): Promise<void>;
   getNextOtkKeyId(): Promise<number>;
   setNextOtkKeyId(nextId: number): Promise<void>;
+  /** Next signed-pre-key id (max existing signed key_id + 1, or 1). */
+  getNextSignedPreKeyId(): Promise<number>;
 }
 
 type PreKeyRow = {
@@ -86,6 +90,22 @@ export class CryptoKeyStore implements ICryptoKeyStore {
         );
       }
     });
+  }
+
+  async removeOneTimePreKey(keyId: number): Promise<void> {
+    await this.db.run(
+      `UPDATE crypto_prekeys
+       SET consumed = 1, private_key = X''
+       WHERE key_type = 'onetime' AND key_id = ?`,
+      [keyId],
+    );
+  }
+
+  async getNextSignedPreKeyId(): Promise<number> {
+    const row = await this.db.getFirst<{ m: number | null }>(
+      `SELECT MAX(key_id) AS m FROM crypto_prekeys WHERE key_type = 'signed'`,
+    );
+    return (row?.m ?? 0) + 1;
   }
 
   async getNextOtkKeyId(): Promise<number> {

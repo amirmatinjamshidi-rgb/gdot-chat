@@ -129,7 +129,9 @@ export class SignalProtocolStore implements StorageType {
   }
 
   async removePreKey(keyId: number | string): Promise<void> {
-    void keyId;
+    const id = typeof keyId === "string" ? parseInt(keyId, 10) : keyId;
+    if (!Number.isFinite(id)) return;
+    await this.cryptoKeyStore.removeOneTimePreKey(id);
   }
 
   async storeSession(

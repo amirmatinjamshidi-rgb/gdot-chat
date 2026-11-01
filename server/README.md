@@ -7,32 +7,52 @@ ASP.NET Core 8 ciphertext relay API compatible with the Expo client (`lib/api/`)
 - [.NET 8 SDK](https://dotnet.microsoft.com/download)
 - [Docker](https://www.docker.com/) (for PostgreSQL and integration tests)
 
+## Secrets (do not commit)
 
-## JWT signing key
+The API **does not** store database passwords, MinIO keys, or `Jwt:SigningKey` in committed `appsettings*.json`.
 
-The API **does not** store `Jwt:SigningKey` in `appsettings.json`. Provide it via environment or user-secrets (32+ characters):
+Provide them via environment variables or .NET user-secrets:
 
 ```powershell
-# Environment (PowerShell)
+# PostgreSQL (full connection string including Password=)
+$env:ConnectionStrings__Default = "Host=localhost;Port=5433;Database=gdotchat;Username=gdot;Password=YOUR_DB_PASSWORD"
+
+# MinIO
+$env:Minio__AccessKey = "YOUR_MINIO_ACCESS_KEY"
+$env:Minio__SecretKey = "YOUR_MINIO_SECRET_KEY"
+
+# JWT (32+ characters)
 $env:Jwt__SigningKey = "paste-a-long-random-secret-at-least-32-chars"
 
-# Or .NET user-secrets (Development)
+# Or user-secrets (Development)
+dotnet user-secrets set "ConnectionStrings:Default" "Host=localhost;Port=5433;Database=gdotchat;Username=gdot;Password=YOUR_DB_PASSWORD" --project GdotChat.Api
+dotnet user-secrets set "Minio:AccessKey" "YOUR_MINIO_ACCESS_KEY" --project GdotChat.Api
+dotnet user-secrets set "Minio:SecretKey" "YOUR_MINIO_SECRET_KEY" --project GdotChat.Api
 dotnet user-secrets set "Jwt:SigningKey" "paste-a-long-random-secret-at-least-32-chars" --project GdotChat.Api
 ```
 
-Docker / compose: set `Jwt__SigningKey` in the API service environment.
+Docker / compose: set the same variables on the API service. Compose may still define local-only defaults for the Postgres/MinIO *containers* — change those for any shared or exposed environment.
 
-**Local Development shortcut:** `appsettings.Development.json` may set `Jwt:UseEphemeralDevelopmentSigningKey` to `true`. That enables a fixed in-process ephemeral key defined only in code — never use that flag in staging/production.
+Startup **fails fast** if:
 
-Startup **fails fast** if the signing key is missing or shorter than 32 characters (except Testing, which uses a test key, and Development with the ephemeral flag).
+- `ConnectionStrings:Default` is missing or has an empty `Password` (except Testing)
+- `Minio:AccessKey` / `Minio:SecretKey` are missing (except Testing, which uses in-memory attachment storage)
+- `Jwt:SigningKey` is missing or shorter than 32 characters (except Testing, and Development with the ephemeral flag)
+
+**Local Development JWT shortcut:** `appsettings.Development.json` may set `Jwt:UseEphemeralDevelopmentSigningKey` to `true`. That enables a fixed in-process ephemeral key defined only in code — never use that flag in staging/production.
 
 SignalR WebSocket clients still send the JWT as `?access_token=` (browser/RN limitation). The server accepts that query value **only** on `/hubs/*`, moves it into `HttpContext.Items`, and strips it from the query string before request logging so the token is not written to access logs. Prefer `accessTokenFactory` on the client (already used) so LongPolling/SSE can use the Authorization header when the transport allows it.
+
+## Rate limits
+
+Configurable under `RateLimits` in config / env (`RateLimits__AuthRefreshPermitLimit`, etc.). Integration tests set high limits by default; dedicated rate-limit tests override them.
 
 ## Quick start
 
 ```powershell
 cd server
 docker compose up -d
+# Set ConnectionStrings__Default, Minio__*, Jwt__SigningKey (see above)
 dotnet ef database update -p GdotChat.Infrastructure -s GdotChat.Api
 dotnet run --project GdotChat.Api
 ```
@@ -50,22 +70,18 @@ MinIO is bound to **127.0.0.1:9000** (S3 API) and **127.0.0.1:9001** (console). 
 | Key | Purpose |
 |-----|---------|
 | `Minio:Endpoint` | `127.0.0.1:9000` |
-| `Minio:AccessKey` / `Minio:SecretKey` | local credentials from env / `appsettings.json` |
+| `Minio:AccessKey` / `Minio:SecretKey` | from env / user-secrets only |
 | `Minio:Bucket` | `gdot-attachments` |
 | `Minio:UseServerSideEncryption` | `false` locally; enable with KMS in production |
 | `Attachments:MaxSizeBytes` | default 1 GiB |
 | `Attachments:ChunkSizeBytes` | default 4 MiB |
 | `Attachments:TtlDays` | default 7 |
 
-Override secrets with environment variables (`Minio__AccessKey`, `Minio__SecretKey`, `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`). Do not expose MinIO ports on `0.0.0.0`.
-
-Default connection string (see `GdotChat.Api/appsettings.json`):
-
-`Host=localhost;Port=5433;Database=gdotchat;Username=gdot;Password=gdot_dev`
+Do not expose MinIO ports on `0.0.0.0`.
 
 ## Client configuration
 
-Set the Expo env var to reach the API from a device or emulator:
+Set the Expo env var (see root `.env.example`) to reach the API from a device or emulator:
 
 | Target | `EXPO_PUBLIC_API_URL` |
 |--------|------------------------|
@@ -95,7 +111,7 @@ dotnet test
 - `GdotChat.Application` — services, DTOs, interfaces
 - `GdotChat.Domain` — entities, exceptions
 - `GdotChat.Infrastructure` — EF Core, JWT, SignalR, background workers
-- `GdotChat.Tests` — integration tests
+- `GdotChat.Tests` — integration / E2E-style API tests
 
 ## Manual E2E checklist (T1/T2)
 

@@ -54,3 +54,14 @@ public class InvalidAttachmentRequestException : Exception
 {
     public InvalidAttachmentRequestException(string message) : base(message) { }
 }
+
+public class WeakPasswordException : Exception
+{
+    public WeakPasswordException(string message) : base(message) { }
+}
+
+public class RefreshTokenReuseException : Exception
+{
+    public RefreshTokenReuseException() : base("Refresh token reuse detected") { }
+}
+

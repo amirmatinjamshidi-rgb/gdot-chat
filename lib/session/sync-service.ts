@@ -109,6 +109,14 @@ export class SyncService {
       return;
     }
 
+    this.signalr.setPreKeysLowHandler(() => {
+      void this.signalService.replenishLocalPreKeysIfNeeded().catch((e) => {
+        console.warn(
+          "[SyncService] PreKeysLow replenish failed",
+          e instanceof Error ? e.message : e,
+        );
+      });
+    });
     this.signalr.setEnvelopeHandler(() => {
       this.schedulePullPending();
     });
@@ -135,6 +143,7 @@ export class SyncService {
     this.stopPolling();
     this.signalr.setEnvelopeHandler(null);
     this.signalr.setConnectionHandler(null);
+    this.signalr.setPreKeysLowHandler(null);
     this.signalRConnected = false;
     await this.signalr.disconnect();
   }

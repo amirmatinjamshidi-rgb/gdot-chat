@@ -16,6 +16,9 @@ public sealed class AttachmentRelayTests
 
     public AttachmentRelayTests(GdotChatWebApplicationFactory factory) => _factory = factory;
 
+    /// <summary>
+    /// Security regression: wrong party cannot upload/download; media key never persisted server-side.
+    /// </summary>
     [Fact]
     public async Task UploadDownload_RejectsWrongParty_AndNeverStoresKey()
     {

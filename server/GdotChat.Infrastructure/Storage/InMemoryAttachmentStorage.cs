@@ -3,26 +3,29 @@ using GdotChat.Application.Interfaces;
 
 namespace GdotChat.Infrastructure.Storage;
 
+/// <summary>
+/// Test/dev in-memory blob store. Must use async stream IO — ASP.NET TestHost/Kestrel
+/// disallow synchronous reads/writes on request/response bodies by default.
+/// </summary>
 public sealed class InMemoryAttachmentStorage : IAttachmentStorage
 {
     private readonly ConcurrentDictionary<string, byte[]> _objects = new();
 
-    public Task PutChunkAsync(
+    public async Task PutChunkAsync(
         Guid attachmentId,
         int chunkIndex,
         Stream ciphertext,
         long sizeBytes,
         CancellationToken ct = default)
     {
-        using var ms = new MemoryStream();
-        ciphertext.CopyTo(ms);
+        await using var ms = new MemoryStream();
+        await ciphertext.CopyToAsync(ms, ct);
         if (ms.Length != sizeBytes)
             throw new InvalidOperationException("chunk stream length mismatch");
         _objects[Key(attachmentId, chunkIndex)] = ms.ToArray();
-        return Task.CompletedTask;
     }
 
-    public Task GetChunkAsync(
+    public async Task GetChunkAsync(
         Guid attachmentId,
         int chunkIndex,
         Stream destination,
@@ -30,8 +33,7 @@ public sealed class InMemoryAttachmentStorage : IAttachmentStorage
     {
         if (!_objects.TryGetValue(Key(attachmentId, chunkIndex), out var bytes))
             throw new FileNotFoundException("chunk missing");
-        destination.Write(bytes, 0, bytes.Length);
-        return Task.CompletedTask;
+        await destination.WriteAsync(bytes.AsMemory(0, bytes.Length), ct);
     }
 
     public Task<bool> ChunkExistsAsync(

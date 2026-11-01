@@ -2,6 +2,7 @@ using GdotChat.Api.Extensions;
 using GdotChat.Application.DTOs;
 using GdotChat.Application.Interfaces;
 using GdotChat.Application.Mapping;
+using GdotChat.Application.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -15,11 +16,16 @@ public class UsersController : ControllerBase
 {
     private readonly IUserService _userService;
     private readonly IDeviceService _deviceService;
+    private readonly IPreKeyBundleRateLimiter _preKeyBundleRateLimiter;
 
-    public UsersController(IUserService userService, IDeviceService deviceService)
+    public UsersController(
+        IUserService userService,
+        IDeviceService deviceService,
+        IPreKeyBundleRateLimiter preKeyBundleRateLimiter)
     {
         _userService = userService;
         _deviceService = deviceService;
+        _preKeyBundleRateLimiter = preKeyBundleRateLimiter;
     }
 
     [EnableRateLimiting("users-search")]
@@ -47,6 +53,12 @@ public class UsersController : ControllerBase
     public async Task<ActionResult<PreKeyBundleDto>> GetPreKeyBundleAsync(
         Guid userId,
         Guid deviceId,
-        CancellationToken ct) =>
-        Ok(await _deviceService.GetPreKeyBundleAsync(userId, deviceId, ct));
+        CancellationToken ct)
+    {
+        var callerUserId = User.GetUserId().ToString("D");
+        if (!_preKeyBundleRateLimiter.TryAcquire(callerUserId, userId, deviceId))
+            return StatusCode(StatusCodes.Status429TooManyRequests);
+
+        return Ok(await _deviceService.GetPreKeyBundleAsync(userId, deviceId, ct));
+    }
 }

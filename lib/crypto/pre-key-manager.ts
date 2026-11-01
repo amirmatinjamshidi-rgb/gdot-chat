@@ -16,7 +16,10 @@ export class PreKeyManager {
     private readonly devicesApi: DevicesApi,
   ) {}
 
-  /** Upload a fresh batch of one-time pre-keys for this device. */
+  /**
+   * Upload a fresh signed pre-key (new keyId) plus a batch of one-time pre-keys.
+   * Always rotates the signed pre-key id so server unique (deviceId, keyId) is not hit.
+   */
   async replenishOneTimePreKeys(): Promise<void> {
     const local = await this.identityStore.getLocalIdentity();
     if (!local) throw new Error("Local identity missing");
@@ -29,12 +32,12 @@ export class PreKeyManager {
       privateKey: identityPrivate,
     };
 
-    const signed = await this.cryptoKeyStore.getSignedPreKey(1);
-    let signedPreKey = signed;
-    if (!signedPreKey) {
-      signedPreKey = await this.crypto.generateSignedPreKey(identityPair, 1);
-      await this.cryptoKeyStore.saveSignedPreKey(signedPreKey);
-    }
+    const nextSpkId = await this.cryptoKeyStore.getNextSignedPreKeyId();
+    const signedPreKey = await this.crypto.generateSignedPreKey(
+      identityPair,
+      nextSpkId,
+    );
+    await this.cryptoKeyStore.saveSignedPreKey(signedPreKey);
 
     const startId = await this.cryptoKeyStore.getNextOtkKeyId();
     const oneTimePreKeys = await this.crypto.generatePreKeys(
@@ -42,9 +45,7 @@ export class PreKeyManager {
       REPLENISH_COUNT,
     );
     await this.cryptoKeyStore.saveOneTimePreKeys(oneTimePreKeys);
-    await this.cryptoKeyStore.setNextOtkKeyId(
-      startId + REPLENISH_COUNT,
-    );
+    await this.cryptoKeyStore.setNextOtkKeyId(startId + REPLENISH_COUNT);
 
     const body: UploadPreKeysRequest = {
       signedPreKey: {

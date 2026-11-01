@@ -17,6 +17,7 @@ builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptio
 builder.Services.Configure<RelayOptions>(builder.Configuration.GetSection(RelayOptions.SectionName));
 builder.Services.Configure<AttachmentOptions>(builder.Configuration.GetSection(AttachmentOptions.SectionName));
 builder.Services.Configure<MinioOptions>(builder.Configuration.GetSection(MinioOptions.SectionName));
+builder.Services.Configure<RateLimitOptions>(builder.Configuration.GetSection(RateLimitOptions.SectionName));
 
 var attachmentOptions = builder.Configuration.GetSection(AttachmentOptions.SectionName).Get<AttachmentOptions>()
     ?? new AttachmentOptions();
@@ -27,7 +28,7 @@ builder.WebHost.ConfigureKestrel(kestrel =>
         attachmentOptions.ChunkSizeBytes + AttachmentOptions.GcmTagBytes + 1_048_576);
 });
 
-builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddInfrastructure(builder.Configuration, builder.Environment);
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
@@ -118,7 +119,8 @@ builder.Services.AddCors(options =>
         policy.AllowAnyHeader().AllowAnyMethod().AllowAnyOrigin());
 });
 
-var isTesting = builder.Environment.IsEnvironment("Testing");
+var rateLimitOptions = builder.Configuration.GetSection(RateLimitOptions.SectionName).Get<RateLimitOptions>()
+    ?? new RateLimitOptions();
 
 builder.Services.AddRateLimiter(options =>
 {
@@ -129,8 +131,9 @@ builder.Services.AddRateLimiter(options =>
             httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
             _ => new FixedWindowRateLimiterOptions
             {
-                PermitLimit = isTesting ? int.MaxValue : 5,
-                Window = TimeSpan.FromHours(1),
+                PermitLimit = rateLimitOptions.AuthRegisterPermitLimit,
+                Window = TimeSpan.FromSeconds(Math.Max(1, rateLimitOptions.AuthRegisterWindowSeconds)),
+                QueueLimit = 0,
             }));
 
     options.AddPolicy("auth-login", httpContext =>
@@ -138,8 +141,19 @@ builder.Services.AddRateLimiter(options =>
             httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
             _ => new FixedWindowRateLimiterOptions
             {
-                PermitLimit = isTesting ? int.MaxValue : 20,
-                Window = TimeSpan.FromHours(1),
+                PermitLimit = rateLimitOptions.AuthLoginPermitLimit,
+                Window = TimeSpan.FromSeconds(Math.Max(1, rateLimitOptions.AuthLoginWindowSeconds)),
+                QueueLimit = 0,
+            }));
+
+    options.AddPolicy("auth-refresh", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = rateLimitOptions.AuthRefreshPermitLimit,
+                Window = TimeSpan.FromSeconds(Math.Max(1, rateLimitOptions.AuthRefreshWindowSeconds)),
+                QueueLimit = 0,
             }));
 
     options.AddPolicy("messages-send", httpContext =>
@@ -147,8 +161,9 @@ builder.Services.AddRateLimiter(options =>
             httpContext.User.FindFirst("device_id")?.Value ?? "anon",
             _ => new FixedWindowRateLimiterOptions
             {
-                PermitLimit = isTesting ? int.MaxValue : 60,
+                PermitLimit = rateLimitOptions.MessagesSendPermitLimit,
                 Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
             }));
 
     options.AddPolicy("users-search", httpContext =>
@@ -156,8 +171,9 @@ builder.Services.AddRateLimiter(options =>
             httpContext.User.FindFirst("sub")?.Value ?? "anon",
             _ => new FixedWindowRateLimiterOptions
             {
-                PermitLimit = isTesting ? int.MaxValue : 30,
+                PermitLimit = rateLimitOptions.UsersSearchPermitLimit,
                 Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
             }));
 
     options.AddPolicy("attachments-create", httpContext =>
@@ -165,8 +181,9 @@ builder.Services.AddRateLimiter(options =>
             httpContext.User.FindFirst("device_id")?.Value ?? "anon",
             _ => new FixedWindowRateLimiterOptions
             {
-                PermitLimit = isTesting ? int.MaxValue : attachmentOptions.CreatePermitLimit,
+                PermitLimit = attachmentOptions.CreatePermitLimit,
                 Window = TimeSpan.FromHours(1),
+                QueueLimit = 0,
             }));
 
     options.AddPolicy("attachments-chunk-upload", httpContext =>
@@ -174,8 +191,9 @@ builder.Services.AddRateLimiter(options =>
             httpContext.User.FindFirst("device_id")?.Value ?? "anon",
             _ => new FixedWindowRateLimiterOptions
             {
-                PermitLimit = isTesting ? int.MaxValue : attachmentOptions.ChunkPermitLimit,
+                PermitLimit = attachmentOptions.ChunkPermitLimit,
                 Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
             }));
 
     options.AddPolicy("attachments-chunk-download", httpContext =>
@@ -183,8 +201,9 @@ builder.Services.AddRateLimiter(options =>
             httpContext.User.FindFirst("device_id")?.Value ?? "anon",
             _ => new FixedWindowRateLimiterOptions
             {
-                PermitLimit = isTesting ? int.MaxValue : attachmentOptions.ChunkPermitLimit,
+                PermitLimit = attachmentOptions.ChunkPermitLimit,
                 Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
             }));
 });
 

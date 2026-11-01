@@ -81,7 +81,7 @@ public sealed class AuthFlowTests
     [Fact]
     public async Task Register_DuplicateUsername_Returns409()
     {
-        const string username = "duplicate_user";
+        var username = TestData.UniqueUsername();
         await _client.RegisterAsync(TestData.CreateRegisterRequest(username));
 
         var response = await _client.PostAsJsonAsync(

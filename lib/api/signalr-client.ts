@@ -8,6 +8,7 @@ import { isOfflineToken } from "@/lib/session/auth-store";
 
 export type EnvelopeAvailableHandler = (envelopeId: string) => void;
 export type SignalRConnectionHandler = (connected: boolean) => void;
+export type PreKeysLowHandler = (remainingCount: number) => void;
 
 /** Backoff for withAutomaticReconnect (ms). Final null stops retrying until manual connect. */
 const RECONNECT_DELAYS_MS = [0, 2_000, 5_000, 10_000, 30_000];
@@ -16,6 +17,7 @@ export class SignalRClient {
   private connection: signalR.HubConnection | null = null;
   private onEnvelope: EnvelopeAvailableHandler | null = null;
   private onConnection: SignalRConnectionHandler | null = null;
+  private onPreKeysLow: PreKeysLowHandler | null = null;
   private connectInFlight: Promise<void> | null = null;
   /** When false, ignore automatic reconnect / don't auto-start (background / stop). */
   private desireConnected = false;
@@ -28,6 +30,10 @@ export class SignalRClient {
 
   setConnectionHandler(handler: SignalRConnectionHandler | null): void {
     this.onConnection = handler;
+  }
+
+  setPreKeysLowHandler(handler: PreKeysLowHandler | null): void {
+    this.onPreKeysLow = handler;
   }
 
   isConnected(): boolean {
@@ -106,6 +112,15 @@ export class SignalRClient {
     this.connection.on("EnvelopeAvailable", (payload: { envelopeId: string }) => {
       this.onEnvelope?.(payload.envelopeId);
     });
+
+    this.connection.on(
+      "PreKeysLow",
+      (payload: { remainingCount?: number; RemainingCount?: number }) => {
+        const remaining =
+          payload.remainingCount ?? payload.RemainingCount ?? 0;
+        this.onPreKeysLow?.(remaining);
+      },
+    );
 
     this.connection.onreconnecting(() => {
       this.emitConnection(false);

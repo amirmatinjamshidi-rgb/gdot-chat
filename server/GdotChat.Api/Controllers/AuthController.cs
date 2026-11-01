@@ -34,6 +34,7 @@ public class AuthController : ControllerBase
         Ok(await _authService.LoginAsync(request, ct));
 
     [AllowAnonymous]
+    [EnableRateLimiting("auth-refresh")]
     [HttpPost("refresh")]
     public async Task<ActionResult<AuthResultDto>> RefreshAsync(
         [FromBody] RefreshRequest request,

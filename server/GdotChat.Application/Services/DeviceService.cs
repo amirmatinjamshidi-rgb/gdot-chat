@@ -84,18 +84,44 @@ public class DeviceService : IDeviceService
             ?? throw new DeviceNotFoundException();
 
         var now = DateTimeOffset.UtcNow;
-        _db.Set<SignedPreKey>().Add(new SignedPreKey
+
+        // Upsert signed pre-key by (device, keyId) so rotation with a new keyId always
+        // inserts, and a retry with the same keyId does not violate the unique index.
+        var existingSpk = await _db.Set<SignedPreKey>()
+            .FirstOrDefaultAsync(
+                k => k.DeviceId == device.Id && k.KeyId == request.SignedPreKey.KeyId,
+                ct);
+
+        if (existingSpk is null)
         {
-            Id = Guid.NewGuid(),
-            DeviceId = device.Id,
-            KeyId = request.SignedPreKey.KeyId,
-            PublicKey = DtoMapper.FromBase64(request.SignedPreKey.PublicKeyBase64),
-            Signature = DtoMapper.FromBase64(request.SignedPreKey.SignatureBase64),
-            CreatedAt = now,
-        });
+            _db.Set<SignedPreKey>().Add(new SignedPreKey
+            {
+                Id = Guid.NewGuid(),
+                DeviceId = device.Id,
+                KeyId = request.SignedPreKey.KeyId,
+                PublicKey = DtoMapper.FromBase64(request.SignedPreKey.PublicKeyBase64),
+                Signature = DtoMapper.FromBase64(request.SignedPreKey.SignatureBase64),
+                CreatedAt = now,
+            });
+        }
+        else
+        {
+            existingSpk.PublicKey = DtoMapper.FromBase64(request.SignedPreKey.PublicKeyBase64);
+            existingSpk.Signature = DtoMapper.FromBase64(request.SignedPreKey.SignatureBase64);
+            existingSpk.CreatedAt = now;
+        }
+
+        var existingOtkIds = (await _db.Set<OneTimePreKey>()
+                .Where(k => k.DeviceId == device.Id)
+                .Select(k => k.KeyId)
+                .ToListAsync(ct))
+            .ToHashSet();
 
         foreach (var otk in request.OneTimePreKeys)
         {
+            if (existingOtkIds.Contains(otk.KeyId))
+                continue;
+
             _db.Set<OneTimePreKey>().Add(new OneTimePreKey
             {
                 Id = Guid.NewGuid(),

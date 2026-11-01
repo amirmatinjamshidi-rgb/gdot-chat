@@ -16,6 +16,7 @@ import { base64ToBytes, bytesToBase64 } from "./encoding";
 import {
   arrayBufferToBytes,
   arrayBufferToUtf8,
+  binaryStringToBytes,
   bytesToArrayBuffer,
   utf8ToArrayBuffer,
 } from "./buffer-utils";
@@ -158,11 +159,13 @@ export class SignalEngine {
     const cipher = new SessionCipher(store, addressFor(peerAddressId));
     const result = await cipher.encrypt(utf8ToArrayBuffer(plaintext));
     const rawBody = result.body as ArrayBuffer | string | undefined;
+    // libsignal returns body as a binary string (byte = charCode). TextEncoder would
+    // UTF-8-expand high bytes and break decrypt; map char codes 1:1 instead.
     const body =
       rawBody instanceof ArrayBuffer
         ? arrayBufferToBytes(rawBody)
         : typeof rawBody === "string"
-          ? new Uint8Array(new TextEncoder().encode(rawBody))
+          ? binaryStringToBytes(rawBody)
           : new Uint8Array(0);
     return {
       ciphertext: body,

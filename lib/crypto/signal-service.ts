@@ -242,15 +242,15 @@ export class SignalService {
 
   /** Call after login/unlock so this device can receive new sessions. */
   async replenishLocalPreKeysIfNeeded(): Promise<void> {
+    const run = () => this.preKeyManager.replenishOneTimePreKeys();
     try {
-      await this.preKeyManager.replenishOneTimePreKeys();
-    } catch (e) {
-      if (__DEV__) {
-        console.warn(
-          "[SignalService] pre-key upload skipped",
-          e instanceof Error ? e.message : e,
-        );
-      }
+      await run();
+    } catch (first) {
+      console.warn(
+        "[SignalService] pre-key replenish failed; retrying once",
+        first instanceof Error ? first.message : first,
+      );
+      await run();
     }
   }
 }
