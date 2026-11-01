@@ -1,7 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const onEndHandlers: Array<(e: { translationX: number }) => void> = [];
 let lastEnabled: boolean | undefined;
+
+vi.mock("expo-router", () => ({
+  useRouter: () => ({ back: vi.fn() }),
+}));
 
 vi.mock("react-native-gesture-handler", () => ({
   Gesture: {
@@ -28,8 +32,12 @@ vi.mock("react-native-reanimated", () => ({
 }));
 
 describe("createSwipeBackGesture", () => {
-  it("calls back when translation crosses threshold", async () => {
+  beforeEach(() => {
     onEndHandlers.length = 0;
+    lastEnabled = undefined;
+  });
+
+  it("calls back when translation crosses threshold", async () => {
     const back = vi.fn();
     const { createSwipeBackGesture, SWIPE_BACK_TRANSLATION_X } = await import(
       "@/hooks/use-swipe-back"
@@ -41,7 +49,6 @@ describe("createSwipeBackGesture", () => {
   });
 
   it("ignores short swipes", async () => {
-    onEndHandlers.length = 0;
     const back = vi.fn();
     const { createSwipeBackGesture } = await import("@/hooks/use-swipe-back");
     createSwipeBackGesture(back, true);
@@ -50,7 +57,6 @@ describe("createSwipeBackGesture", () => {
   });
 
   it("can be disabled", async () => {
-    onEndHandlers.length = 0;
     const back = vi.fn();
     const { createSwipeBackGesture } = await import("@/hooks/use-swipe-back");
     createSwipeBackGesture(back, false);

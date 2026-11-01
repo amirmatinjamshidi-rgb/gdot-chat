@@ -7,7 +7,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["lib/**/*.test.ts", "components/**/*.test.ts"],
+    include: ["lib/**/*.test.ts", "components/**/*.test.ts", "hooks/**/*.test.ts"],
     setupFiles: ["lib/test/setup.ts"],
   },
   resolve: {
