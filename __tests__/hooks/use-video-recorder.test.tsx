@@ -1,39 +1,10 @@
-import React from "react";
-import { act, create, type ReactTestRenderer } from "react-test-renderer";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+import { act, renderHook } from "@testing-library/react-native";
+import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
+import { Platform } from "react-native";
 
 import type { VideoMessageHandle } from "@/components/video-message";
-import { Platform } from "@/lib/test/react-native-stub";
+import { useVideoRecorder } from "@/hooks/use-video-recorder";
 import { useRecordingStore } from "@/stores/recording-store";
-
-function renderHook<T>(callback: () => T) {
-  const result: { current: T } = {
-    current: undefined as unknown as T,
-  };
-  function Harness() {
-    result.current = callback();
-    return null;
-  }
-  let root: ReactTestRenderer;
-  act(() => {
-    root = create(React.createElement(Harness));
-  });
-  return {
-    result,
-    rerender() {
-      act(() => {
-        root.update(React.createElement(Harness));
-      });
-    },
-    unmount() {
-      act(() => {
-        root.unmount();
-      });
-    },
-  };
-}
 
 function mockCamera(opts?: {
   uri?: string | null;
@@ -62,33 +33,37 @@ describe("useVideoRecorder (hook-level)", () => {
   const delay = async (_ms: number) => {
     /* deterministic: no real wait */
   };
+  const originalOs = Platform.OS;
 
   beforeEach(() => {
     now = 1_000_000;
-    Platform.OS = "ios";
+    Object.defineProperty(Platform, "OS", {
+      configurable: true,
+      get: () => "ios",
+    });
     useRecordingStore.setState({
       recordingChatId: null,
       recordingElapsedMs: 0,
       recordingLocked: false,
     });
-    vi.useFakeTimers({ shouldAdvanceTime: false });
   });
 
   afterEach(() => {
-    vi.useRealTimers();
-    Platform.OS = "ios";
+    Object.defineProperty(Platform, "OS", {
+      configurable: true,
+      get: () => originalOs,
+    });
   });
 
-  async function mountHook(opts?: {
+  function mountHook(opts?: {
     conversationId?: string;
     minDurationMs?: number;
     maxDurationMs?: number;
     onMaxDuration?: (r: { uri: string; durationMs: number }) => void;
     onError?: (m: string) => void;
   }) {
-    const { useVideoRecorder } = await import("@/hooks/use-video-recorder");
-    const onMaxDuration = opts?.onMaxDuration ?? vi.fn();
-    const onError = opts?.onError ?? vi.fn();
+    const onMaxDuration = opts?.onMaxDuration ?? jest.fn();
+    const onError = opts?.onError ?? jest.fn();
     const harness = renderHook(() =>
       useVideoRecorder({
         conversationId: opts?.conversationId ?? "conv_hook",
@@ -105,19 +80,19 @@ describe("useVideoRecorder (hook-level)", () => {
   }
 
   it("start sets session/recording and updates recording-store", async () => {
-    const { result, unmount } = await mountHook();
+    const { result, unmount } = mountHook();
     const cam = mockCamera();
-    result.current.videoRef.current = cam;
+    result.current!.videoRef.current = cam;
 
     let ok = false;
     await act(async () => {
-      ok = await result.current.start();
+      ok = await result.current!.start();
     });
 
     expect(ok).toBe(true);
-    expect(result.current.sessionActive).toBe(true);
-    expect(result.current.isRecording).toBe(true);
-    expect(result.current.isLocked).toBe(false);
+    expect(result.current!.sessionActive).toBe(true);
+    expect(result.current!.isRecording).toBe(true);
+    expect(result.current!.isLocked).toBe(false);
     expect(useRecordingStore.getState().recordingChatId).toBe("conv_hook");
     expect(useRecordingStore.getState().recordingLocked).toBe(false);
     expect(cam.started).toBe(true);
@@ -125,141 +100,141 @@ describe("useVideoRecorder (hook-level)", () => {
   });
 
   it("lock sets isLocked and recording-store lock flag", async () => {
-    const { result, unmount } = await mountHook();
-    result.current.videoRef.current = mockCamera();
+    const { result, unmount } = mountHook();
+    result.current!.videoRef.current = mockCamera();
 
     await act(async () => {
-      await result.current.start();
+      await result.current!.start();
     });
     act(() => {
-      result.current.lock();
+      result.current!.lock();
     });
 
-    expect(result.current.isLocked).toBe(true);
+    expect(result.current!.isLocked).toBe(true);
     expect(useRecordingStore.getState().recordingLocked).toBe(true);
     unmount();
   });
 
   it("finish returns file when above min duration and clears store", async () => {
-    const { result, unmount } = await mountHook({ minDurationMs: 500 });
-    result.current.videoRef.current = mockCamera({
+    const { result, unmount } = mountHook({ minDurationMs: 500 });
+    result.current!.videoRef.current = mockCamera({
       uri: "file:///finished.mp4",
     });
 
     await act(async () => {
-      await result.current.start();
+      await result.current!.start();
     });
     now += 800;
 
     let finished: { uri: string; durationMs: number } | null = null;
     await act(async () => {
-      finished = await result.current.finish();
+      finished = await result.current!.finish();
     });
 
     expect(finished).toEqual({ uri: "file:///finished.mp4", durationMs: 800 });
-    expect(result.current.isRecording).toBe(false);
-    expect(result.current.sessionActive).toBe(false);
+    expect(result.current!.isRecording).toBe(false);
+    expect(result.current!.sessionActive).toBe(false);
     expect(useRecordingStore.getState().recordingChatId).toBeNull();
     unmount();
   });
 
   it("finish returns null when recording is too short", async () => {
-    const { result, unmount } = await mountHook({ minDurationMs: 1000 });
-    result.current.videoRef.current = mockCamera();
+    const { result, unmount } = mountHook({ minDurationMs: 1000 });
+    result.current!.videoRef.current = mockCamera();
 
     await act(async () => {
-      await result.current.start();
+      await result.current!.start();
     });
     now += 200;
 
     let finished: unknown = "unset";
     await act(async () => {
-      finished = await result.current.finish();
+      finished = await result.current!.finish();
     });
 
     expect(finished).toBeNull();
-    expect(result.current.isRecording).toBe(false);
+    expect(result.current!.isRecording).toBe(false);
     unmount();
   });
 
   it("discard cancels recording and clears store", async () => {
-    const { result, unmount } = await mountHook();
+    const { result, unmount } = mountHook();
     const cam = mockCamera();
-    result.current.videoRef.current = cam;
+    result.current!.videoRef.current = cam;
 
     await act(async () => {
-      await result.current.start();
+      await result.current!.start();
     });
     await act(async () => {
-      await result.current.discard();
+      await result.current!.discard();
     });
 
-    expect(result.current.isRecording).toBe(false);
-    expect(result.current.sessionActive).toBe(false);
-    expect(result.current.isLocked).toBe(false);
+    expect(result.current!.isRecording).toBe(false);
+    expect(result.current!.sessionActive).toBe(false);
+    expect(result.current!.isLocked).toBe(false);
     expect(cam.started).toBe(false);
     expect(useRecordingStore.getState().recordingChatId).toBeNull();
     unmount();
   });
 
   it("max duration auto-stops and invokes onMaxDuration", async () => {
-    const onMaxDuration = vi.fn();
-    const { result, unmount } = await mountHook({
+    const onMaxDuration = jest.fn();
+    const { result, unmount } = mountHook({
       minDurationMs: 100,
       maxDurationMs: 1_000,
       onMaxDuration,
     });
-    result.current.videoRef.current = mockCamera({
+    result.current!.videoRef.current = mockCamera({
       uri: "file:///max.mp4",
     });
 
     await act(async () => {
-      await result.current.start();
+      await result.current!.start();
     });
     now += 1_500;
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_000);
+      await jest.advanceTimersByTimeAsync(1_000);
     });
 
     expect(onMaxDuration).toHaveBeenCalledWith({
       uri: "file:///max.mp4",
       durationMs: 1500,
     });
-    expect(result.current.isRecording).toBe(false);
-    expect(result.current.sessionActive).toBe(false);
+    expect(result.current!.isRecording).toBe(false);
+    expect(result.current!.sessionActive).toBe(false);
     expect(useRecordingStore.getState().recordingChatId).toBeNull();
     unmount();
   });
 
   it("permission denied surfaces onError and does not start store", async () => {
-    const onError = vi.fn();
-    const { result, unmount } = await mountHook({ onError });
-    result.current.videoRef.current = mockCamera({ permitted: false });
+    const onError = jest.fn();
+    const { result, unmount } = mountHook({ onError });
+    result.current!.videoRef.current = mockCamera({ permitted: false });
 
     let ok = true;
     await act(async () => {
-      ok = await result.current.start();
+      ok = await result.current!.start();
     });
 
     expect(ok).toBe(false);
     expect(onError).toHaveBeenCalledWith(
       "Camera and microphone permission are required for video messages.",
     );
-    expect(result.current.isRecording).toBe(false);
-    expect(result.current.sessionActive).toBe(false);
+    expect(result.current!.isRecording).toBe(false);
+    expect(result.current!.sessionActive).toBe(false);
     expect(useRecordingStore.getState().recordingChatId).toBeNull();
     unmount();
   });
 
   it("camera start failure surfaces onError", async () => {
-    const onError = vi.fn();
-    const { result, unmount } = await mountHook({ onError });
-    result.current.videoRef.current = mockCamera({ failStart: true });
+    const onError = jest.fn();
+    const { result, unmount } = mountHook({ onError });
+    result.current!.videoRef.current = mockCamera({ failStart: true });
 
     let ok = true;
     await act(async () => {
-      ok = await result.current.start();
+      ok = await result.current!.start();
     });
 
     expect(ok).toBe(false);
@@ -269,14 +244,17 @@ describe("useVideoRecorder (hook-level)", () => {
   });
 
   it("web platform rejects start with onError", async () => {
-    Platform.OS = "web";
-    const onError = vi.fn();
-    const { result, unmount } = await mountHook({ onError });
-    result.current.videoRef.current = mockCamera();
+    Object.defineProperty(Platform, "OS", {
+      configurable: true,
+      get: () => "web",
+    });
+    const onError = jest.fn();
+    const { result, unmount } = mountHook({ onError });
+    result.current!.videoRef.current = mockCamera();
 
     let ok = true;
     await act(async () => {
-      ok = await result.current.start();
+      ok = await result.current!.start();
     });
 
     expect(ok).toBe(false);
@@ -287,20 +265,20 @@ describe("useVideoRecorder (hook-level)", () => {
   });
 
   it("tick updates recording-store elapsed while recording", async () => {
-    const { result, unmount } = await mountHook();
-    result.current.videoRef.current = mockCamera();
+    const { result, unmount } = mountHook();
+    result.current!.videoRef.current = mockCamera();
 
     await act(async () => {
-      await result.current.start();
+      await result.current!.start();
     });
     now += 400;
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(200);
+      await jest.advanceTimersByTimeAsync(200);
     });
 
     expect(useRecordingStore.getState().recordingElapsedMs).toBe(400);
-    expect(result.current.elapsedMs).toBe(400);
+    expect(result.current!.elapsedMs).toBe(400);
     unmount();
   });
 });
