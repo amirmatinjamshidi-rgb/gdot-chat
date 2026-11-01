@@ -1,3 +1,4 @@
+using GdotChat.Api.Authorization;
 using GdotChat.Api.Extensions;
 using GdotChat.Application.DTOs;
 using GdotChat.Application.Interfaces;
@@ -7,7 +8,7 @@ using Microsoft.AspNetCore.RateLimiting;
 
 namespace GdotChat.Api.Controllers;
 
-[Authorize]
+[Authorize(Policy = ScopePolicies.Messages)]
 [ApiController]
 [Route("v1/messages")]
 public class MessagesController : ControllerBase

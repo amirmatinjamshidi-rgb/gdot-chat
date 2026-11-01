@@ -1,3 +1,4 @@
+using GdotChat.Api.Authorization;
 using GdotChat.Api.Extensions;
 using GdotChat.Application.DTOs;
 using GdotChat.Application.Interfaces;
@@ -9,7 +10,7 @@ using Microsoft.AspNetCore.RateLimiting;
 
 namespace GdotChat.Api.Controllers;
 
-[Authorize]
+[Authorize(Policy = ScopePolicies.Users)]
 [ApiController]
 [Route("v1/users")]
 public class UsersController : ControllerBase
@@ -43,12 +44,14 @@ public class UsersController : ControllerBase
         return Ok(DtoMapper.ToDto(user));
     }
 
+    [Authorize(Policy = ScopePolicies.Devices)]
     [HttpGet("{userId:guid}/devices")]
     public async Task<ActionResult<IReadOnlyList<DeviceSummaryDto>>> ListDevicesAsync(
         Guid userId,
         CancellationToken ct) =>
         Ok(await _deviceService.ListDevicesForUserAsync(userId, ct));
 
+    [Authorize(Policy = ScopePolicies.Prekeys)]
     [HttpGet("{userId:guid}/devices/{deviceId:guid}/prekey-bundle")]
     public async Task<ActionResult<PreKeyBundleDto>> GetPreKeyBundleAsync(
         Guid userId,

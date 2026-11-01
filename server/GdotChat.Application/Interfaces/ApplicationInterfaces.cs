@@ -38,7 +38,7 @@ public interface IMessageRelayService
 
 public interface IJwtTokenService
 {
-    string CreateAccessToken(User user, Device device);
+    string CreateAccessToken(User user, Device device, IReadOnlyCollection<string>? scopes = null);
     string CreateRefreshTokenPlaintext();
     string HashRefreshToken(string plaintext);
     ClaimsPrincipal ValidateAccessToken(string token);

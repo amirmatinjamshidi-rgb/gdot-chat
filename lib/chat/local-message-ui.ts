@@ -29,5 +29,6 @@ export function localMessageToUi(
     serverEnvelopeId: m.serverEnvelopeId,
     attachmentId: m.attachmentId,
     transferState: attachment?.transferState ?? m.status,
+    deliveryStatus: isMine && kind === "text" ? m.status : undefined,
   };
 }

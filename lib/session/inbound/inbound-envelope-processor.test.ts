@@ -11,6 +11,11 @@ import {
   MemorySessionResetCooldownStore,
 } from "@/lib/db/envelope-attempt-store";
 import { MemoryEnvelopeQuarantineStore } from "@/lib/db/envelope-quarantine-store";
+import { MemoryOutboxStore } from "@/lib/db/outbox-store";
+import {
+  serializeReceiptPayload,
+  serializeTextPayload,
+} from "@/lib/protocol/payload";
 import {
   ENVELOPE_MAX_ATTEMPTS,
   UNDISPLAYABLE_MESSAGE_PLACEHOLDER,
@@ -323,5 +328,155 @@ describe("InboundEnvelopeProcessor (unit)", () => {
       createdAt: new Date(ctx.clock.now()).toISOString(),
     });
     expect(ctx.acked).toEqual([]);
+  });
+});
+
+describe("InboundEnvelopeProcessor delivery receipts + dedupe", () => {
+  function setupReceipts() {
+    let now = 2_000_000;
+    const clock = () => now;
+    const advance = (ms: number) => {
+      now += ms;
+    };
+    const messageStore = new MemoryMessageStore();
+    const conversationStore = new MemoryConversationStore();
+    const quarantineStore = new MemoryEnvelopeQuarantineStore();
+    const attemptStore = new MemoryEnvelopeAttemptStore();
+    const outboxStore = new MemoryOutboxStore();
+    const acked: string[] = [];
+    const receiptsSent: string[] = [];
+
+    const peerUserId = crypto.randomUUID();
+    const peerDeviceId = crypto.randomUUID();
+    const conversationId = crypto.randomUUID();
+
+    conversationStore.conversations.set(conversationId, {
+      id: conversationId,
+      peerUserId,
+      peerUsername: "peer",
+      peerDeviceId,
+      lastMessagePreview: "",
+      lastMessageAt: 0,
+      unreadCount: 0,
+    });
+
+    let decryptPlaintext = serializeTextPayload("hi");
+
+    const processor = new InboundEnvelopeProcessor({
+      messagesApi: {
+        ack: async (id: string) => {
+          acked.push(id);
+        },
+      } as never,
+      signalService: {
+        decryptIncoming: async () => decryptPlaintext,
+        getIdentityTrust: async () => ({
+          keyChanged: false,
+          verified: false,
+          hasRemote: true,
+        }),
+      } as never,
+      messageStore,
+      conversationStore,
+      reactionStore: new MemoryReactionStore(),
+      quarantineStore,
+      attemptStore,
+      sessionResetApi: { request: async () => undefined } as never,
+      sessionResetCooldown: new MemorySessionResetCooldownStore(),
+      mediaTransfer: null,
+      outboxStore,
+      sendEncrypted: async (_c, plaintext: string) => {
+        receiptsSent.push(plaintext);
+      },
+      isDbReady: () => true,
+      clock,
+    });
+
+    return {
+      processor,
+      messageStore,
+      outboxStore,
+      acked,
+      receiptsSent,
+      peerUserId,
+      peerDeviceId,
+      conversationId,
+      setPlaintext: (v: string) => {
+        decryptPlaintext = v;
+      },
+      advance,
+      clock: () => now,
+      env: (overrides?: Partial<{ id: string }>) => ({
+        id: overrides?.id ?? crypto.randomUUID(),
+        senderDeviceId: peerDeviceId,
+        senderUserId: peerUserId,
+        messageType: 2 as const,
+        ciphertextBase64: bytesToBase64(new Uint8Array([1, 2, 3])),
+        createdAt: new Date(now).toISOString(),
+      }),
+    };
+  }
+
+  it("sends encrypted receipt after successful text decrypt with clientMessageId", async () => {
+    const ctx = setupReceipts();
+    const clientMessageId = crypto.randomUUID();
+    ctx.setPlaintext(serializeTextPayload("deliver-me", clientMessageId));
+    await ctx.processor.processEnvelope(ctx.env());
+    expect(ctx.acked).toHaveLength(1);
+    expect(ctx.receiptsSent).toHaveLength(1);
+    const parsed = JSON.parse(ctx.receiptsSent[0]!);
+    expect(parsed.t).toBe("receipt");
+    expect(parsed.messageIds).toEqual([clientMessageId]);
+    const msgs = await ctx.messageStore.listByConversation(ctx.conversationId, 10);
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]?.clientId).toBe(clientMessageId);
+  });
+
+  it("dedupes resends by clientMessageId and still acks + receipts", async () => {
+    const ctx = setupReceipts();
+    const clientMessageId = crypto.randomUUID();
+    ctx.setPlaintext(serializeTextPayload("once", clientMessageId));
+    await ctx.processor.processEnvelope(ctx.env());
+    await ctx.processor.processEnvelope(ctx.env());
+    const msgs = await ctx.messageStore.listByConversation(ctx.conversationId, 10);
+    expect(msgs).toHaveLength(1);
+    expect(ctx.acked).toHaveLength(2);
+    expect(ctx.receiptsSent.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("marks outgoing delivered and purges outbox on receipt payload", async () => {
+    const ctx = setupReceipts();
+    const clientMessageId = crypto.randomUUID();
+    const localId = crypto.randomUUID();
+    await ctx.messageStore.insert({
+      id: localId,
+      clientId: clientMessageId,
+      conversationId: ctx.conversationId,
+      direction: "outgoing",
+      kind: "text",
+      plaintext: "awaiting",
+      status: "sent",
+      senderDeviceId: "me",
+      createdAt: ctx.clock(),
+    });
+    await ctx.outboxStore.upsertPending({
+      clientMessageId,
+      localMessageId: localId,
+      conversationId: ctx.conversationId,
+      peerUserId: ctx.peerUserId,
+      peerDeviceId: ctx.peerDeviceId,
+      plaintext: "awaiting",
+      createdAt: ctx.clock(),
+      expiresAt: ctx.clock() + 86_400_000,
+    });
+    ctx.setPlaintext(serializeReceiptPayload([clientMessageId]));
+    await ctx.processor.processEnvelope(ctx.env());
+    const local = await ctx.messageStore.getById(localId);
+    expect(local?.status).toBe("delivered");
+    expect(await ctx.outboxStore.get(clientMessageId)).toBeNull();
+    expect(ctx.acked).toHaveLength(1);
+    // receipts are control messages — no chat row
+    const msgs = await ctx.messageStore.listByConversation(ctx.conversationId, 10);
+    expect(msgs.filter((m) => m.direction === "incoming")).toHaveLength(0);
   });
 });

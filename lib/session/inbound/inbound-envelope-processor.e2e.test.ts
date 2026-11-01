@@ -11,6 +11,7 @@ import {
   MemorySessionResetCooldownStore,
 } from "@/lib/db/envelope-attempt-store";
 import { MemoryEnvelopeQuarantineStore } from "@/lib/db/envelope-quarantine-store";
+import { MemoryOutboxStore } from "@/lib/db/outbox-store";
 import {
   ENVELOPE_MAX_ATTEMPT_AGE_MS,
   MESSAGE_REQUEST_TTL_MS,
@@ -21,6 +22,7 @@ import {
   encodeNoncePrefix,
   MEDIA_ALGORITHM,
   serializeTextPayload,
+  serializeReceiptPayload,
 } from "@/lib/protocol/payload";
 
 import { InboundEnvelopeProcessor } from "./inbound-envelope-processor";
@@ -283,5 +285,162 @@ describe("InboundEnvelopeProcessor (E2E flows)", () => {
     const msg = [...ctx.messageStore.messages.values()][0]!;
     expect(msg.plaintext).toBe(UNDISPLAYABLE_MESSAGE_PLACEHOLDER);
     expect(msg.plaintext.includes('"t":"media"')).toBe(false);
+  });
+});
+
+describe("E2E delivery receipts after session-reset style resend", () => {
+  it("dedupes clientMessageId resend and confirms delivery via receipt", async () => {
+    let now = 9_000_000;
+    const clock = () => now;
+
+    const aliceUser = crypto.randomUUID();
+    const aliceDevice = crypto.randomUUID();
+    const bobUser = crypto.randomUUID();
+    const bobDevice = crypto.randomUUID();
+    const conversationId = crypto.randomUUID();
+    const clientMessageId = crypto.randomUUID();
+
+    const aliceMessages = new MemoryMessageStore();
+    const aliceConversations = new MemoryConversationStore();
+    const aliceAcked: string[] = [];
+    const receiptsFromAlice: string[] = [];
+
+    aliceConversations.conversations.set(conversationId, {
+      id: conversationId,
+      peerUserId: bobUser,
+      peerUsername: "bob",
+      peerDeviceId: bobDevice,
+      lastMessagePreview: "",
+      lastMessageAt: 0,
+      unreadCount: 0,
+    });
+
+    const aliceDecrypt = serializeTextPayload("lost-in-reset", clientMessageId);
+    const aliceProcessor = new InboundEnvelopeProcessor({
+      messagesApi: {
+        ack: async (id: string) => {
+          aliceAcked.push(id);
+        },
+      } as never,
+      signalService: {
+        decryptIncoming: async () => aliceDecrypt,
+        getIdentityTrust: async () => ({
+          keyChanged: false,
+          verified: false,
+          hasRemote: true,
+        }),
+      } as never,
+      messageStore: aliceMessages,
+      conversationStore: aliceConversations,
+      reactionStore: new MemoryReactionStore(),
+      quarantineStore: new MemoryEnvelopeQuarantineStore(),
+      attemptStore: new MemoryEnvelopeAttemptStore(),
+      sessionResetApi: { request: async () => undefined } as never,
+      sessionResetCooldown: new MemorySessionResetCooldownStore(),
+      mediaTransfer: null,
+      outboxStore: new MemoryOutboxStore(),
+      sendEncrypted: async (_c, plaintext: string) => {
+        receiptsFromAlice.push(plaintext);
+      },
+      isDbReady: () => true,
+      clock,
+    });
+
+    const bobToAliceEnv = () => ({
+      id: crypto.randomUUID(),
+      senderDeviceId: bobDevice,
+      senderUserId: bobUser,
+      messageType: 2 as const,
+      ciphertextBase64: bytesToBase64(new Uint8Array([9, 9, 9])),
+      createdAt: new Date(now).toISOString(),
+    });
+
+    await aliceProcessor.processEnvelope(bobToAliceEnv());
+    await aliceProcessor.processEnvelope(bobToAliceEnv());
+
+    const incoming = await aliceMessages.listByConversation(conversationId, 50);
+    expect(incoming).toHaveLength(1);
+    expect(incoming[0]?.clientId).toBe(clientMessageId);
+    expect(aliceAcked).toHaveLength(2);
+    expect(receiptsFromAlice.length).toBeGreaterThanOrEqual(1);
+
+    const bobMessages = new MemoryMessageStore();
+    const bobConversations = new MemoryConversationStore();
+    const bobOutbox = new MemoryOutboxStore();
+    const bobAcked: string[] = [];
+
+    bobConversations.conversations.set(conversationId, {
+      id: conversationId,
+      peerUserId: aliceUser,
+      peerUsername: "alice",
+      peerDeviceId: aliceDevice,
+      lastMessagePreview: "",
+      lastMessageAt: 0,
+      unreadCount: 0,
+    });
+
+    const bobLocalId = crypto.randomUUID();
+    await bobMessages.insert({
+      id: bobLocalId,
+      clientId: clientMessageId,
+      conversationId,
+      direction: "outgoing",
+      kind: "text",
+      plaintext: "lost-in-reset",
+      status: "sent",
+      senderDeviceId: bobDevice,
+      createdAt: now,
+    });
+    await bobOutbox.upsertPending({
+      clientMessageId,
+      localMessageId: bobLocalId,
+      conversationId,
+      peerUserId: aliceUser,
+      peerDeviceId: aliceDevice,
+      plaintext: "lost-in-reset",
+      createdAt: now,
+      expiresAt: now + 7 * 24 * 60 * 60 * 1000,
+    });
+
+    const bobDecrypt = receiptsFromAlice[0]!;
+    const bobProcessor = new InboundEnvelopeProcessor({
+      messagesApi: {
+        ack: async (id: string) => {
+          bobAcked.push(id);
+        },
+      } as never,
+      signalService: {
+        decryptIncoming: async () => bobDecrypt,
+        getIdentityTrust: async () => ({
+          keyChanged: false,
+          verified: false,
+          hasRemote: true,
+        }),
+      } as never,
+      messageStore: bobMessages,
+      conversationStore: bobConversations,
+      reactionStore: new MemoryReactionStore(),
+      quarantineStore: new MemoryEnvelopeQuarantineStore(),
+      attemptStore: new MemoryEnvelopeAttemptStore(),
+      sessionResetApi: { request: async () => undefined } as never,
+      sessionResetCooldown: new MemorySessionResetCooldownStore(),
+      mediaTransfer: null,
+      outboxStore: bobOutbox,
+      isDbReady: () => true,
+      clock,
+    });
+
+    await bobProcessor.processEnvelope({
+      id: crypto.randomUUID(),
+      senderDeviceId: aliceDevice,
+      senderUserId: aliceUser,
+      messageType: 2,
+      ciphertextBase64: bytesToBase64(new Uint8Array([1])),
+      createdAt: new Date(now).toISOString(),
+    });
+
+    expect((await bobMessages.getById(bobLocalId))?.status).toBe("delivered");
+    expect(await bobOutbox.get(clientMessageId)).toBeNull();
+    expect(bobAcked).toHaveLength(1);
   });
 });

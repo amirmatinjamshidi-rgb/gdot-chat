@@ -18,6 +18,7 @@ import { DraftStore } from "@/lib/db/draft-store";
 import { IdentityStore } from "@/lib/db/identity-store";
 import { kekManager } from "@/lib/db/kek-manager";
 import { MessageStore } from "@/lib/db/message-store";
+import { OutboxStore } from "@/lib/db/outbox-store";
 import { EnvelopeQuarantineStore } from "@/lib/db/envelope-quarantine-store";
 import { EnvelopeAttemptStore } from "@/lib/db/envelope-attempt-store";
 import { ReactionStore } from "@/lib/db/reaction-store";
@@ -51,6 +52,7 @@ const usersApi = new UsersApi(apiClient);
 const envelopeQuarantineStore = new EnvelopeQuarantineStore(sqlCipherDatabase);
 const envelopeAttemptStore = new EnvelopeAttemptStore(sqlCipherDatabase);
 const messageStore = new MessageStore(sqlCipherDatabase);
+const outboxStore = new OutboxStore(sqlCipherDatabase);
 const reactionStore = new ReactionStore(sqlCipherDatabase);
 const conversationStore = new ConversationStore(sqlCipherDatabase);
 const attachmentStore = new AttachmentStore(sqlCipherDatabase);
@@ -83,6 +85,7 @@ const syncService = new SyncService(
     attemptStore: envelopeAttemptStore,
     sessionResetApi,
     sessionStore,
+    outboxStore,
     resolveUsername: async (userId) => {
       try {
         const profile = await usersApi.getProfile(userId);
@@ -120,6 +123,7 @@ export const appServices = {
   draftStore: new DraftStore(sqlCipherDatabase),
   sessionStore,
   messageStore,
+  outboxStore,
   reactionStore,
   conversationStore,
   envelopeQuarantineStore,

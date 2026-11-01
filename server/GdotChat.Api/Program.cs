@@ -1,6 +1,8 @@
 using System.Text;
 using System.Threading.RateLimiting;
+using GdotChat.Api.Authorization;
 using GdotChat.Api.Middleware;
+using Microsoft.AspNetCore.Authorization;
 using GdotChat.Application.Options;
 using GdotChat.Infrastructure;
 using GdotChat.Infrastructure.Hubs;
@@ -110,7 +112,8 @@ builder.Services
         };
     });
 
-builder.Services.AddAuthorization();
+builder.Services.AddSingleton<IAuthorizationHandler, ScopeAuthorizationHandler>();
+builder.Services.AddAuthorization(options => options.AddScopePolicies());
 builder.Services.AddSignalR();
 
 builder.Services.AddCors(options =>

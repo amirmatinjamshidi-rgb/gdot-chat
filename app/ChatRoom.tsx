@@ -1072,6 +1072,7 @@ export default function ChatRoomScreen() {
                         text={item.text ?? ""}
                         time={item.time}
                         isMine={item.isMine ?? item.sender === "me"}
+                        deliveryStatus={item.deliveryStatus}
                         primaryColor={primaryColor}
                         timeColor={timeColor}
                         bubbleStyle={[

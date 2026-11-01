@@ -8,7 +8,7 @@ export const MEDIA_KEY_BYTES = 32;
 export const DEFAULT_MEDIA_CHUNK_SIZE = 4 * 1024 * 1024;
 export const MAX_ATTACHMENT_BYTES = 1024 * 1024 * 1024;
 
-export type SignalPayloadType = "text" | "media" | "reaction";
+export type SignalPayloadType = "text" | "media" | "reaction" | "receipt";
 export type MediaKind = "voice" | "video";
 export type ReactionOp = "add" | "remove";
 
@@ -16,6 +16,8 @@ export interface TextPayload {
   v: 1;
   t: "text";
   text: string;
+  /** Stable sender client id for dedupe + delivery receipts. */
+  clientMessageId?: string;
 }
 
 export interface MediaPayload {
@@ -46,16 +48,41 @@ export interface ReactionPayload {
   emoji: string;
 }
 
-export type TypedSignalPayload = TextPayload | MediaPayload | ReactionPayload;
+export interface ReceiptPayload {
+  v: 1;
+  t: "receipt";
+  /** Sender client message ids that were successfully decrypted. */
+  messageIds: string[];
+}
+
+export type TypedSignalPayload =
+  | TextPayload
+  | MediaPayload
+  | ReactionPayload
+  | ReceiptPayload;
 
 export type ParsedSignalPlaintext =
   | { kind: "legacy-text"; text: string }
   | { kind: "text"; payload: TextPayload }
   | { kind: "media"; payload: MediaPayload }
-  | { kind: "reaction"; payload: ReactionPayload };
+  | { kind: "reaction"; payload: ReactionPayload }
+  | { kind: "receipt"; payload: ReceiptPayload };
 
-export function serializeTextPayload(text: string): string {
+export function serializeTextPayload(
+  text: string,
+  clientMessageId?: string,
+): string {
   const payload: TextPayload = { v: 1, t: "text", text };
+  if (clientMessageId) payload.clientMessageId = clientMessageId;
+  return JSON.stringify(payload);
+}
+
+export function serializeReceiptPayload(messageIds: string[]): string {
+  const payload: ReceiptPayload = {
+    v: 1,
+    t: "receipt",
+    messageIds: [...messageIds],
+  };
   return JSON.stringify(payload);
 }
 
@@ -93,7 +120,11 @@ export function parseSignalPlaintext(plaintext: string): ParsedSignalPlaintext {
     return { kind: "legacy-text", text: plaintext };
   }
   if (raw.t === "text" && typeof raw.text === "string") {
-    return { kind: "text", payload: { v: 1, t: "text", text: raw.text } };
+    const textPayload: TextPayload = { v: 1, t: "text", text: raw.text };
+    if (typeof raw.clientMessageId === "string" && raw.clientMessageId.length > 0) {
+      textPayload.clientMessageId = raw.clientMessageId;
+    }
+    return { kind: "text", payload: textPayload };
   }
   if (raw.t === "media") {
     const media = parseMediaPayload(raw);
@@ -102,6 +133,10 @@ export function parseSignalPlaintext(plaintext: string): ParsedSignalPlaintext {
   if (raw.t === "reaction") {
     const reaction = parseReactionPayload(raw);
     if (reaction) return { kind: "reaction", payload: reaction };
+  }
+  if (raw.t === "receipt") {
+    const receipt = parseReceiptPayload(raw);
+    if (receipt) return { kind: "receipt", payload: receipt };
   }
   return { kind: "legacy-text", text: plaintext };
 }
@@ -173,6 +208,20 @@ export function parseReactionPayload(
     targetServerEnvelopeId: raw.targetServerEnvelopeId,
     emoji: raw.emoji,
   };
+}
+
+export function parseReceiptPayload(
+  raw: Record<string, unknown>,
+): ReceiptPayload | null {
+  if (raw.t !== "receipt" || raw.v !== 1) return null;
+  if (!Array.isArray(raw.messageIds) || raw.messageIds.length === 0) return null;
+  if (raw.messageIds.length > 100) return null;
+  const messageIds: string[] = [];
+  for (const id of raw.messageIds) {
+    if (typeof id !== "string" || id.length < 8 || id.length > 128) return null;
+    messageIds.push(id);
+  }
+  return { v: 1, t: "receipt", messageIds };
 }
 
 export function mediaPreviewLabel(kind: MediaKind): string {

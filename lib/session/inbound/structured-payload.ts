@@ -6,7 +6,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 /**
  * Detects plaintext that claimed a v1 structured Signal payload but failed to parse
- * into text/media/reaction (so we must not show raw JSON as a message).
+ * into text/media/reaction/receipt (so we must not show raw JSON as a message).
  */
 export function isInvalidStructuredPayload(
   plaintext: string,

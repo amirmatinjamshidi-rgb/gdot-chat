@@ -11,11 +11,13 @@ import type {
   QuarantinedEnvelope,
 } from "@/lib/db/envelope-quarantine-store";
 import type { IMessageStore } from "@/lib/db/message-store";
+import type { IOutboxStore } from "@/lib/db/outbox-store";
 import type { IReactionStore } from "@/lib/db/reaction-store";
 import type { Conversation, LocalMessage } from "@/lib/db/types";
 import type { MediaTransferService } from "@/lib/media/media-transfer";
 import {
   parseSignalPlaintext,
+  serializeReceiptPayload,
   type ReactionOp,
 } from "@/lib/protocol/payload";
 import { useMediaStore } from "@/stores/media-store";
@@ -55,6 +57,18 @@ export type InboundProcessorDeps = {
   sessionResetApi: SessionResetApi;
   sessionResetCooldown: SessionResetCooldown;
   mediaTransfer: MediaTransferService | null;
+  /** Encrypted local outbox for delivery receipts (optional in older tests). */
+  outboxStore?: IOutboxStore | null;
+  /**
+   * Send an already-serialized Signal plaintext (e.g. receipt) without creating a UI row.
+   * Used for E2EE delivery receipts after successful decrypt.
+   */
+  sendEncrypted?: (
+    conversation: Conversation,
+    plaintext: string,
+  ) => Promise<void>;
+  /** Fired when an outgoing message is marked delivered via receipt. */
+  onMessageDelivered?: (conversationId: string, localMessageId: string) => void;
   /** Returns whether the app lock / DB is available for crypto + SQL. */
   isDbReady: () => boolean;
   clock?: Clock;
@@ -452,6 +466,12 @@ export class InboundEnvelopeProcessor {
       return;
     }
 
+    if (parsed.kind === "receipt") {
+      await this.applyIncomingReceipt(conversation, parsed.payload.messageIds);
+      if (!opts?.skipAck) await this.deps.messagesApi.ack(env.id);
+      return;
+    }
+
     if (parsed.kind === "reaction") {
       await this.applyIncomingReaction(
         conversation,
@@ -465,9 +485,22 @@ export class InboundEnvelopeProcessor {
     }
 
     const text = parsed.kind === "text" ? parsed.payload.text : parsed.text;
+    const clientMessageId =
+      parsed.kind === "text" ? parsed.payload.clientMessageId : undefined;
+
+    // Dedupe resends after session reset by stable sender client message id.
+    if (clientMessageId) {
+      const existing = await this.deps.messageStore.getByClientId(clientMessageId);
+      if (existing) {
+        await this.maybeSendDeliveryReceipt(conversation, [clientMessageId]);
+        if (!opts?.skipAck) await this.deps.messagesApi.ack(env.id);
+        return;
+      }
+    }
+
     const msg: LocalMessage = {
       id: randomUUID(),
-      clientId: randomUUID(),
+      clientId: clientMessageId ?? randomUUID(),
       conversationId: conversation.id,
       direction: "incoming",
       kind: "text",
@@ -485,6 +518,9 @@ export class InboundEnvelopeProcessor {
       lastMessageAt: msg.createdAt,
       unreadCount: conversation.unreadCount + 1,
     });
+    if (clientMessageId) {
+      await this.maybeSendDeliveryReceipt(conversation, [clientMessageId]);
+    }
     if (!opts?.skipAck) await this.deps.messagesApi.ack(env.id);
   }
 
@@ -544,6 +580,52 @@ export class InboundEnvelopeProcessor {
     }
     await this.deps.reactionStore.apply(target.id, emoji, senderUserId, op);
     this.deps.onReactionApplied?.(conversation.id);
+  }
+
+
+  private async applyIncomingReceipt(
+    conversation: Conversation,
+    messageIds: string[],
+  ): Promise<void> {
+    const outbox = this.deps.outboxStore;
+    const now = this.clock();
+    for (const clientMessageId of messageIds) {
+      const local = await this.deps.messageStore.getByClientId(clientMessageId);
+      if (
+        local &&
+        local.direction === "outgoing" &&
+        local.status !== "delivered"
+      ) {
+        await this.deps.messageStore.updateStatus(local.id, "delivered");
+        this.deps.onMessageDelivered?.(conversation.id, local.id);
+      }
+      if (outbox) {
+        await outbox.markReceipted(clientMessageId, now);
+      }
+    }
+    if (outbox) {
+      await outbox.purgeReceipted();
+    }
+  }
+
+  private async maybeSendDeliveryReceipt(
+    conversation: Conversation,
+    messageIds: string[],
+  ): Promise<void> {
+    if (!this.deps.sendEncrypted || messageIds.length === 0) return;
+    try {
+      await this.deps.sendEncrypted(
+        conversation,
+        serializeReceiptPayload(messageIds),
+      );
+    } catch (e) {
+      if (__DEV__) {
+        console.warn(
+          "[InboundEnvelopeProcessor] delivery receipt send failed",
+          e instanceof Error ? e.message : e,
+        );
+      }
+    }
   }
 
   private async findConversationForSender(

@@ -3,6 +3,7 @@ import {
   parseSignalPlaintext,
   serializeMediaPayload,
   serializeReactionPayload,
+  serializeReceiptPayload,
   serializeTextPayload,
   SIGNAL_PAYLOAD_VERSION,
   type MediaPayload,
@@ -122,6 +123,39 @@ describe("typed Signal plaintext protocol", () => {
           targetServerEnvelopeId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
           emoji: "👍",
         }),
+      ).kind,
+    ).toBe("legacy-text");
+  });
+
+  test("serializes text with clientMessageId for dedupe/receipts", () => {
+    const id = crypto.randomUUID();
+    const raw = serializeTextPayload("hi", id);
+    const parsed = parseSignalPlaintext(raw);
+    expect(parsed.kind).toBe("text");
+    if (parsed.kind === "text") {
+      expect(parsed.payload.clientMessageId).toBe(id);
+      expect(parsed.payload.text).toBe("hi");
+    }
+  });
+
+  test("serializes and parses delivery receipts", () => {
+    const a = crypto.randomUUID();
+    const b = crypto.randomUUID();
+    const raw = serializeReceiptPayload([a, b]);
+    const parsed = parseSignalPlaintext(raw);
+    expect(parsed).toEqual({
+      kind: "receipt",
+      payload: { v: 1, t: "receipt", messageIds: [a, b] },
+    });
+  });
+
+  test("rejects empty or oversized receipt payloads as legacy", () => {
+    expect(parseSignalPlaintext(JSON.stringify({ v: 1, t: "receipt", messageIds: [] })).kind).toBe(
+      "legacy-text",
+    );
+    expect(
+      parseSignalPlaintext(
+        JSON.stringify({ v: 1, t: "receipt", messageIds: ["short"] }),
       ).kind,
     ).toBe("legacy-text");
   });

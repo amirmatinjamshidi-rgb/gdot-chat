@@ -13,6 +13,8 @@ export type TextMessageBubbleProps = {
   isMine: boolean;
   primaryColor: string;
   timeColor: string;
+  /** Cheap outgoing delivery hint: sent / delivered. */
+  deliveryStatus?: string;
   bubbleStyle: ViewStyle[];
   reactions: Reaction[];
   myId: string;
@@ -28,6 +30,7 @@ export function TextMessageBubble({
   isMine,
   primaryColor,
   timeColor,
+  deliveryStatus,
   bubbleStyle,
   reactions,
   myId,
@@ -55,6 +58,11 @@ export function TextMessageBubble({
         <ThemedText style={{ color: primaryColor }}>{text}</ThemedText>
         <ThemedText style={[styles.timeText, { color: timeColor }]}>
           {time}
+          {isMine && deliveryStatus === "delivered"
+            ? " ✓✓"
+            : isMine && (deliveryStatus === "sent" || deliveryStatus === "pending")
+              ? " ✓"
+              : ""}
         </ThemedText>
       </Pressable>
       <ReactionList

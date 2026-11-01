@@ -15,6 +15,7 @@ import type { IEnvelopeAttemptStore } from "@/lib/db/envelope-attempt-store";
 import type { IEnvelopeQuarantineStore } from "@/lib/db/envelope-quarantine-store";
 import type { IIdentityStore } from "@/lib/db/identity-store";
 import type { IMessageStore } from "@/lib/db/message-store";
+import type { IOutboxStore } from "@/lib/db/outbox-store";
 import type { IReactionStore } from "@/lib/db/reaction-store";
 import type { ISessionStore } from "@/lib/db/session-store";
 import type { Conversation, LocalMessage } from "@/lib/db/types";
@@ -29,6 +30,11 @@ import { isOfflineToken, type AuthStore } from "@/lib/session/auth-store";
 import { appLockStore } from "@/lib/session/app-lock-store";
 import { InboundEnvelopeProcessor } from "@/lib/session/inbound/inbound-envelope-processor";
 import { systemClock, type Clock } from "@/lib/session/inbound/constants";
+import {
+  OUTBOX_MAX_PER_CONVERSATION,
+  OUTBOX_MAX_RESENDS,
+  OUTBOX_TTL_MS,
+} from "@/lib/session/outbox-constants";
 
 export type SyncErrorHandler = (message: string) => void;
 export type ReactionAppliedHandler = (conversationId: string) => void;
@@ -38,6 +44,7 @@ export type SyncServiceInboundDeps = {
   attemptStore: IEnvelopeAttemptStore;
   sessionResetApi: SessionResetApi;
   sessionStore: ISessionStore;
+  outboxStore: IOutboxStore;
   clock?: Clock;
   resolveUsername?: (userId: string) => Promise<string | null>;
 };
@@ -61,6 +68,7 @@ export class SyncService {
   private readonly sessionStore: ISessionStore;
   private readonly clock: Clock;
   private readonly sessionResetCooldown = new MemorySessionResetCooldownStore();
+  private readonly outboxStore: IOutboxStore;
 
   constructor(
     private readonly messagesApi: MessagesApi,
@@ -78,6 +86,7 @@ export class SyncService {
       throw new Error("SyncService requires inboundDeps (quarantine/attempt/sessionReset)");
     }
     this.sessionStore = inboundDeps.sessionStore;
+    this.outboxStore = inboundDeps.outboxStore;
     this.clock = inboundDeps.clock ?? systemClock;
     this.inbound = new InboundEnvelopeProcessor({
       messagesApi,
@@ -90,6 +99,9 @@ export class SyncService {
       sessionResetApi: inboundDeps.sessionResetApi,
       sessionResetCooldown: this.sessionResetCooldown,
       mediaTransfer,
+      outboxStore: this.outboxStore,
+      sendEncrypted: (conversation, plaintext) =>
+        this.encryptAndPost(conversation, plaintext).then(() => undefined),
       isDbReady: () => appLockStore.isUnlocked,
       clock: this.clock,
       resolveUsername: inboundDeps.resolveUsername,
@@ -395,6 +407,44 @@ export class SyncService {
         fromDeviceId,
       );
     }
+    await this.resendUnreceiptedAfterSessionReset(conversation);
+  }
+
+  /**
+   * Re-encrypt and resend outbox plaintexts that were never receipted.
+   * Rate-limited by OUTBOX_MAX_RESENDS per client message id.
+   */
+  private async resendUnreceiptedAfterSessionReset(
+    conversation: Conversation,
+  ): Promise<void> {
+    const now = this.clock();
+    await this.outboxStore.purgeExpired(now);
+    const pending = await this.outboxStore.listPendingForPeerDevice(
+      conversation.peerDeviceId,
+      now,
+    );
+    for (const entry of pending) {
+      if (entry.resendCount >= OUTBOX_MAX_RESENDS) continue;
+      try {
+        await this.encryptAndPost(
+          conversation,
+          serializeTextPayload(entry.plaintext, entry.clientMessageId),
+        );
+        await this.outboxStore.incrementResend(entry.clientMessageId, now);
+        const local = await this.messageStore.getByClientId(entry.clientMessageId);
+        if (local && local.status === "failed") {
+          await this.messageStore.updateStatus(local.id, "sent");
+        }
+      } catch (e) {
+        if (__DEV__) {
+          console.warn(
+            "[SyncService] outbox resend failed",
+            entry.clientMessageId,
+            e instanceof Error ? e.message : e,
+          );
+        }
+      }
+    }
   }
 
   async sendOutgoing(conversationId: string, text: string): Promise<void> {
@@ -417,7 +467,7 @@ export class SyncService {
     const deviceId = local?.deviceId ?? "local-device";
     const clientId = randomUUID();
     const id = randomUUID();
-    const createdAt = Date.now();
+    const createdAt = this.clock();
 
     const optimistic: LocalMessage = {
       id,
@@ -439,7 +489,7 @@ export class SyncService {
         const payload = await this.signalService.encryptOutgoing(
           conversation.peerUserId,
           conversation.peerDeviceId,
-          serializeTextPayload(text),
+          serializeTextPayload(text, clientId),
         );
         const result = await this.messagesApi.send({
           recipientUserId: payload.recipientUserId,
@@ -454,6 +504,20 @@ export class SyncService {
           lastMessagePreview: text.slice(0, 120),
           lastMessageAt: createdAt,
         });
+        await this.outboxStore.upsertPending({
+          clientMessageId: clientId,
+          localMessageId: id,
+          conversationId,
+          peerUserId: conversation.peerUserId,
+          peerDeviceId: conversation.peerDeviceId,
+          plaintext: text,
+          createdAt,
+          expiresAt: createdAt + OUTBOX_TTL_MS,
+        });
+        await this.outboxStore.trimConversation(
+          conversationId,
+          OUTBOX_MAX_PER_CONVERSATION,
+        );
         void result;
       });
     } catch (e) {

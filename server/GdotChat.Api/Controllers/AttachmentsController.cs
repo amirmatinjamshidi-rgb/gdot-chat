@@ -1,3 +1,4 @@
+using GdotChat.Api.Authorization;
 using GdotChat.Api.Extensions;
 using GdotChat.Application.DTOs;
 using GdotChat.Application.Interfaces;
@@ -10,7 +11,7 @@ using Microsoft.Extensions.Options;
 
 namespace GdotChat.Api.Controllers;
 
-[Authorize]
+[Authorize(Policy = ScopePolicies.Attachments)]
 [ApiController]
 [Route("v1/attachments")]
 public class AttachmentsController : ControllerBase

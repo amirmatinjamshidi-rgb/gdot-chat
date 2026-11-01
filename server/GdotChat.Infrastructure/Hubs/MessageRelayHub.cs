@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.SignalR;
 
 namespace GdotChat.Infrastructure.Hubs;
 
-[Authorize]
+[Authorize(Policy = "scope:messages")]
 public class MessageRelayHub : Hub
 {
     public override async Task OnConnectedAsync()

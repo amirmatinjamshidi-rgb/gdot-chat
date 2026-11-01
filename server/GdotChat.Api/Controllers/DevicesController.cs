@@ -1,3 +1,4 @@
+using GdotChat.Api.Authorization;
 using GdotChat.Api.Extensions;
 using GdotChat.Application.DTOs;
 using GdotChat.Application.Interfaces;
@@ -6,7 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace GdotChat.Api.Controllers;
 
-[Authorize]
+[Authorize(Policy = ScopePolicies.Prekeys)]
 [ApiController]
 [Route("v1/devices")]
 public class DevicesController : ControllerBase

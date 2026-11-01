@@ -19,6 +19,8 @@ export type Message = {
   serverEnvelopeId?: string;
   attachmentId?: string;
   transferState?: string;
+  /** Outgoing delivery: pending/sent/delivered/failed (text). */
+  deliveryStatus?: string;
 };
 
 type MessagesState = {

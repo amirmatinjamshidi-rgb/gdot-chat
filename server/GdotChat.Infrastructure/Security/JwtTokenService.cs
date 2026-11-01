@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using GdotChat.Application.Interfaces;
 using GdotChat.Application.Options;
+using GdotChat.Application.Security;
 using GdotChat.Domain.Entities;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -22,13 +23,20 @@ public class JwtTokenService : IJwtTokenService
         _credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
     }
 
-    public string CreateAccessToken(User user, Device device)
+    public string CreateAccessToken(
+        User user,
+        Device device,
+        IReadOnlyCollection<string>? scopes = null)
     {
+        var effective = scopes is { Count: > 0 }
+            ? scopes
+            : AuthScopes.AllUserScopes;
+
         var claims = new[]
         {
             new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
             new Claim("device_id", device.Id.ToString()),
-            new Claim("scope", "message:send message:read prekeys:write"),
+            new Claim(AuthScopes.ClaimType, AuthScopes.Format(effective)),
         };
 
         var token = new JwtSecurityToken(
