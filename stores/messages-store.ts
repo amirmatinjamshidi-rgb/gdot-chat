@@ -17,6 +17,8 @@ export type Message = {
   isMine?: boolean;
   reactions?: Reaction[];
   serverEnvelopeId?: string;
+  attachmentId?: string;
+  transferState?: string;
 };
 
 type MessagesState = {

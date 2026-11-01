@@ -4,9 +4,10 @@ import type { IDatabase } from "./database-types";
 export interface IIdentityStore {
   getLocalIdentity(): Promise<LocalIdentity | null>;
   saveLocalIdentity(identity: LocalIdentity): Promise<void>;
-  getRemoteIdentity(peerDeviceId: string): Promise<RemoteIdentity | null>;
+  getRemoteIdentity(peerAddressId: string): Promise<RemoteIdentity | null>;
   saveRemoteIdentity(identity: RemoteIdentity): Promise<void>;
-  setVerified(peerDeviceId: string, verified: boolean): Promise<void>;
+  setVerified(peerAddressId: string, verified: boolean): Promise<void>;
+  setKeyChanged(peerAddressId: string, keyChanged: boolean): Promise<void>;
 }
 
 type LocalIdentityRow = {
@@ -24,6 +25,7 @@ type RemoteIdentityRow = {
   identity_key_public: Uint8Array;
   safety_number: string;
   verified: number;
+  key_changed?: number | null;
   last_key_fingerprint: string;
 };
 
@@ -62,10 +64,10 @@ export class IdentityStore implements IIdentityStore {
     );
   }
 
-  async getRemoteIdentity(peerDeviceId: string): Promise<RemoteIdentity | null> {
+  async getRemoteIdentity(peerAddressId: string): Promise<RemoteIdentity | null> {
     const row = await this.db.getFirst<RemoteIdentityRow>(
       `SELECT * FROM remote_identities WHERE peer_device_id = ?`,
-      [peerDeviceId],
+      [peerAddressId],
     );
     if (!row) return null;
     return {
@@ -74,6 +76,7 @@ export class IdentityStore implements IIdentityStore {
       identityKeyPublic: row.identity_key_public,
       safetyNumber: row.safety_number,
       verified: row.verified === 1,
+      keyChanged: (row.key_changed ?? 0) === 1,
       lastSeenKeyFingerprint: row.last_key_fingerprint,
     };
   }
@@ -82,24 +85,32 @@ export class IdentityStore implements IIdentityStore {
     await this.db.run(
       `INSERT OR REPLACE INTO remote_identities
        (peer_device_id, peer_user_id, identity_key_public, safety_number, verified,
-        last_key_fingerprint, updated_at)
-       VALUES (?,?,?,?,?,?,?)`,
+        key_changed, last_key_fingerprint, updated_at)
+       VALUES (?,?,?,?,?,?,?,?)`,
       [
         identity.peerDeviceId,
         identity.peerUserId,
         identity.identityKeyPublic,
         identity.safetyNumber,
         identity.verified ? 1 : 0,
+        identity.keyChanged ? 1 : 0,
         identity.lastSeenKeyFingerprint,
         Date.now(),
       ],
     );
   }
 
-  async setVerified(peerDeviceId: string, verified: boolean): Promise<void> {
+  async setVerified(peerAddressId: string, verified: boolean): Promise<void> {
     await this.db.run(
       `UPDATE remote_identities SET verified = ? WHERE peer_device_id = ?`,
-      [verified ? 1 : 0, peerDeviceId],
+      [verified ? 1 : 0, peerAddressId],
+    );
+  }
+
+  async setKeyChanged(peerAddressId: string, keyChanged: boolean): Promise<void> {
+    await this.db.run(
+      `UPDATE remote_identities SET key_changed = ? WHERE peer_device_id = ?`,
+      [keyChanged ? 1 : 0, peerAddressId],
     );
   }
 }

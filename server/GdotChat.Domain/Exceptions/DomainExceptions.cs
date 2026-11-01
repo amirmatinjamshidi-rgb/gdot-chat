@@ -34,3 +34,23 @@ public class EnvelopeNotFoundException : Exception
 {
     public EnvelopeNotFoundException() : base("Envelope not found") { }
 }
+
+public class AttachmentNotFoundException : Exception
+{
+    public AttachmentNotFoundException() : base("Attachment not found") { }
+}
+
+public class AttachmentConflictException : Exception
+{
+    public AttachmentConflictException(string message) : base(message) { }
+}
+
+public class AttachmentTooLargeException : Exception
+{
+    public AttachmentTooLargeException() : base("Attachment exceeds the maximum allowed size") { }
+}
+
+public class InvalidAttachmentRequestException : Exception
+{
+    public InvalidAttachmentRequestException(string message) : base(message) { }
+}

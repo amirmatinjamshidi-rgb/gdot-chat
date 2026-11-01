@@ -97,6 +97,53 @@ namespace GdotChat.Infrastructure.Migrations
                     b.ToTable("message_envelopes", (string)null);
                 });
 
+            modelBuilder.Entity("GdotChat.Domain.Entities.Attachment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("ChunkCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ChunkSizeBytes")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("DownloadedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("PlainSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("RecipientDeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("SenderDeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RecipientDeviceId", "ExpiresAt");
+
+                    b.HasIndex("SenderDeviceId", "Status");
+
+                    b.ToTable("attachments", (string)null);
+                });
+
             modelBuilder.Entity("GdotChat.Domain.Entities.OneTimePreKey", b =>
                 {
                     b.Property<Guid>("Id")
@@ -229,6 +276,25 @@ namespace GdotChat.Infrastructure.Migrations
                 });
 
             modelBuilder.Entity("GdotChat.Domain.Entities.MessageEnvelope", b =>
+                {
+                    b.HasOne("GdotChat.Domain.Entities.Device", "RecipientDevice")
+                        .WithMany()
+                        .HasForeignKey("RecipientDeviceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("GdotChat.Domain.Entities.Device", "SenderDevice")
+                        .WithMany()
+                        .HasForeignKey("SenderDeviceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("RecipientDevice");
+
+                    b.Navigation("SenderDevice");
+                });
+
+            modelBuilder.Entity("GdotChat.Domain.Entities.Attachment", b =>
                 {
                     b.HasOne("GdotChat.Domain.Entities.Device", "RecipientDevice")
                         .WithMany()

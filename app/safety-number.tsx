@@ -1,4 +1,4 @@
-import { Stack, useLocalSearchParams } from "expo-router";
+import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -8,43 +8,89 @@ import { ScalePressable } from "@/components/ui/scale-pressable";
 import { useAppServices } from "@/lib/services/app-services-context";
 
 export default function SafetyNumberScreen() {
+  const router = useRouter();
   const { peerUserId, peerDeviceId } = useLocalSearchParams<{
     peerUserId: string;
     peerDeviceId: string;
   }>();
-  const { signalService, identityStore } = useAppServices();
+  const { signalService } = useAppServices();
   const [formatted, setFormatted] = useState("…");
+  const [keyChanged, setKeyChanged] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (!peerUserId || !peerDeviceId) return;
-    void signalService
-      .getSafetyNumber(peerUserId, peerDeviceId)
-      .then((sn) => {
-        setFormatted(sn.replace(/(.{5})/g, "$1 ").trim());
-      });
+    void (async () => {
+      const sn = await signalService.getSafetyNumber(peerUserId, peerDeviceId);
+      setFormatted(sn.replace(/(.{5})/g, "$1 ").trim());
+      const trust = await signalService.getIdentityTrust(peerUserId);
+      setKeyChanged(trust.keyChanged);
+    })();
   }, [peerUserId, peerDeviceId, signalService]);
 
-  const onVerify = async () => {
-    if (!peerDeviceId) return;
-    await identityStore.setVerified(peerDeviceId, true);
+  const onAccept = async (markVerified: boolean) => {
+    if (!peerUserId) return;
+    setBusy(true);
+    try {
+      await signalService.acceptNewIdentityKey(peerUserId, { markVerified });
+      setKeyChanged(false);
+      router.back();
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
     <SafeAreaView style={styles.container}>
       <Stack.Screen options={{ title: "Safety number" }} />
-      <ThemedText type="subtitle">Verify with your contact in person</ThemedText>
+      {keyChanged ? (
+        <ThemedText type="subtitle" style={styles.warn}>
+          This contact&apos;s identity key changed. Confirm the safety number
+          with them in person before trusting messages again.
+        </ThemedText>
+      ) : (
+        <ThemedText type="subtitle">
+          Verify with your contact in person
+        </ThemedText>
+      )}
       <View style={styles.codeBox}>
         <ThemedText style={styles.code}>{formatted}</ThemedText>
       </View>
-      <ScalePressable style={styles.button} onPress={() => void onVerify()}>
-        <ThemedText style={styles.buttonText}>Mark verified</ThemedText>
-      </ScalePressable>
+      {keyChanged ? (
+        <>
+          <ScalePressable
+            style={[styles.button, styles.accept]}
+            disabled={busy}
+            onPress={() => void onAccept(false)}
+          >
+            <ThemedText style={styles.buttonText}>Accept new key</ThemedText>
+          </ScalePressable>
+          <ScalePressable
+            style={styles.button}
+            disabled={busy}
+            onPress={() => void onAccept(true)}
+          >
+            <ThemedText style={styles.buttonText}>
+              Accept and mark verified
+            </ThemedText>
+          </ScalePressable>
+        </>
+      ) : (
+        <ScalePressable
+          style={styles.button}
+          disabled={busy}
+          onPress={() => void onAccept(true)}
+        >
+          <ThemedText style={styles.buttonText}>Mark verified</ThemedText>
+        </ScalePressable>
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 20, gap: 16 },
+  warn: { color: "#B45309" },
   codeBox: {
     padding: 16,
     borderRadius: 12,
@@ -57,5 +103,6 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: "center",
   },
+  accept: { backgroundColor: "#D97706" },
   buttonText: { color: "#fff", fontWeight: "600" },
 });

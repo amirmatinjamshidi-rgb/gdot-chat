@@ -2,18 +2,23 @@ import * as signalR from "@microsoft/signalr";
 import { Platform } from "react-native";
 
 import { SIGNALR_HUB_URL } from "@/lib/config";
-import type { ReactionPayload } from "@/components/reactions/types";
 import { agentDebugLog } from "@/lib/debug-agent-log";
 import type { AuthStore } from "@/lib/session/auth-store";
+import { isOfflineToken } from "@/lib/session/auth-store";
 
 export type EnvelopeAvailableHandler = (envelopeId: string) => void;
-export type ReactionHandler = (payload: ReactionPayload) => void;
+export type SignalRConnectionHandler = (connected: boolean) => void;
+
+/** Backoff for withAutomaticReconnect (ms). Final null stops retrying until manual connect. */
+const RECONNECT_DELAYS_MS = [0, 2_000, 5_000, 10_000, 30_000];
 
 export class SignalRClient {
   private connection: signalR.HubConnection | null = null;
   private onEnvelope: EnvelopeAvailableHandler | null = null;
-  private onReaction: ReactionHandler | null = null;
+  private onConnection: SignalRConnectionHandler | null = null;
   private connectInFlight: Promise<void> | null = null;
+  /** When false, ignore automatic reconnect / don't auto-start (background / stop). */
+  private desireConnected = false;
 
   constructor(private readonly authStore: AuthStore) {}
 
@@ -21,23 +26,18 @@ export class SignalRClient {
     this.onEnvelope = handler;
   }
 
-  setReactionHandler(handler: ReactionHandler | null): void {
-    this.onReaction = handler;
+  setConnectionHandler(handler: SignalRConnectionHandler | null): void {
+    this.onConnection = handler;
   }
 
-  async sendReaction(payload: ReactionPayload): Promise<void> {
-    if (this.connection?.state !== signalR.HubConnectionState.Connected) {
-      return;
-    }
-    try {
-      await this.connection.invoke("SendReaction", payload);
-    } catch {
-      /* REST fallback already sent */
-    }
+  isConnected(): boolean {
+    return this.connection?.state === signalR.HubConnectionState.Connected;
   }
 
   async connect(): Promise<void> {
+    this.desireConnected = true;
     if (this.connection?.state === signalR.HubConnectionState.Connected) {
+      this.emitConnection(true);
       return;
     }
     if (this.connectInFlight) {
@@ -51,25 +51,42 @@ export class SignalRClient {
   }
 
   private async connectInner(): Promise<void> {
+    if (!this.desireConnected) return;
     if (this.connection?.state === signalR.HubConnectionState.Connected) {
+      this.emitConnection(true);
       return;
     }
 
     const token = await this.authStore.getAccessToken();
-    if (!token || token.startsWith("offline.")) {
+    if (!token || isOfflineToken(token)) {
+      this.emitConnection(false);
       return;
     }
 
-    const hubUrl = `${SIGNALR_HUB_URL}?access_token=${encodeURIComponent(token)}`;
+    await this.disposeConnection();
+
+    if (!this.desireConnected) return;
+
+    const accessTokenFactory = async () => {
+      const latest = await this.authStore.getAccessToken();
+      return latest && !isOfflineToken(latest) ? latest : "";
+    };
+
+    // Prefer accessTokenFactory over embedding the JWT in a hand-built URL.
+    // WebSockets still transmit the token as ?access_token= (browser/RN cannot
+    // set Authorization on the WS handshake); the server only accepts that
+    // query param on /hubs/* and request logging redacts it.
+    const options: signalR.IHttpConnectionOptions = {
+      accessTokenFactory,
+    };
+
     const builder = new signalR.HubConnectionBuilder()
-      .withAutomaticReconnect()
+      .withAutomaticReconnect(RECONNECT_DELAYS_MS)
       .configureLogging(signalR.LogLevel.None);
 
-    // Long-polling holds HTTP connections and can starve fetch() on Android.
     if (Platform.OS === "web") {
-      this.connection = builder.withUrl(hubUrl).build();
+      this.connection = builder.withUrl(SIGNALR_HUB_URL, options).build();
     } else {
-      // #region agent log
       agentDebugLog(
         "signalr-client.ts:connectInner",
         "using websockets transport",
@@ -77,49 +94,68 @@ export class SignalRClient {
         "K",
         "post-fix",
       );
-      // #endregion
       this.connection = builder
-        .withUrl(hubUrl, {
+        .withUrl(SIGNALR_HUB_URL, {
+          ...options,
           transport: signalR.HttpTransportType.WebSockets,
           skipNegotiation: true,
         })
         .build();
     }
 
-    this.connection.on(
-      "EnvelopeAvailable",
-      (payload: { envelopeId: string }) => {
-        this.onEnvelope?.(payload.envelopeId);
-      },
-    );
+    this.connection.on("EnvelopeAvailable", (payload: { envelopeId: string }) => {
+      this.onEnvelope?.(payload.envelopeId);
+    });
 
-    this.connection.on("ReceiveReaction", (payload: ReactionPayload) => {
-      this.onReaction?.(payload);
+    this.connection.onreconnecting(() => {
+      this.emitConnection(false);
+    });
+
+    this.connection.onreconnected(() => {
+      if (!this.desireConnected) return;
+      this.emitConnection(true);
+    });
+
+    this.connection.onclose(() => {
+      this.emitConnection(false);
+      // If we still want to be live (foreground) and auto-reconnect exhausted,
+      // leave disconnected so SyncService poll fallback / next connect() can recover.
     });
 
     try {
       await this.connection.start();
+      if (!this.desireConnected) {
+        await this.disposeConnection();
+        return;
+      }
+      this.emitConnection(true);
     } catch {
-      this.connection = null;
+      await this.disposeConnection();
+      this.emitConnection(false);
     }
   }
 
   async disconnect(): Promise<void> {
-    await this.connection?.stop();
-    this.connection = null;
+    this.desireConnected = false;
+    await this.disposeConnection();
+    this.emitConnection(false);
   }
 
   async reconnect(): Promise<void> {
-    await this.disconnect();
-    await this.connect();
+    // Keep desireConnected true across a forced rebuild (e.g. token refresh).
+    const want = this.desireConnected;
+    await this.disposeConnection();
+    this.emitConnection(false);
+    if (want) {
+      await this.connect();
+    }
   }
 
   /** Free HTTP connections on native while critical REST calls run. */
   async runWithTransportPaused<T>(fn: () => Promise<T>): Promise<T> {
-    const wasConnected =
-      this.connection?.state === signalR.HubConnectionState.Connected;
-    if (wasConnected) {
-      // #region agent log
+    const wasDesired = this.desireConnected;
+    const wasConnected = this.isConnected();
+    if (wasConnected || wasDesired) {
       agentDebugLog(
         "signalr-client.ts:runWithTransportPaused",
         "pausing signalr",
@@ -127,14 +163,12 @@ export class SignalRClient {
         "K",
         "post-fix",
       );
-      // #endregion
       await this.disconnect();
     }
     try {
       return await fn();
     } finally {
-      if (wasConnected) {
-        // #region agent log
+      if (wasDesired) {
         agentDebugLog(
           "signalr-client.ts:runWithTransportPaused",
           "resuming signalr",
@@ -142,9 +176,23 @@ export class SignalRClient {
           "K",
           "post-fix",
         );
-        // #endregion
         await this.connect();
       }
     }
+  }
+
+  private async disposeConnection(): Promise<void> {
+    const conn = this.connection;
+    this.connection = null;
+    if (!conn) return;
+    try {
+      await conn.stop();
+    } catch {
+      /* noop */
+    }
+  }
+
+  private emitConnection(connected: boolean): void {
+    this.onConnection?.(connected);
   }
 }

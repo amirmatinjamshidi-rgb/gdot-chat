@@ -1,14 +1,15 @@
 import { ApiClient } from "@/lib/api/api-client";
+import { AttachmentsApi } from "@/lib/api/attachments-api";
 import { ENABLE_SIGNALR } from "@/lib/config";
 import { AuthApi } from "@/lib/api/auth-api";
 import { DevicesApi } from "@/lib/api/devices-api";
 import { MessagesApi } from "@/lib/api/messages-api";
-import { ReactionsApi } from "@/lib/api/reactions-api";
 import { SignalRClient } from "@/lib/api/signalr-client";
 import { UsersApi } from "@/lib/api/users-api";
 import { LibSignalAdapter } from "@/lib/crypto/libsignal-adapter";
 import { PreKeyManager } from "@/lib/crypto/pre-key-manager";
 import { SignalService } from "@/lib/crypto/signal-service";
+import { AttachmentStore } from "@/lib/db/attachment-store";
 import { ConversationStore } from "@/lib/db/conversation-store";
 import { CryptoKeyStore } from "@/lib/db/crypto-key-store";
 import { sqlCipherDatabase } from "@/lib/db/database";
@@ -19,6 +20,7 @@ import { MessageStore } from "@/lib/db/message-store";
 import { ReactionStore } from "@/lib/db/reaction-store";
 import { ProfileStore } from "@/lib/db/profile-store";
 import { SessionStore } from "@/lib/db/session-store";
+import { MediaTransferService } from "@/lib/media/media-transfer";
 import { authStore } from "@/lib/session/auth-store";
 import { appLockStore } from "@/lib/session/app-lock-store";
 import { SyncService } from "@/lib/session/sync-service";
@@ -41,10 +43,11 @@ const crypto = new LibSignalAdapter(
 );
 const devicesApi = new DevicesApi(apiClient);
 const messagesApi = new MessagesApi(apiClient);
-const reactionsApi = new ReactionsApi(apiClient);
 const messageStore = new MessageStore(sqlCipherDatabase);
 const reactionStore = new ReactionStore(sqlCipherDatabase);
 const conversationStore = new ConversationStore(sqlCipherDatabase);
+const attachmentStore = new AttachmentStore(sqlCipherDatabase);
+const attachmentsApi = new AttachmentsApi(apiClient);
 const preKeyManager = new PreKeyManager(
   crypto,
   cryptoKeyStore,
@@ -56,6 +59,7 @@ const signalService = new SignalService(
   identityStore,
   devicesApi,
   preKeyManager,
+  sessionStore,
 );
 const syncService = new SyncService(
   messagesApi,
@@ -65,7 +69,17 @@ const syncService = new SyncService(
   conversationStore,
   identityStore,
   authStore,
+  reactionStore,
 );
+const mediaTransfer = new MediaTransferService(
+  attachmentsApi,
+  messageStore,
+  attachmentStore,
+  conversationStore,
+  identityStore,
+  (conversation, plaintext) => syncService.encryptAndPost(conversation, plaintext),
+);
+syncService.setMediaTransfer(mediaTransfer);
 
 export const appServices = {
   authStore,
@@ -76,7 +90,6 @@ export const appServices = {
   authApi: new AuthApi(apiClient),
   devicesApi,
   messagesApi,
-  reactionsApi,
   usersApi: new UsersApi(apiClient),
   signalr,
   identityStore,
@@ -87,6 +100,9 @@ export const appServices = {
   messageStore,
   reactionStore,
   conversationStore,
+  attachmentStore,
+  attachmentsApi,
+  mediaTransfer,
   crypto,
   preKeyManager,
   signalService,

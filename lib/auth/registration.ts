@@ -1,6 +1,8 @@
 import type { AuthResult, RegisterRequest } from "@/lib/api/api-types";
 import { ApiError } from "@/lib/api/api-client";
 import type { AuthApi } from "@/lib/api/auth-api";
+import { AppAuthError } from "@/lib/auth/app-auth-error";
+import { getBiometricCapability } from "@/lib/auth/biometric-capability";
 import { bytesToBase64 } from "@/lib/crypto/encoding";
 import type { LibSignalAdapter } from "@/lib/crypto/libsignal-adapter";
 import type { ICryptoKeyStore } from "@/lib/db/crypto-key-store";
@@ -11,6 +13,22 @@ import type { IKekManager } from "@/lib/db/kek-manager";
 import type { LocalIdentity } from "@/lib/db/types";
 import { randomUUID } from "@/lib/crypto/random-id";
 import type { AuthStore } from "@/lib/session/auth-store";
+
+export async function ensureKek(
+  kekManager: IKekManager,
+  appPin?: string,
+): Promise<void> {
+  if (await kekManager.hasKek()) return;
+
+  const capability = await getBiometricCapability();
+  if (capability.canUseStrongForSecureStore) {
+    await kekManager.createKekAfterBiometric();
+    return;
+  }
+
+  if (!appPin) throw new AppAuthError("PIN_REQUIRED");
+  await kekManager.createKekWithPin(appPin);
+}
 
 export async function registerUser(params: {
   username: string;
@@ -23,7 +41,12 @@ export async function registerUser(params: {
   db: IDatabase;
   identityStore: IIdentityStore;
   cryptoKeyStore: ICryptoKeyStore;
+  appPin?: string;
 }): Promise<void> {
+  // Resolve KEK path before server registration so PIN_REQUIRED does not leave
+  // a half-created server account.
+  await ensureKek(params.kekManager, params.appPin);
+
   const username = params.username.trim().toLowerCase();
   const identityPair = await params.crypto.generateIdentityKeyPair();
   const registrationId = await params.crypto.generateRegistrationId();
@@ -56,19 +79,15 @@ export async function registerUser(params: {
   try {
     auth = await params.authApi.register(registerBody);
   } catch (e) {
-    if (e instanceof ApiError && e.status >= 400 && e.status < 500) {
-      throw e;
-    }
-    if (!__DEV__) {
-      throw e instanceof Error ? e : new Error("Registration failed");
-    }
-    auth = offlineAuthResult(username);
+    if (e instanceof ApiError) throw e;
+    throw e instanceof Error
+      ? e
+      : new Error("Registration failed. Check your connection and try again.");
   }
 
-  if (!(await params.kekManager.hasKek())) {
-    await params.kekManager.createKekAfterBiometric();
-  }
-  const passphrase = await params.kekManager.getPassphraseForDb();
+  const passphrase = await params.kekManager.getPassphraseForDb({
+    pin: params.appPin,
+  });
   if (!params.db.isOpen()) {
     await params.db.open(passphrase);
   }
@@ -89,19 +108,12 @@ export async function registerUser(params: {
     oneTimePreKeys[oneTimePreKeys.length - 1]!.keyId + 1,
   );
   await params.authStore.setTokens(auth);
+  // Close so /lock re-authenticates (biometric or PIN) before app use.
+  if (params.db.isOpen()) {
+    await params.db.close();
+  }
 }
 
-function offlineAuthResult(username: string): AuthResult {
-  const userId = randomUUID();
-  const deviceId = randomUUID();
-  return {
-    accessToken: `offline.${userId}`,
-    refreshToken: `offline.refresh.${userId}`,
-    userId,
-    deviceId,
-    accessTokenExpiresAt: new Date(Date.now() + 86400000).toISOString(),
-  };
-}
 
 export async function loginUser(params: {
   username: string;
@@ -111,9 +123,17 @@ export async function loginUser(params: {
   kekManager: IKekManager;
   db: IDatabase;
   identityStore: IIdentityStore;
+  appPin?: string;
 }): Promise<void> {
   const username = params.username.trim().toLowerCase();
-  const passphrase = await params.kekManager.getPassphraseForDb();
+  const mode = await params.kekManager.getLockMode();
+  if (mode === "pin" && !params.appPin) {
+    throw new AppAuthError("PIN_REQUIRED");
+  }
+
+  const passphrase = await params.kekManager.getPassphraseForDb({
+    pin: params.appPin,
+  });
   if (!params.db.isOpen()) {
     await params.db.open(passphrase);
   }
@@ -131,22 +151,13 @@ export async function loginUser(params: {
       deviceId,
     });
   } catch (e) {
-    if (e instanceof ApiError && e.status >= 400 && e.status < 500) {
-      throw e;
-    }
-    if (!__DEV__) {
-      throw e instanceof Error ? e : new Error("Login failed");
-    }
-    if (!local || local.username !== username) {
-      throw new Error("Invalid credentials or no local account");
-    }
-    auth = {
-      accessToken: `offline.${local.userId}`,
-      refreshToken: `offline.refresh.${local.userId}`,
-      userId: local.userId,
-      deviceId: local.deviceId,
-      accessTokenExpiresAt: new Date(Date.now() + 86400000).toISOString(),
-    };
+    if (e instanceof ApiError) throw e;
+    throw e instanceof Error
+      ? e
+      : new Error("Login failed. Check your connection and try again.");
   }
   await params.authStore.setTokens(auth);
+  if (params.db.isOpen()) {
+    await params.db.close();
+  }
 }

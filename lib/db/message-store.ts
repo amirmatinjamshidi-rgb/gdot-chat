@@ -10,6 +10,8 @@ export interface IMessageStore {
   ): Promise<LocalMessage[]>;
   updateStatus(id: string, status: MessageStatus): Promise<void>;
   updateServerEnvelopeId(id: string, serverEnvelopeId: string): Promise<void>;
+  updateAttachmentId(id: string, attachmentId: string): Promise<void>;
+  getById(id: string): Promise<LocalMessage | null>;
   getByClientId(clientId: string): Promise<LocalMessage | null>;
   getByServerEnvelopeId(serverEnvelopeId: string): Promise<LocalMessage | null>;
 }
@@ -19,6 +21,7 @@ type MessageRow = {
   client_id: string;
   conversation_id: string;
   direction: string;
+  kind: string | null;
   plaintext: string;
   ciphertext: Uint8Array | null;
   message_type: number | null;
@@ -26,14 +29,18 @@ type MessageRow = {
   sender_device_id: string;
   server_envelope_id: string | null;
   created_at: number;
+  attachment_id: string | null;
 };
 
 function mapRow(row: MessageRow): LocalMessage {
+  const kind =
+    row.kind === "voice" || row.kind === "video" ? row.kind : "text";
   return {
     id: row.id,
     clientId: row.client_id,
     conversationId: row.conversation_id,
     direction: row.direction as LocalMessage["direction"],
+    kind,
     plaintext: row.plaintext,
     ciphertext: row.ciphertext ?? undefined,
     messageType:
@@ -44,6 +51,7 @@ function mapRow(row: MessageRow): LocalMessage {
     senderDeviceId: row.sender_device_id,
     serverEnvelopeId: row.server_envelope_id ?? undefined,
     createdAt: row.created_at,
+    attachmentId: row.attachment_id ?? undefined,
   };
 }
 
@@ -52,14 +60,15 @@ export class MessageStore implements IMessageStore {
 
   async insert(m: LocalMessage): Promise<void> {
     await this.db.run(
-      `INSERT INTO messages (id, client_id, conversation_id, direction, plaintext,
-        ciphertext, message_type, status, sender_device_id, server_envelope_id, created_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO messages (id, client_id, conversation_id, direction, kind, plaintext,
+        ciphertext, message_type, status, sender_device_id, server_envelope_id, created_at, attachment_id)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         m.id,
         m.clientId,
         m.conversationId,
         m.direction,
+        m.kind ?? "text",
         m.plaintext,
         m.ciphertext ?? null,
         m.messageType ?? null,
@@ -67,6 +76,7 @@ export class MessageStore implements IMessageStore {
         m.senderDeviceId,
         m.serverEnvelopeId ?? null,
         m.createdAt,
+        m.attachmentId ?? null,
       ],
     );
   }
@@ -105,6 +115,21 @@ export class MessageStore implements IMessageStore {
       `UPDATE messages SET server_envelope_id = ? WHERE id = ?`,
       [serverEnvelopeId, id],
     );
+  }
+
+  async updateAttachmentId(id: string, attachmentId: string): Promise<void> {
+    await this.db.run(`UPDATE messages SET attachment_id = ? WHERE id = ?`, [
+      attachmentId,
+      id,
+    ]);
+  }
+
+  async getById(id: string): Promise<LocalMessage | null> {
+    const row = await this.db.getFirst<MessageRow>(
+      `SELECT * FROM messages WHERE id = ?`,
+      [id],
+    );
+    return row ? mapRow(row) : null;
   }
 
   async getByClientId(clientId: string): Promise<LocalMessage | null> {

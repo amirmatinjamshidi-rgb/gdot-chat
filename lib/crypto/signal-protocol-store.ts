@@ -9,6 +9,16 @@ import type { IIdentityStore } from "@/lib/db/identity-store";
 import type { ISessionStore } from "@/lib/db/session-store";
 
 import { bytesToArrayBuffer, arrayBufferToBytes } from "./buffer-utils";
+import { bytesToBase64 } from "./encoding";
+
+/** Strip SignalProtocolAddress device suffix ("name.1" → "name"). */
+export function identityStoreKey(encodedAddress: string): string {
+  const lastDot = encodedAddress.lastIndexOf(".");
+  if (lastDot > 0 && /^\d+$/.test(encodedAddress.slice(lastDot + 1))) {
+    return encodedAddress.slice(0, lastDot);
+  }
+  return encodedAddress;
+}
 
 /** SQLCipher-backed Signal Protocol store (single local device). */
 export class SignalProtocolStore implements StorageType {
@@ -34,10 +44,20 @@ export class SignalProtocolStore implements StorageType {
   }
 
   async isTrustedIdentity(
-    _identifier: string,
-    _identityKey: ArrayBuffer,
-    _direction: Direction,
+    identifier: string,
+    identityKey: ArrayBuffer,
+    direction: Direction,
   ): Promise<boolean> {
+    const key = identityStoreKey(identifier);
+    const existing = await this.identityStore.getRemoteIdentity(key);
+    if (!existing) return true;
+    if (this.buffersEqual(existing.identityKeyPublic, identityKey)) {
+      // Same key: allow. Sending still blocked separately when keyChanged.
+      return true;
+    }
+    // Different key presented: allow receive so UI can surface the change;
+    // block sending until the user accepts the new identity.
+    if (direction === Direction.SENDING) return false;
     return true;
   }
 
@@ -46,14 +66,42 @@ export class SignalProtocolStore implements StorageType {
     publicKey: ArrayBuffer,
     _nonblockingApproval?: boolean,
   ): Promise<boolean> {
-    const existing = await this.identityStore.getRemoteIdentity(encodedAddress);
-    if (
-      existing &&
-      !this.buffersEqual(existing.identityKeyPublic, publicKey)
-    ) {
-      return true;
+    const key = identityStoreKey(encodedAddress);
+    const newKey = arrayBufferToBytes(publicKey);
+    const fingerprint = bytesToBase64(newKey);
+    const existing = await this.identityStore.getRemoteIdentity(key);
+
+    if (!existing) {
+      await this.identityStore.saveRemoteIdentity({
+        peerUserId: key,
+        peerDeviceId: key,
+        identityKeyPublic: newKey,
+        safetyNumber: "",
+        verified: false,
+        keyChanged: false,
+        lastSeenKeyFingerprint: fingerprint,
+      });
+      return false;
     }
-    return false;
+
+    if (this.buffersEqual(existing.identityKeyPublic, publicKey)) {
+      return false;
+    }
+
+    await this.sessionStore.delete(encodedAddress);
+    // Also clear bare key session if present.
+    await this.sessionStore.delete(key);
+    await this.identityStore.saveRemoteIdentity({
+      ...existing,
+      peerUserId: key,
+      peerDeviceId: key,
+      identityKeyPublic: newKey,
+      safetyNumber: "",
+      verified: false,
+      keyChanged: true,
+      lastSeenKeyFingerprint: fingerprint,
+    });
+    return true;
   }
 
   async loadPreKey(keyId: number | string): Promise<KeyPairType | undefined> {

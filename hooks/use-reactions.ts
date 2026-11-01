@@ -1,7 +1,7 @@
 import * as Haptics from "expo-haptics";
 import { useCallback, useEffect, useState } from "react";
 
-import type { Reaction, ReactionPayload } from "@/components/reactions/types";
+import type { Reaction } from "@/components/reactions/types";
 import { useAppServices } from "@/lib/services/app-services-context";
 import { useReactionsStore } from "@/stores/reactions-store";
 
@@ -10,13 +10,7 @@ export type UseReactionsOptions = {
 };
 
 export function useReactions({ conversationId }: UseReactionsOptions) {
-  const {
-    reactionStore,
-    reactionsApi,
-    signalr,
-    identityStore,
-    messageStore,
-  } = useAppServices();
+  const { reactionStore, identityStore, syncService } = useAppServices();
   const setConversationReactions = useReactionsStore(
     (s) => s.setConversationReactions,
   );
@@ -48,45 +42,31 @@ export function useReactions({ conversationId }: UseReactionsOptions) {
   }, [hydrateFromDb]);
 
   useEffect(() => {
-    const handler = async (payload: ReactionPayload) => {
-      if (!conversationId || payload.conversationId !== conversationId) return;
-      if (payload.userId === currentUserId) return;
-
-      let messageId = payload.messageId;
-      if (payload.serverEnvelopeId) {
-        const match = await messageStore.getByServerEnvelopeId(
-          payload.serverEnvelopeId,
-        );
-        if (match) messageId = match.id;
-      }
-
-      const reactions = await reactionStore.toggle(
-        messageId,
-        payload.emoji,
-        payload.userId,
-      );
-      setMessageReactions(conversationId, messageId, reactions);
+    if (!conversationId) return;
+    const handler = (changedConversationId: string) => {
+      if (changedConversationId !== conversationId) return;
+      void hydrateFromDb();
     };
-
-    signalr.setReactionHandler(handler);
-    return () => signalr.setReactionHandler(null);
-  }, [
-    conversationId,
-    currentUserId,
-    messageStore,
-    reactionStore,
-    setMessageReactions,
-    signalr,
-  ]);
+    syncService.setReactionAppliedHandler(handler);
+    return () => syncService.setReactionAppliedHandler(null);
+  }, [conversationId, hydrateFromDb, syncService]);
 
   const sendReaction = useCallback(
     async (
       messageId: string,
       emoji: string,
-      recipientDeviceId: string,
+      _recipientDeviceId: string,
       serverEnvelopeId?: string,
     ) => {
       if (!conversationId || !currentUserId) return;
+      if (!serverEnvelopeId) {
+        if (__DEV__) {
+          console.warn(
+            "[useReactions] cannot send E2EE reaction without serverEnvelopeId",
+          );
+        }
+        return;
+      }
 
       const previous =
         useReactionsStore.getState().byConversation[conversationId]?.[
@@ -95,32 +75,37 @@ export function useReactions({ conversationId }: UseReactionsOptions) {
 
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
-      let toggled = false;
+      const had = await reactionStore.userHasReaction(
+        messageId,
+        emoji,
+        currentUserId,
+      );
+      const op = had ? "remove" : "add";
+
+      let applied = false;
       try {
-        const reactions = await reactionStore.toggle(
+        const reactions = await reactionStore.apply(
           messageId,
           emoji,
           currentUserId,
+          op,
         );
-        toggled = true;
+        applied = true;
         setMessageReactions(conversationId, messageId, reactions);
 
-        const payload: ReactionPayload = {
-          messageId,
+        await syncService.sendReaction({
           conversationId,
+          targetServerEnvelopeId: serverEnvelopeId,
           emoji,
-          userId: currentUserId,
-          recipientDeviceId,
-          serverEnvelopeId,
-        };
-        await reactionsApi.send(payload);
-        await signalr.sendReaction(payload);
+          op,
+        });
       } catch {
-        if (toggled) {
-          const reverted = await reactionStore.toggle(
+        if (applied) {
+          const reverted = await reactionStore.apply(
             messageId,
             emoji,
             currentUserId,
+            op === "add" ? "remove" : "add",
           );
           setMessageReactions(conversationId, messageId, reverted);
         } else {
@@ -132,9 +117,8 @@ export function useReactions({ conversationId }: UseReactionsOptions) {
       conversationId,
       currentUserId,
       reactionStore,
-      reactionsApi,
       setMessageReactions,
-      signalr,
+      syncService,
     ],
   );
 

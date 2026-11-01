@@ -15,9 +15,8 @@ import React, {
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
 import { CircularProgressRing } from "@/components/circular-progress-ring";
+import { VIDEO_RECORD_MAX_MS } from "@/lib/config";
 import { useColors } from "@/stores/theme-store";
-
-export const VIDEO_RECORD_MAX_MS = 90_000;
 /** Visible camera disc */
 const CIRCLE = 212;
 const RING_INSET = 10;

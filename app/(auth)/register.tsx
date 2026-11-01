@@ -5,11 +5,12 @@ import {
   Alert,
   StyleSheet,
   TextInput,
-  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ThemedText } from "@/components/themed-text";
 import { ScalePressable } from "@/components/ui/scale-pressable";
+import { AppAuthError } from "@/lib/auth/app-auth-error";
+import { setPendingAppPinAuth } from "@/lib/auth/pending-app-pin-auth";
 import { registerUser } from "@/lib/auth/registration";
 import type { LibSignalAdapter } from "@/lib/crypto/libsignal-adapter";
 import { useAuth } from "@/lib/providers/auth-provider";
@@ -45,8 +46,24 @@ export default function RegisterScreen() {
       await refresh();
       router.replace("/lock" as Href);
     } catch (e) {
+      if (e instanceof AppAuthError && e.code === "PIN_REQUIRED") {
+        setPendingAppPinAuth({
+          kind: "register",
+          username,
+          password,
+          deviceName: "Mobile",
+        });
+        router.push("/(auth)/set-app-pin" as Href);
+        return;
+      }
+      const title =
+        e instanceof AppAuthError && e.code === "STRONG_BIOMETRIC_REQUIRED"
+          ? "Fingerprint required"
+          : e instanceof AppAuthError && e.code === "NOT_ENROLLED"
+            ? "Biometrics not set up"
+            : "Registration failed";
       Alert.alert(
-        "Registration failed",
+        title,
         e instanceof Error ? e.message : "Unknown error",
       );
     } finally {

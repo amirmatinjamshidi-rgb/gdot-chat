@@ -15,6 +15,19 @@ export function base64ToBytes(b64: string): Uint8Array {
   return out;
 }
 
+export function bytesToBase64Url(bytes: Uint8Array): string {
+  return bytesToBase64(bytes)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+export function base64UrlToBytes(b64url: string): Uint8Array {
+  const padded = b64url.replace(/-/g, "+").replace(/_/g, "/");
+  const pad = padded.length % 4 === 0 ? "" : "=".repeat(4 - (padded.length % 4));
+  return base64ToBytes(padded + pad);
+}
+
 export function textToBytes(text: string): Uint8Array {
   return new TextEncoder().encode(text);
 }

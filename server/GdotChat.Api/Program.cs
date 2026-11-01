@@ -15,6 +15,17 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
 builder.Services.Configure<RelayOptions>(builder.Configuration.GetSection(RelayOptions.SectionName));
+builder.Services.Configure<AttachmentOptions>(builder.Configuration.GetSection(AttachmentOptions.SectionName));
+builder.Services.Configure<MinioOptions>(builder.Configuration.GetSection(MinioOptions.SectionName));
+
+var attachmentOptions = builder.Configuration.GetSection(AttachmentOptions.SectionName).Get<AttachmentOptions>()
+    ?? new AttachmentOptions();
+builder.WebHost.ConfigureKestrel(kestrel =>
+{
+    kestrel.Limits.MaxRequestBodySize = Math.Max(
+        30_000_000,
+        attachmentOptions.ChunkSizeBytes + AttachmentOptions.GcmTagBytes + 1_048_576);
+});
 
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddControllers();
@@ -45,7 +56,15 @@ builder.Services.AddSwaggerGen(c =>
 
 var jwt = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>()
     ?? new JwtOptions();
-var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt.SigningKey));
+var signingKeyMaterial = ResolveJwtSigningKey(builder.Environment, jwt);
+var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(signingKeyMaterial));
+// Keep options.SigningKey in sync for JwtTokenService (reads IOptions<JwtOptions>).
+jwt.SigningKey = signingKeyMaterial;
+builder.Services.PostConfigure<JwtOptions>(opts =>
+{
+    if (string.IsNullOrWhiteSpace(opts.SigningKey))
+        opts.SigningKey = signingKeyMaterial;
+});
 
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -67,9 +86,23 @@ builder.Services
         {
             OnMessageReceived = context =>
             {
-                var accessToken = context.Request.Query["access_token"];
+                // Prefer Items (redacted query) then raw query for hub WebSockets only.
                 var path = context.HttpContext.Request.Path;
-                if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+                if (!path.StartsWithSegments("/hubs"))
+                    return Task.CompletedTask;
+
+                if (context.HttpContext.Items.TryGetValue(
+                        AccessTokenQueryRedactionMiddleware.HubAccessTokenItemKey,
+                        out var stored)
+                    && stored is string itemToken
+                    && !string.IsNullOrEmpty(itemToken))
+                {
+                    context.Token = itemToken;
+                    return Task.CompletedTask;
+                }
+
+                var accessToken = context.Request.Query["access_token"];
+                if (!string.IsNullOrEmpty(accessToken))
                     context.Token = accessToken;
                 return Task.CompletedTask;
             },
@@ -126,6 +159,33 @@ builder.Services.AddRateLimiter(options =>
                 PermitLimit = isTesting ? int.MaxValue : 30,
                 Window = TimeSpan.FromMinutes(1),
             }));
+
+    options.AddPolicy("attachments-create", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.User.FindFirst("device_id")?.Value ?? "anon",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = isTesting ? int.MaxValue : attachmentOptions.CreatePermitLimit,
+                Window = TimeSpan.FromHours(1),
+            }));
+
+    options.AddPolicy("attachments-chunk-upload", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.User.FindFirst("device_id")?.Value ?? "anon",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = isTesting ? int.MaxValue : attachmentOptions.ChunkPermitLimit,
+                Window = TimeSpan.FromMinutes(1),
+            }));
+
+    options.AddPolicy("attachments-chunk-download", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.User.FindFirst("device_id")?.Value ?? "anon",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = isTesting ? int.MaxValue : attachmentOptions.ChunkPermitLimit,
+                Window = TimeSpan.FromMinutes(1),
+            }));
 });
 
 var app = builder.Build();
@@ -143,6 +203,7 @@ if (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Testing"))
     await db.Database.MigrateAsync();
 }
 
+app.UseMiddleware<AccessTokenQueryRedactionMiddleware>();
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 // LAN phones use http://<ip>:5066; redirecting to HTTPS breaks fetch (untrusted dev cert).
 if (!app.Environment.IsDevelopment() && !app.Environment.IsEnvironment("Testing"))
@@ -157,5 +218,35 @@ app.MapControllers();
 app.MapHub<MessageRelayHub>("/hubs/messages");
 
 app.Run();
+
+
+static string ResolveJwtSigningKey(IHostEnvironment env, JwtOptions jwt)
+{
+    const int minLength = 32;
+    // Fixed local-only key used when Development + UseEphemeralDevelopmentSigningKey.
+    // Not a production secret; never commit real keys into appsettings.
+    const string ephemeralDevelopmentSigningKey =
+        "dev-only-ephemeral-signing-key-do-not-use-in-prod!";
+
+    var key = jwt.SigningKey?.Trim() ?? "";
+    if (key.Length >= minLength)
+        return key;
+
+    if (env.IsEnvironment("Testing"))
+    {
+        if (key.Length > 0 && key.Length < minLength)
+            throw new InvalidOperationException(
+                "Jwt:SigningKey is set but shorter than 32 characters (Testing).");
+        return "testing-signing-key-min-32-characters-long!!";
+    }
+
+    if (env.IsDevelopment() && jwt.UseEphemeralDevelopmentSigningKey)
+        return ephemeralDevelopmentSigningKey;
+
+    throw new InvalidOperationException(
+        "Jwt:SigningKey is missing or shorter than 32 characters. "
+        + "Set env Jwt__SigningKey (or user-secrets), or for local Development only set "
+        + "Jwt:UseEphemeralDevelopmentSigningKey=true. See server/README.md.");
+}
 
 public partial class Program;

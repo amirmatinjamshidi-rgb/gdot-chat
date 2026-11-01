@@ -36,15 +36,6 @@ public interface IMessageRelayService
     Task<int> PurgeExpiredAsync(CancellationToken ct = default);
 }
 
-public interface IReactionService
-{
-    Task ToggleAndNotifyAsync(
-        Guid senderUserId,
-        Guid senderDeviceId,
-        ReactionRequest request,
-        CancellationToken ct = default);
-}
-
 public interface IJwtTokenService
 {
     string CreateAccessToken(User user, Device device);
@@ -60,9 +51,47 @@ public interface IPasswordHasher
     bool Verify(string password, string hash);
 }
 
+public interface IAttachmentService
+{
+    Task<CreateAttachmentResponse> CreateAsync(
+        Guid senderDeviceId,
+        CreateAttachmentRequest request,
+        CancellationToken ct = default);
+
+    Task PutChunkAsync(
+        Guid senderDeviceId,
+        Guid attachmentId,
+        int chunkIndex,
+        Stream body,
+        long? contentLength,
+        CancellationToken ct = default);
+
+    Task<AttachmentStatusDto> GetStatusAsync(
+        Guid callerDeviceId,
+        Guid attachmentId,
+        CancellationToken ct = default);
+
+    Task CompleteAsync(Guid senderDeviceId, Guid attachmentId, CancellationToken ct = default);
+
+    Task GetChunkAsync(
+        Guid recipientDeviceId,
+        Guid attachmentId,
+        int chunkIndex,
+        Stream destination,
+        CancellationToken ct = default);
+
+    Task DownloadCompleteAsync(
+        Guid recipientDeviceId,
+        Guid attachmentId,
+        CancellationToken ct = default);
+
+    Task DeleteAsync(Guid senderDeviceId, Guid attachmentId, CancellationToken ct = default);
+
+    Task<int> PurgeExpiredAsync(CancellationToken ct = default);
+}
+
 public interface IMessageNotifier
 {
     Task NotifyEnvelopeAvailableAsync(Guid recipientDeviceId, Guid envelopeId, CancellationToken ct = default);
     Task NotifyPreKeysLowAsync(Guid deviceId, int remainingCount, CancellationToken ct = default);
-    Task NotifyReactionAsync(Guid recipientDeviceId, ReactionPayload payload, CancellationToken ct = default);
 }

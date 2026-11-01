@@ -1,0 +1,29 @@
+[tools]
+node = "20"
+dotnet = "8"
+
+[env]
+DOTNET_CLI_TELEMETRY_OPTOUT = "1"
+
+[tasks.db]
+description = "Start Postgres via Docker Compose"
+dir = "server"
+run = "docker compose up -d"
+
+[tasks.migrate]
+description = "Apply EF Core migrations"
+dir = "server"
+run = "dotnet ef database update -p GdotChat.Infrastructure -s GdotChat.Api"
+
+[tasks.api]
+description = "Run the ASP.NET API"
+dir = "server"
+run = "dotnet run --project GdotChat.Api"
+
+[tasks.app]
+description = "Start Expo with dev client"
+run = "npx expo start --dev-client"
+
+[tasks.install]
+description = "Install JS deps"
+run = "npm install"

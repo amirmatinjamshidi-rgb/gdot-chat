@@ -174,6 +174,92 @@ export class ApiClient {
 
   }
 
+  async delete<T>(path: string): Promise<T> {
+    return this.request<T>("DELETE", path, undefined, false, "priority");
+  }
+
+  async putOctetStream(
+    path: string,
+    body: Uint8Array,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await this.requestBinary("PUT", path, body, timeoutMs, "bytes", signal);
+  }
+
+  async getOctetStream(
+    path: string,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<Uint8Array> {
+    const res = await this.requestBinary("GET", path, undefined, timeoutMs, "bytes", signal);
+    return res;
+  }
+
+  private async requestBinary(
+    method: string,
+    path: string,
+    body: Uint8Array | undefined,
+    timeoutMs: number,
+    _responseType: "bytes",
+    signal?: AbortSignal,
+  ): Promise<Uint8Array> {
+    if (!path.startsWith("/auth/")) {
+      await this.ensureAccessTokenFresh();
+    }
+    const url = `${API_BASE_URL}${path}`;
+    const token = await this.authStore.getAccessToken();
+    const headers: Record<string, string> = {
+      Accept: "application/octet-stream",
+      Connection: "close",
+    };
+    if (body !== undefined) {
+      headers["Content-Type"] = "application/octet-stream";
+      headers["Content-Length"] = String(body.byteLength);
+    }
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
+    const run = async (): Promise<Uint8Array> => {
+      const res = await httpFetch(url, {
+        method,
+        headers,
+        body,
+        signal,
+        timeoutMs,
+        responseType: "bytes",
+      });
+      if (res.status === 401) {
+        const refreshed = await this.tryRefreshToken();
+        if (refreshed) {
+          const retryToken = await this.authStore.getAccessToken();
+          if (retryToken) headers.Authorization = `Bearer ${retryToken}`;
+          const retry = await httpFetch(url, {
+            method,
+            headers,
+            body,
+            signal,
+            timeoutMs,
+            responseType: "bytes",
+          });
+          if (retry.status < 200 || retry.status >= 300) {
+            throw new ApiError(await retry.text(), retry.status);
+          }
+          return retry.bytes();
+        }
+        throw new ApiError("Session expired. Please sign in again.", 401);
+      }
+      if (res.status < 200 || res.status >= 300) {
+        throw new ApiError(await res.text(), res.status);
+      }
+      if (res.status === 204) return new Uint8Array(0);
+      return res.bytes();
+    };
+
+    return this.scheduleHttp("priority", run);
+  }
+
 
 
   private async ensureAccessTokenFresh(): Promise<void> {

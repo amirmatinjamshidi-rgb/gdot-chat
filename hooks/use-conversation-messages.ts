@@ -1,7 +1,7 @@
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useState } from "react";
 
-import type { LocalMessage } from "@/lib/db/types";
+import type { LocalAttachment, LocalMessage } from "@/lib/db/types";
 import { useAppLock } from "@/lib/providers/app-lock-provider";
 import { useAppServices } from "@/lib/services/app-services-context";
 
@@ -13,29 +13,41 @@ const REFRESH_MS = 5_000;
  * Clears in-memory plaintext when the app locks (lockEpoch).
  */
 export function useConversationMessages(conversationId: string | undefined) {
-  const { messageStore } = useAppServices();
+  const { messageStore, attachmentStore } = useAppServices();
   const { dbReady, lockEpoch } = useAppLock();
   const [messages, setMessages] = useState<LocalMessage[]>([]);
+  const [attachments, setAttachments] = useState<
+    Record<string, LocalAttachment>
+  >({});
   const [loading, setLoading] = useState(true);
 
   const reload = useCallback(async () => {
     if (!conversationId || !dbReady) {
       setMessages([]);
+      setAttachments({});
       setLoading(false);
       return;
     }
     try {
       const list = await messageStore.listByConversation(conversationId, 200);
+      const next: Record<string, LocalAttachment> = {};
+      for (const m of list) {
+        if (!m.attachmentId) continue;
+        const att = await attachmentStore.get(m.attachmentId);
+        if (att) next[m.attachmentId] = att;
+      }
       setMessages(list);
+      setAttachments(next);
     } finally {
       setLoading(false);
     }
-  }, [conversationId, messageStore, dbReady]);
+  }, [conversationId, messageStore, attachmentStore, dbReady]);
 
   useFocusEffect(
     useCallback(() => {
       if (!dbReady) {
         setMessages([]);
+        setAttachments({});
         setLoading(false);
         return;
       }
@@ -48,5 +60,5 @@ export function useConversationMessages(conversationId: string | undefined) {
     }, [reload, dbReady, lockEpoch]),
   );
 
-  return { messages, loading, reload };
+  return { messages, attachments, loading, reload };
 }

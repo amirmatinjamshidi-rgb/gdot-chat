@@ -34,6 +34,7 @@ public sealed class GdotChatWebApplicationFactory : WebApplicationFactory<Progra
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
+        builder.UseSetting("Jwt:SigningKey", "testing-signing-key-min-32-characters-long!!");
 
         builder.ConfigureTestServices(services =>
         {

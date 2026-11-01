@@ -1,14 +1,27 @@
 import type { Reaction } from "@/components/reactions/types";
 import type { IDatabase } from "./database-types";
 
+export type ReactionApplyOp = "add" | "remove" | "toggle";
+
 export interface IReactionStore {
   toggle(
     messageId: string,
     emoji: string,
     userId: string,
   ): Promise<Reaction[]>;
+  apply(
+    messageId: string,
+    emoji: string,
+    userId: string,
+    op: ReactionApplyOp,
+  ): Promise<Reaction[]>;
   listForMessage(messageId: string): Promise<Reaction[]>;
   listForConversation(conversationId: string): Promise<Map<string, Reaction[]>>;
+  userHasReaction(
+    messageId: string,
+    emoji: string,
+    userId: string,
+  ): Promise<boolean>;
 }
 
 type ReactionRow = {
@@ -36,29 +49,65 @@ function aggregateRows(rows: ReactionRow[]): Reaction[] {
 export class ReactionStore implements IReactionStore {
   constructor(private readonly db: IDatabase) {}
 
-  async toggle(
+  async userHasReaction(
     messageId: string,
     emoji: string,
     userId: string,
-  ): Promise<Reaction[]> {
+  ): Promise<boolean> {
     const existing = await this.db.getFirst<{ user_id: string }>(
       `SELECT user_id FROM message_reactions
        WHERE message_id = ? AND emoji = ? AND user_id = ?`,
       [messageId, emoji, userId],
     );
+    return existing !== null;
+  }
 
-    if (existing) {
-      await this.db.run(
-        `DELETE FROM message_reactions
-         WHERE message_id = ? AND emoji = ? AND user_id = ?`,
-        [messageId, emoji, userId],
-      );
-    } else {
-      await this.db.run(
-        `INSERT INTO message_reactions (message_id, emoji, user_id, created_at)
-         VALUES (?, ?, ?, ?)`,
-        [messageId, emoji, userId, Date.now()],
-      );
+  async toggle(
+    messageId: string,
+    emoji: string,
+    userId: string,
+  ): Promise<Reaction[]> {
+    return this.apply(messageId, emoji, userId, "toggle");
+  }
+
+  async apply(
+    messageId: string,
+    emoji: string,
+    userId: string,
+    op: ReactionApplyOp,
+  ): Promise<Reaction[]> {
+    const existing = await this.userHasReaction(messageId, emoji, userId);
+
+    if (op === "toggle") {
+      if (existing) {
+        await this.db.run(
+          `DELETE FROM message_reactions
+           WHERE message_id = ? AND emoji = ? AND user_id = ?`,
+          [messageId, emoji, userId],
+        );
+      } else {
+        await this.db.run(
+          `INSERT INTO message_reactions (message_id, emoji, user_id, created_at)
+           VALUES (?, ?, ?, ?)`,
+          [messageId, emoji, userId, Date.now()],
+        );
+      }
+    } else if (op === "add") {
+      if (!existing) {
+        await this.db.run(
+          `INSERT INTO message_reactions (message_id, emoji, user_id, created_at)
+           VALUES (?, ?, ?, ?)`,
+          [messageId, emoji, userId, Date.now()],
+        );
+      }
+    } else if (op === "remove") {
+      if (existing) {
+        await this.db.run(
+          `DELETE FROM message_reactions
+           WHERE message_id = ? AND emoji = ? AND user_id = ?`,
+          [messageId, emoji, userId],
+        );
+      }
     }
 
     return this.listForMessage(messageId);

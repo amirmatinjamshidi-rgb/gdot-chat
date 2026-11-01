@@ -10,7 +10,7 @@ See [e2ee_sqlcipher_spec plan](../.cursor/plans/e2ee_sqlcipher_spec_e374ce9a.pla
 | REST (HTTP) | `http://localhost:5066/v1` |
 | SignalR hub | `https://localhost:5067/hubs/messages` |
 
-Hub JWT: query param `access_token` (see `lib/api/signalr-client.ts`).
+Hub JWT: WebSockets use query param `access_token` (redacted server-side on `/hubs/*` only; see `lib/api/signalr-client.ts`). Prefer `accessTokenFactory` so non-WS transports can use the Authorization header.
 
 ## Client env
 
@@ -31,6 +31,31 @@ EXPO_PUBLIC_API_URL=http://10.0.2.2:5066/v1
 - `POST /messages` → `{ envelopeId }`
 - `GET /messages/pending?limit=50`
 - `POST /messages/{envelopeId}/ack`
+- `POST /attachments` → `{ attachmentId, chunkSizeBytes, chunkCount, expiresAt }`
+- `PUT /attachments/{id}/chunks/{index}` (raw `application/octet-stream`)
+- `GET /attachments/{id}`
+- `POST /attachments/{id}/complete`
+- `GET /attachments/{id}/chunks/{index}` (raw ciphertext)
+- `POST /attachments/{id}/download-complete`
+- `DELETE /attachments/{id}`
+
+Decrypted Signal payloads are versioned JSON (`v=1`, `t=text|media|reaction`). Legacy plaintext strings remain valid text. Media bytes never go through `/messages`. See [e2ee-media.md](./e2ee-media.md).
+
+### Reaction payload (E2EE)
+
+Reactions are **not** stored or pushed in plaintext by the server. They are ordinary Signal envelopes whose plaintext is:
+
+```json
+{
+  "v": 1,
+  "t": "reaction",
+  "op": "add" | "remove",
+  "targetServerEnvelopeId": "<uuid of the reacted message envelope>",
+  "emoji": "👍"
+}
+```
+
+Clients resolve `targetServerEnvelopeId` to a local message and update the local `message_reactions` SQLCipher table. There is no `/v1/messages/reactions` REST endpoint and no SignalR `ReceiveReaction` / hub `SendReaction`.
 
 ## SignalR (server → client)
 
@@ -48,7 +73,7 @@ EXPO_PUBLIC_API_URL=http://10.0.2.2:5066/v1
 
 ## SignalR security note
 
-The hub uses `?access_token=` for JWT (see `lib/api/signalr-client.ts`). Reverse proxies and access logs may capture this value; rotate tokens and use TLS in production.
+WebSocket hub connections still carry JWT as `?access_token=` (transport limitation). The API accepts that query param **only** under `/hubs`, then redacts it from the request query before logging. Use TLS, short-lived access tokens, and rotate on suspicion. See [THREAT_MODEL.md](./THREAT_MODEL.md).
 
 ## Threat model
 

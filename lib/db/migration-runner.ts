@@ -3,12 +3,16 @@ import type { IDatabase } from "./database-types";
 import { MIGRATION_001_SQL } from "./migrations/001-initial";
 import { MIGRATION_002_SQL } from "./migrations/002-key-material";
 import { MIGRATION_003_SQL } from "./migrations/003-reactions";
+import { MIGRATION_004_SQL } from "./migrations/004-media";
+import { MIGRATION_005_SQL } from "./migrations/005-identity-trust";
 import { splitStatements } from "./sql-utils";
 
 const MIGRATIONS: { version: number; sql: string }[] = [
   { version: 1, sql: MIGRATION_001_SQL },
   { version: 2, sql: MIGRATION_002_SQL },
   { version: 3, sql: MIGRATION_003_SQL },
+  { version: 4, sql: MIGRATION_004_SQL },
+  { version: 5, sql: MIGRATION_005_SQL },
 ];
 
 export class MigrationRunner {
