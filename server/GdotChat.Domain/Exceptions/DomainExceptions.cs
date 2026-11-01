@@ -65,3 +65,8 @@ public class RefreshTokenReuseException : Exception
     public RefreshTokenReuseException() : base("Refresh token reuse detected") { }
 }
 
+public class InvalidMessageRequestException : Exception
+{
+    public InvalidMessageRequestException(string message) : base(message) { }
+}
+

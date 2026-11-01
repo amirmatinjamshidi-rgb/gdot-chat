@@ -77,4 +77,71 @@ public sealed class MessageRelayTests
         var verifyDb = verifyScope.ServiceProvider.GetRequiredService<DbContext>();
         Assert.False(await verifyDb.Set<MessageEnvelope>().AnyAsync(e => e.Id == sent.EnvelopeId));
     }
+
+    [Fact]
+    public async Task Enqueue_RejectsDisallowedMessageType_With400()
+    {
+        var sender = await _client.RegisterAsync();
+        var recipient = await _client.RegisterAsync();
+
+        using var senderClient = _factory.CreateClient();
+        senderClient.SetBearer(sender.AccessToken);
+
+        var ciphertextBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes("opaque-ok"));
+        var response = await senderClient.PostAsJsonAsync(
+            "/v1/messages",
+            new SendMessageRequest(
+                recipient.UserId,
+                recipient.DeviceId,
+                1,
+                ciphertextBase64));
+
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Enqueue_RejectsCiphertextOverMaxBound_With400()
+    {
+        var sender = await _client.RegisterAsync();
+        var recipient = await _client.RegisterAsync();
+
+        using var senderClient = _factory.CreateClient();
+        senderClient.SetBearer(sender.AccessToken);
+
+        // 64 KiB + 1 byte after Base64 decode
+        var oversized = new byte[64 * 1024 + 1];
+        Random.Shared.NextBytes(oversized);
+        var response = await senderClient.PostAsJsonAsync(
+            "/v1/messages",
+            new SendMessageRequest(
+                recipient.UserId,
+                recipient.DeviceId,
+                2,
+                Convert.ToBase64String(oversized)));
+
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Enqueue_AcceptsType2_WithinBound()
+    {
+        var sender = await _client.RegisterAsync();
+        var recipient = await _client.RegisterAsync();
+
+        using var senderClient = _factory.CreateClient();
+        senderClient.SetBearer(sender.AccessToken);
+
+        var ciphertextBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes("whisper-opaque"));
+        var response = await senderClient.PostAsJsonAsync(
+            "/v1/messages",
+            new SendMessageRequest(
+                recipient.UserId,
+                recipient.DeviceId,
+                2,
+                ciphertextBase64));
+
+        response.EnsureSuccessStatusCode();
+        var sent = await response.Content.ReadFromJsonAsync<SendMessageResponse>();
+        Assert.NotNull(sent);
+    }
 }

@@ -62,6 +62,11 @@ import {
 } from "@/components/video-message-bubble";
 import { VoiceMessageBubble } from "@/components/voice-message-bubble";
 import { useComposerDraft } from "@/hooks/use-composer-draft";
+import {
+  assertMessageTextWithinLimit,
+  MAX_MESSAGE_TEXT_CHARS,
+  MESSAGE_TOO_LONG_ERROR,
+} from "@/lib/protocol/message-limits";
 import { useConversationMessages } from "@/hooks/use-conversation-messages";
 import { useReactions } from "@/hooks/use-reactions";
 import { localMessageToUi } from "@/lib/chat/local-message-ui";
@@ -480,6 +485,12 @@ export default function ChatRoomScreen() {
       try {
         if (identityKeyChanged) {
           setComposerError("Cannot send until you accept the new safety number.");
+          return;
+        }
+        try {
+          assertMessageTextWithinLimit(trimmedMessage);
+        } catch {
+          setComposerError(MESSAGE_TOO_LONG_ERROR);
           return;
         }
         await syncService.sendOutgoing(chatId, trimmedMessage);
@@ -1285,6 +1296,7 @@ export default function ChatRoomScreen() {
                           placeholder="Type a message..."
                           placeholderTextColor={colors.textMuted}
                           value={draft}
+                          maxLength={MAX_MESSAGE_TEXT_CHARS}
                           onChangeText={setDraft}
                           onFocus={() => setInputFocused(true)}
                           onBlur={() => setInputFocused(false)}

@@ -34,6 +34,38 @@ public class MessageRelayService : IMessageRelayService
         SendMessageRequest request,
         CancellationToken ct = default)
     {
+        if (request.MessageType is not (2 or 3))
+        {
+            throw new InvalidMessageRequestException(
+                "MessageType must be 2 (WhisperMessage) or 3 (PreKeyWhisperMessage)");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.CiphertextBase64))
+        {
+            throw new InvalidMessageRequestException("CiphertextBase64 is required");
+        }
+
+        byte[] ciphertext;
+        try
+        {
+            ciphertext = DtoMapper.FromBase64(request.CiphertextBase64);
+        }
+        catch (FormatException)
+        {
+            throw new InvalidMessageRequestException("CiphertextBase64 is not valid Base64");
+        }
+
+        if (ciphertext.Length == 0)
+        {
+            throw new InvalidMessageRequestException("Ciphertext must not be empty");
+        }
+
+        if (ciphertext.Length > _relayOptions.MaxCiphertextBytes)
+        {
+            throw new InvalidMessageRequestException(
+                $"Ciphertext exceeds maximum of {_relayOptions.MaxCiphertextBytes} bytes");
+        }
+
         var recipient = await _db.Set<Device>()
             .FirstOrDefaultAsync(
                 d => d.Id == request.RecipientDeviceId
@@ -49,7 +81,7 @@ public class MessageRelayService : IMessageRelayService
             SenderDeviceId = senderDeviceId,
             RecipientDeviceId = recipient.Id,
             MessageType = request.MessageType,
-            Ciphertext = DtoMapper.FromBase64(request.CiphertextBase64),
+            Ciphertext = ciphertext,
             CreatedAt = now,
             ExpiresAt = now.AddDays(_relayOptions.EnvelopeTtlDays),
         };

@@ -45,6 +45,7 @@ public class ExceptionHandlingMiddleware
         AttachmentConflictException => (409, ex.Message),
         AttachmentTooLargeException => (413, ex.Message),
         InvalidAttachmentRequestException => (400, ex.Message),
+        InvalidMessageRequestException => (400, ex.Message),
         WeakPasswordException => (400, ex.Message),
         RefreshTokenReuseException => (401, ex.Message),
         InvalidCredentialsException => (401, ex.Message),

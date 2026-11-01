@@ -22,6 +22,7 @@ import {
   serializeTextPayload,
   type ReactionOp,
 } from "@/lib/protocol/payload";
+import { assertMessageTextWithinLimit } from "@/lib/protocol/message-limits";
 import { isOfflineToken, type AuthStore } from "@/lib/session/auth-store";
 import { useMediaStore } from "@/stores/media-store";
 
@@ -433,6 +434,7 @@ export class SyncService {
     conversationId: string,
     text: string,
   ): Promise<void> {
+    assertMessageTextWithinLimit(text);
     // #region agent log
     agentDebugLog(
       "sync-service.ts:sendOutgoing",
