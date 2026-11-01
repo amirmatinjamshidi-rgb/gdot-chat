@@ -1,17 +1,29 @@
 import { gcm } from "@noble/ciphers/aes.js";
-import { scrypt } from "@noble/hashes/scrypt.js";
 
 import { AppAuthError } from "@/lib/auth/app-auth-error";
 import { base64ToBytes, bytesToBase64, textToBytes } from "@/lib/crypto/encoding";
+import {
+  derivePinScryptKey,
+  type PinScryptParams,
+} from "@/lib/crypto/pin-scrypt";
 import { hexToBytes } from "@/lib/db/sql-utils";
+
+export type { PinScryptParams } from "@/lib/crypto/pin-scrypt";
 
 /** Passphrase-style app PIN: min 8, max 128; letters/digits/symbols allowed. */
 export const APP_PIN_MIN_LENGTH = 8;
 export const APP_PIN_MAX_LENGTH = 128;
 
 /**
+ * Blob format version.
+ * Absent or 1 = pre-native JS scrypt wraps (still unwrap with same params).
+ * 2 = current wraps produced via native/async scrypt path.
+ */
+export const PIN_KEK_BLOB_VERSION = 2;
+
+/**
  * Current scrypt parameters for PIN → wrap key.
- * N=2^17 targets ~0.3–0.5s on mid phones; memory ≈ 128·N·r ≈ 128 MiB.
+ * N=2^17 targets ~0.5–2s natively on mid phones; memory ≈ 128·N·r ≈ 128 MiB.
  * Per-wrap params are stored so older blobs (e.g. N=2^15) still unlock.
  */
 export const PIN_SCRYPT = {
@@ -19,7 +31,7 @@ export const PIN_SCRYPT = {
   r: 8,
   p: 1,
   dkLen: 32,
-} as const;
+} as const satisfies PinScryptParams;
 
 /** Legacy default when blob omits kdf (pre-param blobs). */
 export const PIN_SCRYPT_LEGACY = {
@@ -27,14 +39,7 @@ export const PIN_SCRYPT_LEGACY = {
   r: 8,
   p: 1,
   dkLen: 32,
-} as const;
-
-export type PinScryptParams = {
-  N: number;
-  r: number;
-  p: number;
-  dkLen: number;
-};
+} as const satisfies PinScryptParams;
 
 export const PIN_SALT_BYTES = 16;
 export const PIN_NONCE_BYTES = 12;
@@ -47,6 +52,8 @@ export type PinWrappedKek = {
   ciphertextB64: string;
   /** Present on new wraps; absent ⇒ treat as PIN_SCRYPT_LEGACY. */
   kdf?: PinScryptParams;
+  /** Absent/1 = legacy JS wraps; 2 = current native async path. */
+  v?: number;
 };
 
 export function validateAppPin(pin: string): void {
@@ -83,6 +90,14 @@ export function resolvePinScryptParams(blob: PinWrappedKek): PinScryptParams {
   return { N, r, p, dkLen };
 }
 
+export function resolvePinKekVersion(blob: PinWrappedKek): number {
+  if (blob.v === undefined) return 1;
+  if (!Number.isInteger(blob.v) || blob.v < 1) {
+    throw new AppAuthError("UNKNOWN", "Corrupt PIN-wrapped KEK");
+  }
+  return blob.v;
+}
+
 export function pinScryptParamsMatch(
   a: PinScryptParams,
   b: PinScryptParams = PIN_SCRYPT,
@@ -91,18 +106,19 @@ export function pinScryptParamsMatch(
 }
 
 export function needsPinKdfUpgrade(blob: PinWrappedKek): boolean {
+  if (resolvePinKekVersion(blob) !== PIN_KEK_BLOB_VERSION) return true;
   return !pinScryptParamsMatch(resolvePinScryptParams(blob), PIN_SCRYPT);
 }
 
-export function wrapKekWithPin(
+export async function wrapKekWithPin(
   kekHex: string,
   pin: string,
   params: PinScryptParams = PIN_SCRYPT,
-): PinWrappedKek {
+): Promise<PinWrappedKek> {
   validateAppPin(pin);
   const salt = getSecureRandomBytes(PIN_SALT_BYTES);
   const nonce = getSecureRandomBytes(PIN_NONCE_BYTES);
-  const key = derivePinKey(pin, salt, params);
+  const key = await derivePinScryptKey(textToBytes(pin), salt, params);
   const plaintext = hexToBytes(kekHex);
   if (plaintext.length !== 32) {
     throw new AppAuthError("UNKNOWN", "KEK must be 32 bytes");
@@ -114,10 +130,14 @@ export function wrapKekWithPin(
     nonceB64: bytesToBase64(nonce),
     ciphertextB64: bytesToBase64(ciphertext),
     kdf: { ...params },
+    v: PIN_KEK_BLOB_VERSION,
   };
 }
 
-export function unwrapKekWithPin(blob: PinWrappedKek, pin: string): string {
+export async function unwrapKekWithPin(
+  blob: PinWrappedKek,
+  pin: string,
+): Promise<string> {
   validateAppPin(pin);
   const salt = base64ToBytes(blob.saltB64);
   const nonce = base64ToBytes(blob.nonceB64);
@@ -125,8 +145,9 @@ export function unwrapKekWithPin(blob: PinWrappedKek, pin: string): string {
   if (salt.length !== PIN_SALT_BYTES || nonce.length !== PIN_NONCE_BYTES) {
     throw new AppAuthError("UNKNOWN", "Corrupt PIN-wrapped KEK");
   }
+  resolvePinKekVersion(blob); // validate if present
   const params = resolvePinScryptParams(blob);
-  const key = derivePinKey(pin, salt, params);
+  const key = await derivePinScryptKey(textToBytes(pin), salt, params);
   const cipher = gcm(key, nonce, PIN_AAD);
   try {
     const plaintext = cipher.decrypt(ciphertext);
@@ -160,20 +181,10 @@ export function parsePinWrappedKek(raw: string): PinWrappedKek {
   if (blob.kdf !== undefined) {
     resolvePinScryptParams(blob); // validate
   }
+  if (blob.v !== undefined) {
+    resolvePinKekVersion(blob);
+  }
   return blob;
-}
-
-function derivePinKey(
-  pin: string,
-  salt: Uint8Array,
-  params: PinScryptParams,
-): Uint8Array {
-  return scrypt(textToBytes(pin), salt, {
-    N: params.N,
-    r: params.r,
-    p: params.p,
-    dkLen: params.dkLen,
-  });
 }
 
 function bytesToHex(bytes: Uint8Array): string {

@@ -117,7 +117,7 @@ export class KekManager implements IKekManager {
 
     const kek = getRandomBytes(32);
     const hex = bytesToHex(kek);
-    const blob = wrapKekWithPin(hex, pin);
+    const blob = await wrapKekWithPin(hex, pin);
     await SecureStore.setItemAsync(
       SECURE_STORE_PIN_WRAPPED_KEK_KEY,
       serializePinWrappedKek(blob),
@@ -145,13 +145,13 @@ export class KekManager implements IKekManager {
       if (!raw) throw new AppAuthError("KEK_MISSING");
       const blob = parsePinWrappedKek(raw);
       try {
-        const kekHex = unwrapKekWithPin(blob, opts.pin);
+        const kekHex = await unwrapKekWithPin(blob, opts.pin);
         await SecureStore.setItemAsync(
           SECURE_STORE_PIN_LOCKOUT_KEY,
           serializePinLockoutState(registerPinSuccess()),
         );
         if (needsPinKdfUpgrade(blob)) {
-          const upgraded = wrapKekWithPin(kekHex, opts.pin);
+          const upgraded = await wrapKekWithPin(kekHex, opts.pin);
           await SecureStore.setItemAsync(
             SECURE_STORE_PIN_WRAPPED_KEK_KEY,
             serializePinWrappedKek(upgraded),

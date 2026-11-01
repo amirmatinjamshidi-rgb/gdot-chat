@@ -73,7 +73,8 @@
         }
       ],
       "expo-font",
-      "expo-asset"
+      "expo-asset",
+      "react-native-quick-crypto"
     ],
     "experiments": {
       "typedRoutes": true,

@@ -5,6 +5,7 @@ import {
   Alert,
   StyleSheet,
   TextInput,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -24,6 +25,15 @@ import {
 } from "@/lib/crypto/pin-kek";
 import { useAuth } from "@/lib/providers/auth-provider";
 import { useAppServices } from "@/lib/services/app-services-context";
+
+/** Let the spinner paint before the (still-heavy) registration work starts. */
+function yieldToUi(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => resolve());
+    });
+  });
+}
 
 export default function SetAppPinScreen() {
   const router = useRouter();
@@ -67,6 +77,7 @@ export default function SetAppPinScreen() {
     }
 
     setLoading(true);
+    await yieldToUi();
     try {
       if (pendingAuth.kind === "register") {
         await registerUser({
@@ -127,6 +138,7 @@ export default function SetAppPinScreen() {
         secureTextEntry
         autoCapitalize="none"
         autoCorrect={false}
+        editable={!loading}
         value={pin}
         onChangeText={setPin}
       />
@@ -137,13 +149,21 @@ export default function SetAppPinScreen() {
           secureTextEntry
           autoCapitalize="none"
           autoCorrect={false}
+          editable={!loading}
           value={confirm}
           onChangeText={setConfirm}
         />
       ) : null}
-      <ScalePressable style={styles.button} onPress={() => void onSubmit()}>
+      <ScalePressable
+        style={styles.button}
+        disabled={loading}
+        onPress={() => void onSubmit()}
+      >
         {loading ? (
-          <ActivityIndicator color="#fff" />
+          <View style={styles.busyRow} accessibilityLabel="Securing your PIN…">
+            <ActivityIndicator color="#fff" />
+            <ThemedText style={styles.buttonText}>Securing your PIN…</ThemedText>
+          </View>
         ) : (
           <ThemedText style={styles.buttonText}>
             {isCreate ? "Continue" : "Unlock"}
@@ -171,6 +191,11 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: "center",
     marginTop: 8,
+  },
+  busyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
   },
   buttonText: { color: "#fff", fontWeight: "600" },
 });

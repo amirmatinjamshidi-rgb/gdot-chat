@@ -5,6 +5,7 @@ import {
   Alert,
   StyleSheet,
   TextInput,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -18,6 +19,14 @@ import { APP_PIN_MIN_LENGTH } from "@/lib/crypto/pin-kek";
 import type { LockMode } from "@/lib/db/kek-manager";
 import { useAppLock } from "@/lib/providers/app-lock-provider";
 import { useAppServices } from "@/lib/services/app-services-context";
+
+function yieldToUi(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => resolve());
+    });
+  });
+}
 
 export default function LockScreen() {
   const router = useRouter();
@@ -45,6 +54,7 @@ export default function LockScreen() {
 
   const tryUnlock = async (appPin?: string) => {
     setBusy(true);
+    await yieldToUi();
     const result = await unlock(appPin);
     setBusy(false);
     if (result.ok) {
@@ -87,12 +97,20 @@ export default function LockScreen() {
           secureTextEntry
           autoCapitalize="none"
           autoCorrect={false}
+          editable={!busy}
           value={pin}
           onChangeText={setPin}
         />
-        <ScalePressable style={styles.button} onPress={onPinUnlock}>
+        <ScalePressable
+          style={styles.button}
+          disabled={busy}
+          onPress={onPinUnlock}
+        >
           {busy ? (
-            <ActivityIndicator color="#fff" />
+            <View style={styles.busyRow} accessibilityLabel="Securing your PIN…">
+              <ActivityIndicator color="#fff" />
+              <ThemedText style={styles.buttonText}>Securing your PIN…</ThemedText>
+            </View>
           ) : (
             <ThemedText style={styles.buttonText}>Unlock</ThemedText>
           )}
@@ -109,6 +127,7 @@ export default function LockScreen() {
       </ThemedText>
       <ScalePressable
         style={styles.button}
+        disabled={busy}
         onPress={() => void tryUnlock()}
       >
         {busy ? (
@@ -157,6 +176,11 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     minWidth: 160,
     alignItems: "center",
+  },
+  busyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
   },
   buttonText: { color: "#fff", fontWeight: "600" },
 });

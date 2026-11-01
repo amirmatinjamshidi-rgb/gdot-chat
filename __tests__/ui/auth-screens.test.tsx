@@ -165,4 +165,43 @@ describe("Login / Register / SetAppPin screens", () => {
       expect(expoRouter.useRouter().replace).toHaveBeenCalledWith("/lock");
     });
   });
+
+  it("shows Securing your PIN progress state while registration runs", async () => {
+    const username = `user_${randomId("u")}`;
+    const password = `pw_${randomId("p")}!Aa12`;
+    const pin = `pin_${randomId("x")}`;
+    setPendingAppPinAuth({
+      kind: "register",
+      username,
+      password,
+      deviceName: "Mobile",
+    });
+
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mockRegisterUser.mockImplementation(async () => {
+      await gate;
+    });
+
+    const user = userEvent.setup();
+    renderWithServices(<SetAppPinScreen />, mockAppServices());
+
+    await user.type(screen.getByPlaceholderText(/App PIN \(min/i), pin);
+    await user.type(screen.getByPlaceholderText(/Confirm app PIN/i), pin);
+    await user.press(screen.getByText("Continue"));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/Securing your PIN/i)).toBeTruthy();
+      expect(screen.getByText(/Securing your PIN/i)).toBeTruthy();
+    });
+
+    release();
+
+    await waitFor(() => {
+      expect(mockRegisterUser).toHaveBeenCalled();
+      expect(expoRouter.useRouter().replace).toHaveBeenCalledWith("/lock");
+    });
+  });
 });
