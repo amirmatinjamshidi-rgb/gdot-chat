@@ -41,11 +41,12 @@ import { ReactionPicker } from "@/components/reactions/reaction-picker";
 import { ScreenTopAccent } from "@/components/screen-top-accent";
 import { ThemedText } from "@/components/themed-text";
 import { ScalePressable } from "@/components/ui/scale-pressable";
-import { VideoMessage, type VideoMessageHandle } from "@/components/video-message";
+import { VideoMessage } from "@/components/video-message";
 import { useComposerDraft } from "@/hooks/use-composer-draft";
 import { useConversationMessages } from "@/hooks/use-conversation-messages";
 import { useReactions } from "@/hooks/use-reactions";
 import { useSwipeBackGesture } from "@/hooks/use-swipe-back";
+import { useVideoRecorder } from "@/hooks/use-video-recorder";
 import { useVoiceRecorder } from "@/hooks/use-voice-recorder";
 import { localMessageToUi } from "@/lib/chat/local-message-ui";
 import { VIDEO_RECORD_MAX_MS, VOICE_RECORD_MAX_MS } from "@/lib/config";
@@ -63,7 +64,6 @@ import { useMessagesStore } from "@/stores/messages-store";
 import { useRecordingStore } from "@/stores/recording-store";
 import { useColors } from "@/stores/theme-store";
 
-const MIN_RECORD_MS = 1000;
 const HOLD_MS = 320;
 const TAP_MAX_MS = 260;
 const KEYBOARD_EXTRA_OFFSET = 100;
@@ -82,9 +82,6 @@ export default function GroupRoomScreen() {
 
   const [composerError, setComposerError] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
-  const [videoSessionActive, setVideoSessionActive] = useState(false);
-  const [videoLocked, setVideoLocked] = useState(false);
-  const [videoRecordingActive, setVideoRecordingActive] = useState(false);
   const [dragY, setDragY] = useState(0);
   const [recordHudTick, setRecordHudTick] = useState(0);
   const [inputFocused, setInputFocused] = useState(false);
@@ -122,12 +119,6 @@ export default function GroupRoomScreen() {
 
   const listRef = useRef<FlatList>(null);
   const holdRecordControlsRef = useRef<HoldRecordControlsHandle>(null);
-  const videoRef = useRef<VideoMessageHandle>(null);
-  const videoRecordingActiveRef = useRef(false);
-  const videoLockedRef = useRef(false);
-  const videoSessionActiveRef = useRef(false);
-  const videoRecordStartedAt = useRef(0);
-  const videoStartGenRef = useRef(0);
   const pressDownAt = useRef(0);
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const holdArmedRef = useRef(false);
@@ -139,10 +130,6 @@ export default function GroupRoomScreen() {
   const shellW = useSharedValue(260);
   const sweep = useSharedValue(0);
   const neonVisible = useSharedValue(0);
-
-  videoRecordingActiveRef.current = videoRecordingActive;
-  videoLockedRef.current = videoLocked;
-  videoSessionActiveRef.current = videoSessionActive;
 
   const sendVoiceResult = useCallback(
     async (result: { uri: string; durationMs: number }) => {
@@ -177,6 +164,48 @@ export default function GroupRoomScreen() {
   });
   const voiceRef = useRef(voice);
   voiceRef.current = voice;
+
+  const sendVideoResult = useCallback(
+    async (result: { uri: string; durationMs: number }) => {
+      if (!groupId) return;
+      try {
+        await syncService.sendGroupOutgoingMedia(groupId, {
+          uri: result.uri,
+          kind: "video",
+          mimeType: "video/mp4",
+          durationMs: result.durationMs,
+        });
+        holdRecordControlsRef.current?.resetLayout();
+        setComposerMode(groupId, "send");
+        setDragY(0);
+        holdArmedRef.current = false;
+        recordingLiveRef.current = false;
+        useRecordingStore.getState().cancelRecording();
+        await reloadMessages();
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } catch (e) {
+        setComposerError(
+          e instanceof Error ? e.message : "Failed to send video message.",
+        );
+      }
+    },
+    [groupId, syncService, setComposerMode, reloadMessages],
+  );
+
+  const video = useVideoRecorder({
+    conversationId: groupId || "group",
+    maxDurationMs: VIDEO_RECORD_MAX_MS,
+    onMaxDuration: (r) => {
+      void sendVideoResult(r);
+    },
+    onError: (m) => setComposerError(m),
+  });
+  const videoHookRef = useRef(video);
+  videoHookRef.current = video;
+
+  const videoRecordingActive = video.isRecording;
+  const videoLocked = video.isLocked;
+  const videoSessionActive = video.sessionActive;
 
   const recordingLive = voice.isRecording || videoRecordingActive;
   const swipeBackGesture = useSwipeBackGesture(!recordingLive);
@@ -305,9 +334,6 @@ export default function GroupRoomScreen() {
     holdRecordControlsRef.current?.resetLayout();
     setComposerMode(groupId, "send");
     setDragY(0);
-    setVideoLocked(false);
-    setVideoRecordingActive(false);
-    videoRecordingActiveRef.current = false;
     holdArmedRef.current = false;
     recordingLiveRef.current = false;
     useRecordingStore.getState().cancelRecording();
@@ -375,94 +401,28 @@ export default function GroupRoomScreen() {
   }, [resetComposerAfterSend]);
 
   const finishVideoCapture = useCallback(async () => {
-    const durationMs = Date.now() - videoRecordStartedAt.current;
-    let recorded: { uri: string } | null = null;
-    try {
-      recorded = (await videoRef.current?.stopRecording()) ?? null;
-    } catch {
-      recorded = null;
-    }
-    setVideoSessionActive(false);
-    setVideoLocked(false);
-    setVideoRecordingActive(false);
-    videoRecordingActiveRef.current = false;
-    useRecordingStore.getState().stopRecording();
-    if (!recorded?.uri || durationMs < MIN_RECORD_MS) {
-      resetComposerAfterSend();
-      return;
-    }
-    try {
-      await syncService.sendGroupOutgoingMedia(groupId, {
-        uri: recorded.uri,
-        kind: "video",
-        mimeType: "video/mp4",
-        durationMs,
-      });
-      resetComposerAfterSend();
-      await reloadMessages();
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    } catch (e) {
-      setComposerError(
-        e instanceof Error ? e.message : "Failed to send video message.",
-      );
-    }
-  }, [groupId, reloadMessages, resetComposerAfterSend, syncService]);
+    recordingLiveRef.current = false;
+    holdArmedRef.current = false;
+    const result = await videoHookRef.current.finish();
+    holdRecordControlsRef.current?.resetLayout();
+    setDragY(0);
+    if (result) await sendVideoResult(result);
+    else resetComposerAfterSend();
+  }, [resetComposerAfterSend, sendVideoResult]);
 
   const discardVideoRecording = useCallback(async () => {
-    videoStartGenRef.current += 1;
-    useRecordingStore.getState().cancelRecording();
-    try {
-      await videoRef.current?.stopRecording();
-    } catch {
-      /* noop */
-    }
-    setVideoSessionActive(false);
-    setVideoLocked(false);
-    setVideoRecordingActive(false);
-    videoRecordingActiveRef.current = false;
+    recordingLiveRef.current = false;
+    holdArmedRef.current = false;
+    await videoHookRef.current.discard();
     setDragY(0);
     holdRecordControlsRef.current?.resetLayout();
     resetComposerAfterSend();
   }, [resetComposerAfterSend]);
 
   const startVideoRecording = useCallback(async (): Promise<boolean> => {
-    if (Platform.OS === "web") {
-      setComposerError("Video messages are not available on web.");
-      return false;
-    }
-    const gen = ++videoStartGenRef.current;
-    setVideoSessionActive(true);
-    setVideoLocked(false);
-    await new Promise((r) => setTimeout(r, 160));
-    if (gen !== videoStartGenRef.current) return false;
-    try {
-      const ok = await videoRef.current?.ensurePermissions();
-      if (gen !== videoStartGenRef.current) return false;
-      if (!ok) {
-        setVideoSessionActive(false);
-        setComposerError(
-          "Camera and microphone permission are required for video messages.",
-        );
-        return false;
-      }
-      await videoRef.current?.startRecording();
-      if (gen !== videoStartGenRef.current) {
-        try {
-          await videoRef.current?.stopRecording();
-        } catch {
-          /* noop */
-        }
-        return false;
-      }
-      videoRecordStartedAt.current = Date.now();
-      return true;
-    } catch {
-      if (gen === videoStartGenRef.current) {
-        setVideoSessionActive(false);
-        setComposerError("Could not start the camera.");
-      }
-      return false;
-    }
+    const ok = await videoHookRef.current.start();
+    if (ok) recordingLiveRef.current = true;
+    return ok;
   }, []);
 
   useEffect(() => {
@@ -472,20 +432,13 @@ export default function GroupRoomScreen() {
       const ms = voice.isRecording
         ? voice.elapsedMs
         : videoRecordingActive
-          ? Date.now() - videoRecordStartedAt.current
+          ? videoHookRef.current.elapsedMs
           : 0;
       useRecordingStore.getState().updateRecordingTime(ms);
     }, 200);
     return () => clearInterval(id);
   }, [recordingLive, voice.isRecording, voice.elapsedMs, videoRecordingActive]);
 
-  useEffect(() => {
-    if (!videoRecordingActive) return;
-    const id = setTimeout(() => {
-      if (videoRecordingActiveRef.current) void finishVideoCapture();
-    }, VIDEO_RECORD_MAX_MS);
-    return () => clearTimeout(id);
-  }, [videoRecordingActive, finishVideoCapture]);
 
   const lockFromDrag = useCallback((dy: number) => {
     if (dy >= -LOCK_DRAG_PX || !recordingLiveRef.current) return;
@@ -493,9 +446,8 @@ export default function GroupRoomScreen() {
     if (mode === "voice" && !voiceRef.current.isLocked) {
       voiceRef.current.lock();
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    } else if (mode === "video" && !videoLockedRef.current) {
-      setVideoLocked(true);
-      useRecordingStore.getState().lockRecording();
+    } else if (mode === "video" && !videoHookRef.current.isLocked) {
+      videoHookRef.current.lock();
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
   }, []);
@@ -516,8 +468,8 @@ export default function GroupRoomScreen() {
       return;
     }
 
-    if (mode === "video" && videoSessionActive && videoRecordingActiveRef.current) {
-      if (videoLockedRef.current) {
+    if (mode === "video" && videoSessionActive && videoHookRef.current.isRecording) {
+      if (videoHookRef.current.isLocked) {
         holdArmedRef.current = false;
         return;
       }
@@ -529,13 +481,7 @@ export default function GroupRoomScreen() {
 
     if (holdArmedRef.current && !recordingLiveRef.current) {
       holdArmedRef.current = false;
-      videoStartGenRef.current += 1;
-      setVideoSessionActive(false);
-      try {
-        await videoRef.current?.stopRecording();
-      } catch {
-        /* noop */
-      }
+      await videoHookRef.current.discard();
       await voiceRef.current.discard();
       return;
     }
@@ -564,7 +510,7 @@ export default function GroupRoomScreen() {
           recordingLiveRef.current || holdArmedRef.current,
         onPanResponderGrant: () => {
           slideCancelFabX.value = 0;
-          if (voiceRef.current.isLocked || videoLockedRef.current) return;
+          if (voiceRef.current.isLocked || videoHookRef.current.isLocked) return;
           pressDownAt.current = Date.now();
           holdArmedRef.current = false;
           recordingLiveRef.current = false;
@@ -580,30 +526,25 @@ export default function GroupRoomScreen() {
                 recordingLiveRef.current = ok;
               } else if (mode === "video") {
                 const ok = await startVideoRecording();
-                if (ok) {
-                  recordingLiveRef.current = true;
-                  setVideoRecordingActive(true);
-                  videoRecordingActiveRef.current = true;
-                  useRecordingStore.getState().startRecording(groupId);
-                }
+                recordingLiveRef.current = ok;
               }
             } catch {
               holdArmedRef.current = false;
               recordingLiveRef.current = false;
-              setVideoSessionActive(false);
+              void videoHookRef.current.discard();
               setComposerError("Recording could not start.");
             }
           }, HOLD_MS);
         },
         onPanResponderMove: (_, g) => {
-          if (voiceRef.current.isLocked || videoLockedRef.current) return;
+          if (voiceRef.current.isLocked || videoHookRef.current.isLocked) return;
           if (!recordingLiveRef.current && !holdArmedRef.current) return;
           setDragY(g.dy);
           lockFromDrag(g.dy);
           if (
             recordingLiveRef.current &&
             !voiceRef.current.isLocked &&
-            !videoLockedRef.current
+            !videoHookRef.current.isLocked
           ) {
             slideCancelFabX.value = Math.max(
               -FAB_CANCEL_DRAG_PX * 1.25,
@@ -616,7 +557,7 @@ export default function GroupRoomScreen() {
           const shouldSlideCancel =
             recordingLiveRef.current &&
             !voiceRef.current.isLocked &&
-            !videoLockedRef.current &&
+            !videoHookRef.current.isLocked &&
             dx <= -FAB_CANCEL_DRAG_PX;
           slideCancelFabX.value = withSpring(0, { damping: 22, stiffness: 320 });
           setDragY(0);
@@ -633,7 +574,7 @@ export default function GroupRoomScreen() {
           const shouldSlideCancel =
             recordingLiveRef.current &&
             !voiceRef.current.isLocked &&
-            !videoLockedRef.current &&
+            !videoHookRef.current.isLocked &&
             dx <= -FAB_CANCEL_DRAG_PX;
           slideCancelFabX.value = withSpring(0, { damping: 22, stiffness: 320 });
           setDragY(0);
@@ -661,11 +602,9 @@ export default function GroupRoomScreen() {
   const recordElapsedMs = useMemo(() => {
     void recordHudTick;
     if (voice.isRecording) return voice.elapsedMs;
-    if (videoRecordingActive) {
-      return Date.now() - videoRecordStartedAt.current;
-    }
+    if (videoRecordingActive) return video.elapsedMs;
     return 0;
-  }, [voice.isRecording, voice.elapsedMs, videoRecordingActive, recordHudTick]);
+  }, [voice.isRecording, voice.elapsedMs, videoRecordingActive, video.elapsedMs, recordHudTick]);
 
   const isSendOnly = draft.trim().length > 0;
 
@@ -694,9 +633,10 @@ export default function GroupRoomScreen() {
       edges={["bottom"]}
     >
       <GestureDetector gesture={swipeBackGesture}>
-        <View style={styles.gestureFill}>
+        <View style={styles.gestureFill} testID="group-swipe-root">
           <ScreenTopAccent />
           <KeyboardAvoidingView
+            testID="group-keyboard-avoid"
             style={styles.keyboardRoot}
             behavior={Platform.OS === "ios" ? "padding" : "height"}
             keyboardVerticalOffset={
@@ -729,7 +669,7 @@ export default function GroupRoomScreen() {
 
               {Platform.OS !== "web" && videoSessionActive ? (
                 <VideoMessage
-                  ref={videoRef}
+                  ref={video.videoRef}
                   active={videoSessionActive}
                   elapsedMs={recordElapsedMs}
                 />

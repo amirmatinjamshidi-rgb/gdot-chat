@@ -43,11 +43,12 @@ import { ReactionPicker } from "@/components/reactions/reaction-picker";
 import { ScreenTopAccent } from "@/components/screen-top-accent";
 import { ThemedText } from "@/components/themed-text";
 import { ScalePressable } from "@/components/ui/scale-pressable";
-import { VideoMessage, type VideoMessageHandle } from "@/components/video-message";
+import { VideoMessage } from "@/components/video-message";
 import { useComposerDraft } from "@/hooks/use-composer-draft";
 import { useConversationMessages } from "@/hooks/use-conversation-messages";
 import { useReactions } from "@/hooks/use-reactions";
 import { useSwipeBackGesture } from "@/hooks/use-swipe-back";
+import { useVideoRecorder } from "@/hooks/use-video-recorder";
 import { useVoiceRecorder } from "@/hooks/use-voice-recorder";
 import { localMessageToUi } from "@/lib/chat/local-message-ui";
 import { VIDEO_RECORD_MAX_MS, VOICE_RECORD_MAX_MS } from "@/lib/config";
@@ -64,7 +65,6 @@ import {
 import { useMessagesStore } from "@/stores/messages-store";
 import { useRecordingStore } from "@/stores/recording-store";
 import { useColors } from "@/stores/theme-store";
-const MIN_RECORD_MS = 1000;
 const HOLD_MS = 320;
 const TAP_MAX_MS = 260;
 const KEYBOARD_EXTRA_OFFSET = 100;
@@ -79,8 +79,6 @@ export default function ChatRoomScreen() {
 
   const [composerError, setComposerError] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
-  const [videoSessionActive, setVideoSessionActive] = useState(false);
-
   const { syncService, conversationStore, mediaTransfer, signalService } =
     useAppServices();
   const activePlaybackId = useMessagesStore((state) => state.activePlaybackId);
@@ -94,8 +92,6 @@ export default function ChatRoomScreen() {
   );
   const setComposerMode = useInputStore((state) => state.setComposerMode);
   const cycleComposerMode = useInputStore((state) => state.cycleComposerMode);
-  const [videoLocked, setVideoLocked] = useState(false);
-  const [videoRecordingActive, setVideoRecordingActive] = useState(false);
   const sendVoiceMediaRef = useRef<
     (result: { uri: string; durationMs: number }) => Promise<void>
   >(async () => undefined);
@@ -113,6 +109,25 @@ export default function ChatRoomScreen() {
 
   const voiceRecordingActive = voice.isRecording;
   const voiceLocked = voice.isLocked;
+
+  const sendVideoMediaRef = useRef<
+    (result: { uri: string; durationMs: number }) => Promise<void>
+  >(async () => undefined);
+
+  const video = useVideoRecorder({
+    conversationId: chatId || "chat",
+    maxDurationMs: VIDEO_RECORD_MAX_MS,
+    onMaxDuration: (r) => {
+      void sendVideoMediaRef.current(r);
+    },
+    onError: (m) => setComposerError(m),
+  });
+  const videoHookRef = useRef(video);
+  videoHookRef.current = video;
+
+  const videoRecordingActive = video.isRecording;
+  const videoLocked = video.isLocked;
+  const videoSessionActive = video.sessionActive;
 
   const recordingLive = voiceRecordingActive || videoRecordingActive;
   const [dragY, setDragY] = useState(0);
@@ -287,13 +302,7 @@ export default function ChatRoomScreen() {
     [shellW],
   );
 
-  const videoRef = useRef<VideoMessageHandle>(null);
-  const videoRecordingActiveRef = useRef(false);
   const voiceLockedRef = useRef(false);
-
-  useEffect(() => {
-    videoRecordingActiveRef.current = videoRecordingActive;
-  }, [videoRecordingActive]);
 
   useEffect(() => {
     voiceLockedRef.current = voiceLocked;
@@ -305,8 +314,6 @@ export default function ChatRoomScreen() {
   }, [videoLocked]);
 
   const voiceRecordingLiveRef = useRef(false);
-  const videoRecordStartedAt = useRef(0);
-  const videoStartGenRef = useRef(0);
   const pressDownAt = useRef(0);
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** True after the hold threshold fired (user held long enough to attempt capture). */
@@ -322,9 +329,6 @@ export default function ChatRoomScreen() {
     holdRecordControlsRef.current?.resetLayout();
     setComposerMode(chatId, "send");
     setDragY(0);
-    setVideoLocked(false);
-    setVideoRecordingActive(false);
-    videoRecordingActiveRef.current = false;
     holdArmedRef.current = false;
     recordingLiveRef.current = false;
     voiceRecordingLiveRef.current = false;
@@ -337,9 +341,6 @@ export default function ChatRoomScreen() {
       holdTimerRef.current = null;
     }
   }, []);
-
-  const videoSessionActiveRef = useRef(false);
-  videoSessionActiveRef.current = videoSessionActive;
 
   useFocusEffect(
     useCallback(() => {
@@ -358,10 +359,7 @@ export default function ChatRoomScreen() {
     return () => {
       clearHoldTimer();
       useRecordingStore.getState().cancelRecording();
-      videoStartGenRef.current += 1;
-      if (videoSessionActiveRef.current) {
-        void Promise.resolve(videoRef.current?.stopRecording()).catch(() => {});
-      }
+      void videoHookRef.current.discard();
     };
   }, [clearHoldTimer]);
 
@@ -481,103 +479,65 @@ export default function ChatRoomScreen() {
     return ok;
   }, []);
 
-  const finishVideoCapture = useCallback(async () => {
-    const durationMs = Date.now() - videoRecordStartedAt.current;
-    let recorded: { uri: string } | null = null;
-    try {
-      recorded = (await videoRef.current?.stopRecording()) ?? null;
-    } catch {
-      recorded = null;
-    }
-    setVideoSessionActive(false);
-    setVideoLocked(false);
-    setVideoRecordingActive(false);
-    videoRecordingActiveRef.current = false;
-    useRecordingStore.getState().stopRecording();
-    if (!recorded?.uri || durationMs < MIN_RECORD_MS) {
-      resetComposerAfterSend();
-      return;
-    }
-    try {
-      if (identityKeyChanged) {
-        setComposerError("Cannot send until you accept the new safety number.");
-        return;
+  const sendVideoMedia = useCallback(
+    async (result: { uri: string; durationMs: number }) => {
+      try {
+        if (identityKeyChanged) {
+          setComposerError("Cannot send until you accept the new safety number.");
+          return;
+        }
+        await syncService.sendOutgoingMedia(chatId, {
+          uri: result.uri,
+          kind: "video",
+          mimeType: "video/mp4",
+          durationMs: result.durationMs,
+        });
+        resetComposerAfterSend();
+        await reloadMessages();
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } catch (e) {
+        setComposerError(
+          e instanceof Error ? e.message : "Failed to send video message.",
+        );
       }
-      await syncService.sendOutgoingMedia(chatId, {
-        uri: recorded.uri,
-        kind: "video",
-        mimeType: "video/mp4",
-        durationMs,
-      });
-      resetComposerAfterSend();
-      await reloadMessages();
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    } catch (e) {
-      setComposerError(
-        e instanceof Error ? e.message : "Failed to send video message.",
-      );
-    }
-  }, [chatId, reloadMessages, resetComposerAfterSend, syncService, identityKeyChanged]);
+    },
+    [
+      chatId,
+      identityKeyChanged,
+      reloadMessages,
+      resetComposerAfterSend,
+      syncService,
+    ],
+  );
+  sendVideoMediaRef.current = sendVideoMedia;
+
+  const finishVideoCapture = useCallback(async () => {
+    recordingLiveRef.current = false;
+    holdArmedRef.current = false;
+    const result = await videoHookRef.current.finish();
+    holdRecordControlsRef.current?.resetLayout();
+    setDragY(0);
+    if (result) await sendVideoMedia(result);
+    else resetComposerAfterSend();
+  }, [resetComposerAfterSend, sendVideoMedia]);
 
   const discardVideoRecording = useCallback(async () => {
-    videoStartGenRef.current += 1;
-    useRecordingStore.getState().cancelRecording();
-    try {
-      await videoRef.current?.stopRecording();
-    } catch {
-      /* noop */
-    }
-    setVideoSessionActive(false);
-    setVideoLocked(false);
-    setVideoRecordingActive(false);
-    videoRecordingActiveRef.current = false;
+    recordingLiveRef.current = false;
+    holdArmedRef.current = false;
+    await videoHookRef.current.discard();
     setDragY(0);
     holdRecordControlsRef.current?.resetLayout();
-  }, []);
-
-  const startVideoRecording = useCallback(async (): Promise<boolean> => {
-    if (Platform.OS === "web") {
-      setComposerError("Video messages are not available on web.");
-      return false;
-    }
-    const gen = ++videoStartGenRef.current;
-    setVideoSessionActive(true);
-    setVideoLocked(false);
-    await new Promise((r) => setTimeout(r, 160));
-    if (gen !== videoStartGenRef.current) return false;
-    try {
-      const ok = await videoRef.current?.ensurePermissions();
-      if (gen !== videoStartGenRef.current) return false;
-      if (!ok) {
-        setVideoSessionActive(false);
-        setComposerError(
-          "Camera and microphone permission are required for video messages.",
-        );
-        return false;
-      }
-      await videoRef.current?.startRecording();
-      if (gen !== videoStartGenRef.current) {
-        try {
-          await videoRef.current?.stopRecording();
-        } catch {
-          /* noop */
-        }
-        return false;
-      }
-      videoRecordStartedAt.current = Date.now();
-      return true;
-    } catch {
-      if (gen === videoStartGenRef.current) {
-        setVideoSessionActive(false);
-        setComposerError("Could not start the camera.");
-      }
-      return false;
-    }
   }, []);
 
   const onVideoSlideCancel = useCallback(() => {
     void discardVideoRecording();
   }, [discardVideoRecording]);
+
+  const startVideoRecording = useCallback(async (): Promise<boolean> => {
+    const ok = await videoHookRef.current.start();
+    if (ok) recordingLiveRef.current = true;
+    return ok;
+  }, []);
 
   useEffect(() => {
     if (!recordingLive) return;
@@ -586,22 +546,13 @@ export default function ChatRoomScreen() {
       const ms = voiceRecordingActive
         ? voiceRef.current.elapsedMs
         : videoRecordingActive
-          ? Date.now() - videoRecordStartedAt.current
+          ? videoHookRef.current.elapsedMs
           : 0;
       useRecordingStore.getState().updateRecordingTime(ms);
     }, 200);
     return () => clearInterval(id);
   }, [recordingLive, voiceRecordingActive, videoRecordingActive]);
 
-  useEffect(() => {
-    if (!videoRecordingActive) return;
-    const id = setTimeout(() => {
-      if (videoRecordingActiveRef.current) {
-        void finishVideoCapture();
-      }
-    }, VIDEO_RECORD_MAX_MS);
-    return () => clearTimeout(id);
-  }, [videoRecordingActive, finishVideoCapture]);
 
 
   const lockFromDrag = useCallback((dy: number) => {
@@ -610,9 +561,8 @@ export default function ChatRoomScreen() {
     if (mode === "voice" && !voiceRef.current.isLocked) {
       voiceRef.current.lock();
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    } else if (mode === "video" && !videoLockedRef.current) {
-      setVideoLocked(true);
-      useRecordingStore.getState().lockRecording();
+    } else if (mode === "video" && !videoHookRef.current.isLocked) {
+      videoHookRef.current.lock();
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
   }, []);
@@ -636,7 +586,7 @@ export default function ChatRoomScreen() {
     if (
       mode === "video" &&
       videoSessionActive &&
-      videoRecordingActiveRef.current
+      videoHookRef.current.isRecording
     ) {
       if (videoLockedRef.current) {
         holdArmedRef.current = false;
@@ -650,13 +600,7 @@ export default function ChatRoomScreen() {
 
     if (holdArmedRef.current && !recordingLiveRef.current) {
       holdArmedRef.current = false;
-      videoStartGenRef.current += 1;
-      setVideoSessionActive(false);
-      try {
-        await videoRef.current?.stopRecording();
-      } catch {
-        /* noop */
-      }
+      await videoHookRef.current.discard();
       voiceRecordingLiveRef.current = false;
       await voiceRef.current.discard();
       return;
@@ -705,17 +649,12 @@ export default function ChatRoomScreen() {
                 recordingLiveRef.current = true;
               } else if (mode === "video") {
                 const ok = await startVideoRecording();
-                if (ok) {
-                  recordingLiveRef.current = true;
-                  setVideoRecordingActive(true);
-                  videoRecordingActiveRef.current = true;
-                  useRecordingStore.getState().startRecording(chatId);
-                }
+                recordingLiveRef.current = ok;
               }
             } catch {
               holdArmedRef.current = false;
               recordingLiveRef.current = false;
-              setVideoSessionActive(false);
+              void videoHookRef.current.discard();
               setComposerError("Recording could not start.");
             }
           }, HOLD_MS);
@@ -802,7 +741,8 @@ export default function ChatRoomScreen() {
       return voice.elapsedMs;
     }
     if (videoRecordingActive) {
-      return Date.now() - videoRecordStartedAt.current + recordHudTick * 0;
+      void recordHudTick;
+      return video.elapsedMs;
     }
     return 0;
   }, [voiceRecordingActive, videoRecordingActive, recordHudTick]);
@@ -818,9 +758,10 @@ export default function ChatRoomScreen() {
       edges={["bottom"]}
     >
       <GestureDetector gesture={swipeBackGesture}>
-        <View style={styles.gestureFill}>
+        <View style={styles.gestureFill} testID="chat-swipe-root">
           <ScreenTopAccent />
           <KeyboardAvoidingView
+            testID="chat-keyboard-avoid"
             style={styles.keyboardRoot}
             behavior={Platform.OS === "ios" ? "padding" : "height"}
             keyboardVerticalOffset={
@@ -840,7 +781,7 @@ export default function ChatRoomScreen() {
 
               {Platform.OS !== "web" && videoSessionActive ? (
                 <VideoMessage
-                  ref={videoRef}
+                  ref={video.videoRef}
                   active={videoSessionActive}
                   elapsedMs={recordElapsedMs}
                 />
@@ -1001,6 +942,7 @@ export default function ChatRoomScreen() {
                         ) : null}
                         <TextInput
                           ref={inputRef}
+                          testID="chat-composer-input"
                           style={[
                             styles.input,
                             {
