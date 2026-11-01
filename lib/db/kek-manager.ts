@@ -106,6 +106,8 @@ export class KekManager implements IKekManager {
   async createKekWithPin(pin: string): Promise<void> {
     validateAppPin(pin);
     const capability = await getBiometricCapability();
+    // Same capability gate as ensureKek: hardware-without-enrollment or
+    // weak-only must allow PIN; only refuse when Strong is truly usable.
     if (capability.canUseStrongForSecureStore) {
       throw new AppAuthError(
         "UNKNOWN",

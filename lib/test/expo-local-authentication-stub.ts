@@ -11,11 +11,13 @@ export const SecurityLevel = {
   BIOMETRIC_STRONG: 3,
 };
 
+let hasHardware = false;
 let enrolled = false;
 let level = SecurityLevel.NONE;
+let authError: string | null = null;
 
 export async function hasHardwareAsync(): Promise<boolean> {
-  return enrolled;
+  return hasHardware;
 }
 
 export async function isEnrolledAsync(): Promise<boolean> {
@@ -27,24 +29,38 @@ export async function getEnrolledLevelAsync(): Promise<number> {
 }
 
 export async function supportedAuthenticationTypesAsync(): Promise<number[]> {
-  return enrolled ? [AuthenticationType.FINGERPRINT] : [];
+  return hasHardware ? [AuthenticationType.FINGERPRINT] : [];
 }
 
 export async function authenticateAsync(_opts?: {
   promptMessage?: string;
-}): Promise<{ success: boolean }> {
+  disableDeviceFallback?: boolean;
+  biometricsSecurityLevel?: string;
+  cancelLabel?: string;
+}): Promise<{ success: boolean; error?: string }> {
+  if (authError) {
+    return { success: false, error: authError };
+  }
   return { success: enrolled };
 }
 
 export function __setBiometricStub(opts: {
   enrolled?: boolean;
   level?: number;
+  hasHardware?: boolean;
+  authError?: string | null;
 }): void {
   enrolled = opts.enrolled ?? false;
-  level = opts.level ?? (enrolled ? SecurityLevel.BIOMETRIC_STRONG : SecurityLevel.NONE);
+  level =
+    opts.level ??
+    (enrolled ? SecurityLevel.BIOMETRIC_STRONG : SecurityLevel.NONE);
+  hasHardware = opts.hasHardware ?? (enrolled || level > SecurityLevel.NONE);
+  authError = opts.authError ?? null;
 }
 
 export function __resetBiometricStub(): void {
+  hasHardware = false;
   enrolled = false;
   level = SecurityLevel.NONE;
+  authError = null;
 }

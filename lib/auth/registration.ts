@@ -22,8 +22,23 @@ export async function ensureKek(
 
   const capability = await getBiometricCapability();
   if (capability.canUseStrongForSecureStore) {
-    await kekManager.createKekAfterBiometric();
-    return;
+    try {
+      await kekManager.createKekAfterBiometric();
+      return;
+    } catch (e) {
+      // Hardware/capability can race with enrollment (or SecureStore can lie).
+      // Fall through to the app-PIN path so register/login can route to set-app-pin.
+      // Duck-type `code` — `instanceof AppAuthError` can fail across Metro/Hermes copies.
+      const code =
+        e instanceof AppAuthError
+          ? e.code
+          : e && typeof e === "object" && "code" in e
+            ? String((e as { code: unknown }).code)
+            : null;
+      if (code !== "NOT_ENROLLED" && code !== "STRONG_BIOMETRIC_REQUIRED") {
+        throw e;
+      }
+    }
   }
 
   if (!appPin) throw new AppAuthError("PIN_REQUIRED");

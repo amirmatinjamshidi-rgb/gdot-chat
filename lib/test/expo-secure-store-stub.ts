@@ -1,5 +1,6 @@
 const store = new Map<string, string>();
 const lastOptions = new Map<string, SecureStoreOptions | undefined>();
+let canUseBiometric = false;
 
 export const WHEN_UNLOCKED = 1;
 export const WHEN_UNLOCKED_THIS_DEVICE_ONLY = 2;
@@ -40,7 +41,11 @@ export async function deleteItemAsync(
 }
 
 export function canUseBiometricAuthentication(): boolean {
-  return false;
+  return canUseBiometric;
+}
+
+export function __setCanUseBiometricAuthentication(value: boolean): void {
+  canUseBiometric = value;
 }
 
 export async function isAvailableAsync(): Promise<boolean> {
@@ -50,6 +55,7 @@ export async function isAvailableAsync(): Promise<boolean> {
 export function __resetSecureStoreStub(): void {
   store.clear();
   lastOptions.clear();
+  canUseBiometric = false;
 }
 
 export function __getLastOptions(

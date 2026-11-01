@@ -7,6 +7,12 @@ import {
   SecurityLevel,
 } from "expo-local-authentication";
 
+function setSecureStoreBiometric(value: boolean) {
+  (
+    SecureStore as { __setCanUseBiometricAuthentication?: (v: boolean) => void }
+  ).__setCanUseBiometricAuthentication?.(value);
+}
+
 import { AppAuthError } from "@/lib/auth/app-auth-error";
 import { ensureKek, registerUser } from "@/lib/auth/registration";
 import { KekManager } from "@/lib/db/kek-manager";
@@ -92,6 +98,111 @@ describe("ensureKek + registerUser", () => {
     await expect(ensureKek(new KekManager())).rejects.toBeInstanceOf(
       AppAuthError,
     );
+  });
+
+
+  it("ensureKek uses PIN path when SecureStore says yes but nothing is enrolled", async () => {
+    setSecureStoreBiometric(true);
+    __setBiometricStub({
+      hasHardware: true,
+      enrolled: false,
+      level: SecurityLevel.NONE,
+    });
+    const kek = new KekManager();
+    await expect(ensureKek(kek)).rejects.toMatchObject({ code: "PIN_REQUIRED" });
+    const pin = `pin-${crypto.randomUUID().slice(0, 8)}!!`;
+    await ensureKek(kek, pin);
+    expect(await kek.getLockMode()).toBe("pin");
+  });
+
+  it("ensureKek uses PIN path for weak-only biometrics", async () => {
+    setSecureStoreBiometric(true);
+    __setBiometricStub({
+      hasHardware: true,
+      enrolled: true,
+      level: SecurityLevel.BIOMETRIC_WEAK,
+    });
+    const kek = new KekManager();
+    await expect(ensureKek(kek)).rejects.toMatchObject({ code: "PIN_REQUIRED" });
+    const pin = `pin-${crypto.randomUUID().slice(0, 8)}!!`;
+    await ensureKek(kek, pin);
+    expect(await kek.getLockMode()).toBe("pin");
+  });
+
+  it("ensureKek uses biometric path when strong biometric is enrolled", async () => {
+    setSecureStoreBiometric(true);
+    __setBiometricStub({
+      hasHardware: true,
+      enrolled: true,
+      level: SecurityLevel.BIOMETRIC_STRONG,
+    });
+    const kek = new KekManager();
+    await ensureKek(kek);
+    expect(await kek.getLockMode()).toBe("biometric");
+  });
+
+  it("ensureKek maps failed biometric creation NOT_ENROLLED to PIN_REQUIRED", async () => {
+    setSecureStoreBiometric(true);
+    __setBiometricStub({
+      hasHardware: true,
+      enrolled: true,
+      level: SecurityLevel.BIOMETRIC_STRONG,
+    });
+    const kekManager = {
+      hasKek: async () => false,
+      getLockMode: async () => "none" as const,
+      createKekAfterBiometric: async () => {
+        throw new AppAuthError("NOT_ENROLLED");
+      },
+      createKekWithPin: async () => {
+        throw new Error("should not create PIN in this assertion");
+      },
+      getPassphraseForDb: async () => "",
+      wipeKek: async () => undefined,
+    };
+    await expect(ensureKek(kekManager)).rejects.toMatchObject({
+      code: "PIN_REQUIRED",
+    });
+  });
+
+  it("ensureKek falls back to PIN after biometric NOT_ENROLLED when pin provided", async () => {
+    setSecureStoreBiometric(true);
+    __setBiometricStub({
+      hasHardware: true,
+      enrolled: true,
+      level: SecurityLevel.BIOMETRIC_STRONG,
+      authError: "not_enrolled",
+    });
+    // After failed biometric auth, enrolled level still looks strong in this stub,
+    // so use a wrapper that fails biometric then allows PIN via real manager once
+    // capability is forced off.
+    const inner = new KekManager();
+    let biometricAttempts = 0;
+    const kekManager = {
+      hasKek: () => inner.hasKek(),
+      getLockMode: () => inner.getLockMode(),
+      createKekAfterBiometric: async () => {
+        biometricAttempts += 1;
+        throw new AppAuthError("NOT_ENROLLED");
+      },
+      createKekWithPin: async (pin: string) => {
+        // Simulate re-check seeing no strong enrollment after the failure.
+        setSecureStoreBiometric(false);
+        __setBiometricStub({
+          hasHardware: true,
+          enrolled: false,
+          level: SecurityLevel.NONE,
+        });
+        await inner.createKekWithPin(pin);
+      },
+      getPassphraseForDb: (opts?: { pin?: string }) =>
+        inner.getPassphraseForDb(opts),
+      wipeKek: () => inner.wipeKek(),
+    };
+    const pin = `pin-${crypto.randomUUID().slice(0, 8)}!!`;
+    await ensureKek(kekManager, pin);
+    expect(biometricAttempts).toBe(1);
+    expect(await inner.getLockMode()).toBe("pin");
   });
 
   it("registerUser creates local identity keys and stores auth tokens", async () => {

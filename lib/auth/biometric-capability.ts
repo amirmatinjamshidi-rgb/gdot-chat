@@ -16,17 +16,23 @@ export type BiometricCapability = {
 };
 
 export async function getBiometricCapability(): Promise<BiometricCapability> {
-  const [hasHardware, enrolledLevel] = await Promise.all([
+  const [hasHardware, enrolledLevel, isEnrolled] = await Promise.all([
     LocalAuthentication.hasHardwareAsync(),
     LocalAuthentication.getEnrolledLevelAsync(),
+    LocalAuthentication.isEnrolledAsync(),
   ]);
-  const canUseStrongForSecureStore = SecureStore.canUseBiometricAuthentication();
+  // SecureStore.canUseBiometricAuthentication() can be true when hardware exists
+  // even if nothing is enrolled (common on Android emulators / fresh phones).
+  // Require BOTH SecureStore support and an actually enrolled Strong biometric.
   const hasStrongBiometric =
-    enrolledLevel >= LocalAuthentication.SecurityLevel.BIOMETRIC_STRONG ||
-    canUseStrongForSecureStore;
+    isEnrolled &&
+    enrolledLevel >= LocalAuthentication.SecurityLevel.BIOMETRIC_STRONG;
+  const canUseStrongForSecureStore =
+    SecureStore.canUseBiometricAuthentication() && hasStrongBiometric;
   const hasWeakOnly =
+    isEnrolled &&
     enrolledLevel === LocalAuthentication.SecurityLevel.BIOMETRIC_WEAK &&
-    !canUseStrongForSecureStore;
+    !hasStrongBiometric;
   const canOfferDeviceCredentialFallback =
     enrolledLevel >= LocalAuthentication.SecurityLevel.SECRET;
 

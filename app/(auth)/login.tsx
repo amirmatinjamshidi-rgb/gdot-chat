@@ -10,9 +10,20 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ThemedText } from "@/components/themed-text";
 import { ScalePressable } from "@/components/ui/scale-pressable";
-import { AppAuthError } from "@/lib/auth/app-auth-error";
+import {
+  AppAuthError,
+  type AppAuthErrorCode,
+} from "@/lib/auth/app-auth-error";
 import { setPendingAppPinAuth } from "@/lib/auth/pending-app-pin-auth";
 import { loginUser } from "@/lib/auth/registration";
+
+function authErrorCode(error: unknown): AppAuthErrorCode | null {
+  if (error instanceof AppAuthError) return error.code;
+  if (error && typeof error === "object" && "code" in error) {
+    return String((error as { code: unknown }).code) as AppAuthErrorCode;
+  }
+  return null;
+}
 import { useAuth } from "@/lib/providers/auth-provider";
 import { useAppServices } from "@/lib/services/app-services-context";
 
@@ -43,7 +54,12 @@ export default function LoginScreen() {
       await refresh();
       router.replace("/lock" as Href);
     } catch (e) {
-      if (e instanceof AppAuthError && e.code === "PIN_REQUIRED") {
+      const code = authErrorCode(e);
+      if (
+        code === "PIN_REQUIRED" ||
+        code === "NOT_ENROLLED" ||
+        code === "STRONG_BIOMETRIC_REQUIRED"
+      ) {
         setPendingAppPinAuth({
           kind: "login",
           username,
@@ -52,14 +68,8 @@ export default function LoginScreen() {
         router.push("/(auth)/set-app-pin" as Href);
         return;
       }
-      const title =
-        e instanceof AppAuthError && e.code === "STRONG_BIOMETRIC_REQUIRED"
-          ? "Fingerprint required"
-          : e instanceof AppAuthError && e.code === "NOT_ENROLLED"
-            ? "Biometrics not set up"
-            : "Login failed";
       Alert.alert(
-        title,
+        "Login failed",
         e instanceof Error ? e.message : "Unknown error",
       );
     } finally {

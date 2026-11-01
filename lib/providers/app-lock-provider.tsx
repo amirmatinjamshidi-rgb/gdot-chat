@@ -14,6 +14,7 @@ import {
   isUserCancelAuth,
 } from "@/lib/auth/app-auth-error";
 import { mapSecureStoreAuthError } from "@/lib/auth/biometric-capability";
+import { isPublicRoute } from "@/lib/auth/public-routes";
 import { APP_LOCK_BACKGROUND_MS } from "@/lib/config";
 import { ensureSignalInitialized } from "@/lib/crypto/init-signal";
 import { useAppServices } from "@/lib/services/app-services-context";
@@ -33,20 +34,6 @@ type AppLockContextValue = {
 const AppLockContext = createContext<AppLockContextValue | null>(null);
 
 const LOCK_ROUTE = "/lock";
-function isPublicRoute(path: string): boolean {
-  if (
-    path === "/" ||
-    path === "/lock" ||
-    path === "/login" ||
-    path === "/verify-otp" ||
-    path.endsWith("/login") ||
-    path.endsWith("/register")
-  ) {
-    return true;
-  }
-  return path.includes("(auth)");
-}
-
 export function AppLockProvider({ children }: { children: React.ReactNode }) {
   const { appLockStore, kekManager, db } = useAppServices();
   const router = useRouter();

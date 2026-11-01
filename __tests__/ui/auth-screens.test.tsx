@@ -98,6 +98,48 @@ describe("Login / Register / SetAppPin screens", () => {
     });
   });
 
+
+
+  it("routes register to set-app-pin when NOT_ENROLLED", async () => {
+    const username = `user_${randomId("u")}`;
+    const password = `pw_${randomId("p")}!Aa12`;
+    mockRegisterUser.mockRejectedValue(
+      new AppAuthError("NOT_ENROLLED", "no biometrics"),
+    );
+    const user = userEvent.setup();
+    renderWithServices(<RegisterScreen />, mockAppServices());
+
+    await user.type(screen.getByPlaceholderText("Username"), username);
+    await user.type(screen.getByPlaceholderText("Password (min 8)"), password);
+    await user.press(screen.getByText("Register"));
+
+    await waitFor(() => {
+      expect(expoRouter.useRouter().push).toHaveBeenCalledWith(
+        "/(auth)/set-app-pin",
+      );
+    });
+  });
+
+  it("routes register to set-app-pin when PIN_REQUIRED", async () => {
+    const username = `user_${randomId("u")}`;
+    const password = `pw_${randomId("p")}!Aa12`;
+    mockRegisterUser.mockRejectedValue(
+      new AppAuthError("PIN_REQUIRED", "need pin"),
+    );
+    const user = userEvent.setup();
+    renderWithServices(<RegisterScreen />, mockAppServices());
+
+    await user.type(screen.getByPlaceholderText("Username"), username);
+    await user.type(screen.getByPlaceholderText("Password (min 8)"), password);
+    await user.press(screen.getByText("Register"));
+
+    await waitFor(() => {
+      expect(expoRouter.useRouter().push).toHaveBeenCalledWith(
+        "/(auth)/set-app-pin",
+      );
+    });
+  });
+
   it("completes registration after setting an app PIN", async () => {
     const username = `user_${randomId("u")}`;
     const password = `pw_${randomId("p")}!Aa12`;
