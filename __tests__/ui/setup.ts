@@ -1,0 +1,116 @@
+jest.mock("@/lib/services/app-services", () => ({
+  appServices: {},
+}));
+
+
+jest.mock("@/lib/crypto/pin-kek", () => ({
+  APP_PIN_MIN_LENGTH: 8,
+  APP_PIN_MAX_LENGTH: 128,
+  validateAppPin: (pin: string) => {
+    if (pin.length < 8) {
+      const { AppAuthError } = require("@/lib/auth/app-auth-error");
+      throw new AppAuthError(
+        "PIN_INVALID",
+        "App PIN must be at least 8 characters",
+      );
+    }
+  },
+}));
+
+
+// Matchers come from any @testing-library/react-native import in tests.
+
+jest.mock("@react-native-async-storage/async-storage", () =>
+  require("@react-native-async-storage/async-storage/jest/async-storage-mock"),
+);
+
+jest.mock("expo-linear-gradient", () => {
+  const React = require("react");
+  return {
+    LinearGradient: ({ children, ...props }: { children?: React.ReactNode }) =>
+      React.createElement("LinearGradient", props, children),
+  };
+});
+
+jest.mock("expo-haptics", () => ({
+  impactAsync: jest.fn(async () => undefined),
+  ImpactFeedbackStyle: { Light: "light", Medium: "medium", Heavy: "heavy" },
+  notificationAsync: jest.fn(async () => undefined),
+  NotificationFeedbackType: {
+    Success: "success",
+    Error: "error",
+    Warning: "warning",
+  },
+}));
+
+jest.mock("expo-router", () => {
+  const React = require("react");
+  const router = {
+    push: jest.fn(),
+    replace: jest.fn(),
+    back: jest.fn(),
+    canGoBack: jest.fn(() => true),
+  };
+  return {
+    useRouter: () => router,
+    useLocalSearchParams: jest.fn(() => ({})),
+    usePathname: jest.fn(() => "/"),
+    useSegments: jest.fn(() => []),
+    Link: ({ children }: { children: React.ReactNode }) => children,
+    Stack: { Screen: () => null },
+    router,
+  };
+});
+
+jest.mock("@react-navigation/native", () => {
+  const actual = jest.requireActual("@react-navigation/native");
+  return {
+    ...actual,
+    useFocusEffect: (cb: () => void | (() => void)) => {
+      const React = require("react");
+      React.useEffect(() => {
+        const cleanup = cb();
+        return typeof cleanup === "function" ? cleanup : undefined;
+      }, [cb]);
+    },
+  };
+});
+
+jest.mock("react-native-reanimated", () => {
+  const Reanimated = require("react-native-reanimated/mock");
+  Reanimated.default.call = () => {};
+  return Reanimated;
+});
+
+jest.mock("react-native-safe-area-context", () => {
+  const React = require("react");
+  const inset = { top: 0, right: 0, bottom: 0, left: 0 };
+  return {
+    SafeAreaProvider: ({ children }: { children: React.ReactNode }) => children,
+    SafeAreaView: ({ children, ...props }: { children: React.ReactNode }) =>
+      React.createElement("SafeAreaView", props, children),
+    useSafeAreaInsets: () => inset,
+  };
+});
+
+jest.mock("@expo/vector-icons/MaterialIcons", () => {
+  const React = require("react");
+  return {
+    __esModule: true,
+    default: (props: Record<string, unknown>) =>
+      React.createElement("MaterialIcons", props),
+  };
+});
+
+jest.mock("expo-symbols", () => ({
+  SymbolView: () => null,
+}));
+
+beforeEach(() => {
+  jest.useFakeTimers({ advanceTimers: true });
+});
+
+afterEach(() => {
+  jest.useRealTimers();
+  jest.clearAllMocks();
+});

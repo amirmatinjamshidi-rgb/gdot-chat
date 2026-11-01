@@ -40,7 +40,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { DualIconCrossfade } from "@/components/dual-icon-crossfade";
+import { ComposerFab } from "@/components/composer-fab";
 import { ErrorHandlerButton } from "@/components/error-handler-button";
 import {
   HoldRecordControls,
@@ -100,52 +100,6 @@ function formatDuration(ms: number) {
   return m > 0
     ? `${m}:${r.toString().padStart(2, "0")}`
     : `0:${r.toString().padStart(2, "0")}`;
-}
-
-type ComposerFabProps = {
-  isSendOnly: boolean;
-  composerMode: ComposerMode;
-  onSendText: () => void;
-  onCycleSendEmpty: () => void;
-  fabColor: string;
-  iconColor: string;
-};
-
-function ComposerFab({
-  isSendOnly,
-  composerMode,
-  onSendText,
-  onCycleSendEmpty,
-  fabColor,
-  iconColor,
-}: ComposerFabProps) {
-  if (isSendOnly) {
-    return (
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Send message"
-        style={[styles.actionFab, { backgroundColor: fabColor }]}
-        onPress={onSendText}
-      >
-        <DualIconCrossfade active="send" size={22} color={iconColor} />
-      </Pressable>
-    );
-  }
-
-  if (composerMode === "send") {
-    return (
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Switch to voice message"
-        style={[styles.actionFab, { backgroundColor: fabColor }]}
-        onPress={onCycleSendEmpty}
-      >
-        <DualIconCrossfade active="send" size={22} color={iconColor} />
-      </Pressable>
-    );
-  }
-
-  return null;
 }
 
 export default function ChatRoomScreen() {

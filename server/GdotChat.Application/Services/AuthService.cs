@@ -13,16 +13,17 @@ namespace GdotChat.Application.Services;
 public class AuthService : IAuthService
 {
     /// <summary>
-    /// Concurrent refresh losers (same token, same moment) must not trigger family revocation.
-    /// Reuse after this window is treated as theft.
+    /// Concurrent refresh losers (same token, same moment) must receive the same
+    /// successor pair (idempotent rotation). Reuse after this window is theft.
     /// </summary>
-    private static readonly TimeSpan RefreshReuseTheftGrace = TimeSpan.FromSeconds(5);
+    internal static readonly TimeSpan RefreshReuseTheftGrace = TimeSpan.FromSeconds(5);
 
     private readonly DbContext _db;
     private readonly IUserService _userService;
     private readonly IDeviceService _deviceService;
     private readonly IJwtTokenService _jwtTokenService;
     private readonly IPasswordHasher _passwordHasher;
+    private readonly IRefreshSuccessorProtector _successorProtector;
     private readonly JwtOptions _jwtOptions;
     private readonly IDeviceLinkRateLimiter _deviceLinkRateLimiter;
 
@@ -32,6 +33,7 @@ public class AuthService : IAuthService
         IDeviceService deviceService,
         IJwtTokenService jwtTokenService,
         IPasswordHasher passwordHasher,
+        IRefreshSuccessorProtector successorProtector,
         IOptions<JwtOptions> jwtOptions,
         IDeviceLinkRateLimiter deviceLinkRateLimiter)
     {
@@ -40,6 +42,7 @@ public class AuthService : IAuthService
         _deviceService = deviceService;
         _jwtTokenService = jwtTokenService;
         _passwordHasher = passwordHasher;
+        _successorProtector = successorProtector;
         _jwtOptions = jwtOptions.Value;
         _deviceLinkRateLimiter = deviceLinkRateLimiter;
     }
@@ -56,7 +59,8 @@ public class AuthService : IAuthService
         var user = await _userService.CreateUserAsync(username, passwordHash, ct);
         var device = await _deviceService.RegisterDeviceWithPreKeysAsync(user.Id, request.Device, ct);
 
-        return await IssueTokensAsync(user, device, ct);
+        var (result, _) = await IssueTokensAsync(user, device, ct);
+        return result;
     }
 
     public async Task<AuthResultDto> LoginAsync(LoginRequest request, CancellationToken ct = default)
@@ -75,7 +79,8 @@ public class AuthService : IAuthService
         device.LastSeenAt = DateTimeOffset.UtcNow;
         await _db.SaveChangesAsync(ct);
 
-        return await IssueTokensAsync(user, device, ct);
+        var (result, _) = await IssueTokensAsync(user, device, ct);
+        return result;
     }
 
     public async Task<AuthResultDto> RefreshAsync(string refreshToken, CancellationToken ct = default)
@@ -107,12 +112,16 @@ public class AuthService : IAuthService
                 .Include(d => d.User)
                 .FirstAsync(d => d.Id == stored.DeviceId, ct);
 
-            var result = await IssueTokensAsync(device.User, device, ct);
+            var (result, successorId) = await IssueTokensAsync(device.User, device, ct);
+            stored.ReplacedByTokenId = successorId;
+            stored.SuccessorCiphertext = _successorProtector.Protect(result);
+            await _db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
             return result;
         }
 
         var existing = await _db.Set<RefreshToken>()
+            .AsTracking()
             .FirstOrDefaultAsync(t => t.TokenHash == hash, ct);
 
         if (existing is null)
@@ -124,22 +133,54 @@ public class AuthService : IAuthService
         if (existing.RevokedAt is not null)
         {
             var revokedAge = now - existing.RevokedAt.Value;
-            if (revokedAge > RefreshReuseTheftGrace)
+            if (revokedAge <= RefreshReuseTheftGrace)
             {
-                await RevokeAllActiveForDeviceAsync(existing.DeviceId, now, ct);
-                await _db.SaveChangesAsync(ct);
+                var payload = await WaitForSuccessorCiphertextAsync(existing, hash, ct);
+                if (payload is null)
+                {
+                    await tx.RollbackAsync(ct);
+                    throw new InvalidCredentialsException();
+                }
+
                 await tx.CommitAsync(ct);
-                throw new RefreshTokenReuseException();
+                return _successorProtector.Unprotect(payload);
             }
 
-            await tx.RollbackAsync(ct);
-            throw new InvalidCredentialsException();
+            existing.SuccessorCiphertext = null;
+            await RevokeAllActiveForDeviceAsync(existing.DeviceId, now, ct);
+            await _db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+            throw new RefreshTokenReuseException();
         }
 
         await tx.RollbackAsync(ct);
         throw new InvalidCredentialsException();
     }
 
+    /// <summary>
+    /// Concurrent losers may observe RevokedAt before the winner commits SuccessorCiphertext.
+    /// Poll briefly (no wall-clock sleep in callers — uses cancellation-friendly delays).
+    /// </summary>
+    private async Task<string?> WaitForSuccessorCiphertextAsync(
+        RefreshToken existing,
+        string hash,
+        CancellationToken ct)
+    {
+        if (!string.IsNullOrEmpty(existing.SuccessorCiphertext))
+            return existing.SuccessorCiphertext;
+
+        for (var i = 0; i < 20; i++)
+        {
+            await Task.Delay(25, ct);
+            var row = await _db.Set<RefreshToken>()
+                .AsNoTracking()
+                .FirstOrDefaultAsync(t => t.TokenHash == hash, ct);
+            if (!string.IsNullOrEmpty(row?.SuccessorCiphertext))
+                return row.SuccessorCiphertext;
+        }
+
+        return null;
+    }
 
     public async Task<AuthResultDto> LoginNewDeviceAsync(LoginNewDeviceRequest request, CancellationToken ct = default)
     {
@@ -154,7 +195,8 @@ public class AuthService : IAuthService
             throw new InvalidCredentialsException();
 
         var device = await _deviceService.RegisterDeviceWithPreKeysAsync(user.Id, request.Device, ct);
-        return await IssueTokensAsync(user, device, ct);
+        var (result, _) = await IssueTokensAsync(user, device, ct);
+        return result;
     }
 
     public async Task<AuthResultDto> RedeemDeviceLinkAsync(RedeemDeviceLinkRequest request, CancellationToken ct = default)
@@ -164,7 +206,8 @@ public class AuthService : IAuthService
             throw new DeviceLinkRateLimitedException();
 
         var (user, device) = await _deviceService.RedeemLinkTokenAsync(request, ct);
-        return await IssueTokensAsync(user, device, ct);
+        var (result, _) = await IssueTokensAsync(user, device, ct);
+        return result;
     }
 
     private async Task RevokeAllActiveForDeviceAsync(Guid deviceId, DateTimeOffset now, CancellationToken ct)
@@ -173,30 +216,38 @@ public class AuthService : IAuthService
             .Where(t => t.DeviceId == deviceId && t.RevokedAt == null)
             .ToListAsync(ct);
         foreach (var token in active)
+        {
             token.RevokedAt = now;
+            token.SuccessorCiphertext = null;
+        }
     }
 
-    private async Task<AuthResultDto> IssueTokensAsync(User user, Device device, CancellationToken ct)
+    private async Task<(AuthResultDto Result, Guid RefreshTokenId)> IssueTokensAsync(
+        User user,
+        Device device,
+        CancellationToken ct)
     {
         var accessToken = _jwtTokenService.CreateAccessToken(user, device);
         var refreshPlain = _jwtTokenService.CreateRefreshTokenPlaintext();
         var refreshHash = _jwtTokenService.HashRefreshToken(refreshPlain);
         var refreshDays = Math.Max(1, _jwtOptions.RefreshTokenDays);
+        var id = Guid.NewGuid();
 
         _db.Set<RefreshToken>().Add(new RefreshToken
         {
-            Id = Guid.NewGuid(),
+            Id = id,
             DeviceId = device.Id,
             TokenHash = refreshHash,
             ExpiresAt = DateTimeOffset.UtcNow.AddDays(refreshDays),
         });
         await _db.SaveChangesAsync(ct);
 
-        return new AuthResultDto(
+        var result = new AuthResultDto(
             accessToken,
             refreshPlain,
             user.Id,
             device.Id,
             _jwtTokenService.GetAccessTokenExpiry());
+        return (result, id);
     }
 }

@@ -9,6 +9,7 @@ import {
   mapSecureStoreAuthError,
 } from "@/lib/auth/biometric-capability";
 import {
+  needsPinKdfUpgrade,
   parsePinWrappedKek,
   serializePinWrappedKek,
   unwrapKekWithPin,
@@ -16,8 +17,17 @@ import {
   wrapKekWithPin,
 } from "@/lib/crypto/pin-kek";
 import {
+  assertPinUnlockAllowed,
+  parsePinLockoutState,
+  registerPinFailure,
+  registerPinSuccess,
+  serializePinLockoutState,
+  type Clock,
+} from "@/lib/crypto/pin-lockout";
+import {
   SECURE_STORE_KEK_KEY,
   SECURE_STORE_KEK_MODE_KEY,
+  SECURE_STORE_PIN_LOCKOUT_KEY,
   SECURE_STORE_PIN_WRAPPED_KEK_KEY,
 } from "./constants";
 import { bytesToHex } from "./sql-utils";
@@ -36,7 +46,17 @@ export interface IKekManager {
   wipeKek(): Promise<void>;
 }
 
+export type KekManagerDeps = {
+  clock?: Clock;
+};
+
 export class KekManager implements IKekManager {
+  private readonly clock: Clock;
+
+  constructor(deps: KekManagerDeps = {}) {
+    this.clock = deps.clock ?? (() => Date.now());
+  }
+
   async hasKek(): Promise<boolean> {
     const mode = await this.getLockMode();
     if (mode === "biometric") {
@@ -48,7 +68,6 @@ export class KekManager implements IKekManager {
         null
       );
     }
-    // Legacy: biometric KEK without mode flag
     return (await SecureStore.getItemAsync(SECURE_STORE_KEK_KEY)) !== null;
   }
 
@@ -102,6 +121,10 @@ export class KekManager implements IKekManager {
       serializePinWrappedKek(blob),
     );
     await SecureStore.setItemAsync(SECURE_STORE_KEK_MODE_KEY, "pin");
+    await SecureStore.setItemAsync(
+      SECURE_STORE_PIN_LOCKOUT_KEY,
+      serializePinLockoutState(registerPinSuccess()),
+    );
   }
 
   async getPassphraseForDb(opts?: { pin?: string }): Promise<string> {
@@ -109,14 +132,43 @@ export class KekManager implements IKekManager {
 
     if (mode === "pin") {
       if (!opts?.pin) throw new AppAuthError("PIN_REQUIRED");
+      const now = this.clock();
+      const lockRaw = await SecureStore.getItemAsync(SECURE_STORE_PIN_LOCKOUT_KEY);
+      let lockState = parsePinLockoutState(lockRaw);
+      assertPinUnlockAllowed(lockState, now);
+
       const raw = await SecureStore.getItemAsync(
         SECURE_STORE_PIN_WRAPPED_KEK_KEY,
       );
       if (!raw) throw new AppAuthError("KEK_MISSING");
-      return unwrapKekWithPin(parsePinWrappedKek(raw), opts.pin);
+      const blob = parsePinWrappedKek(raw);
+      try {
+        const kekHex = unwrapKekWithPin(blob, opts.pin);
+        await SecureStore.setItemAsync(
+          SECURE_STORE_PIN_LOCKOUT_KEY,
+          serializePinLockoutState(registerPinSuccess()),
+        );
+        if (needsPinKdfUpgrade(blob)) {
+          const upgraded = wrapKekWithPin(kekHex, opts.pin);
+          await SecureStore.setItemAsync(
+            SECURE_STORE_PIN_WRAPPED_KEK_KEY,
+            serializePinWrappedKek(upgraded),
+          );
+        }
+        return kekHex;
+      } catch (e) {
+        if (e instanceof AppAuthError && e.code === "AUTH_FAILED") {
+          lockState = registerPinFailure(lockState, now);
+          await SecureStore.setItemAsync(
+            SECURE_STORE_PIN_LOCKOUT_KEY,
+            serializePinLockoutState(lockState),
+          );
+          assertPinUnlockAllowed(lockState, now);
+        }
+        throw e;
+      }
     }
 
-    // Biometric (or legacy biometric without mode flag)
     await assertStrongBiometricForSecureStore();
     await authenticateWithDeviceFallback(AUTH_PROMPT);
 
@@ -138,6 +190,7 @@ export class KekManager implements IKekManager {
     await SecureStore.deleteItemAsync(SECURE_STORE_KEK_KEY);
     await SecureStore.deleteItemAsync(SECURE_STORE_PIN_WRAPPED_KEK_KEY);
     await SecureStore.deleteItemAsync(SECURE_STORE_KEK_MODE_KEY);
+    await SecureStore.deleteItemAsync(SECURE_STORE_PIN_LOCKOUT_KEY);
   }
 }
 

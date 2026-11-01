@@ -9,6 +9,7 @@ import { MIGRATION_006_SQL } from "./migrations/006-envelope-quarantine";
 import { MIGRATION_007_SQL } from "./migrations/007-message-outbox";
 import { MIGRATION_008_SQL } from "./migrations/008-media-blob-outbox";
 import { MIGRATION_009_SQL } from "./migrations/009-pending-delivery-receipts";
+import { MIGRATION_010_SQL } from "./migrations/010-pending-outgoing-sends";
 import { splitStatements } from "./sql-utils";
 
 const MIGRATIONS: { version: number; sql: string }[] = [
@@ -21,6 +22,7 @@ const MIGRATIONS: { version: number; sql: string }[] = [
   { version: 7, sql: MIGRATION_007_SQL },
   { version: 8, sql: MIGRATION_008_SQL },
   { version: 9, sql: MIGRATION_009_SQL },
+  { version: 10, sql: MIGRATION_010_SQL },
 ];
 
 export class MigrationRunner {

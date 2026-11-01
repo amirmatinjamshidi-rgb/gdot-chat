@@ -12,6 +12,7 @@ public class RefreshTokenConfiguration : IEntityTypeConfiguration<RefreshToken>
         builder.HasKey(t => t.Id);
         builder.Property(t => t.TokenHash).HasMaxLength(64).IsRequired();
         builder.HasIndex(t => t.TokenHash);
+        builder.Property(t => t.SuccessorCiphertext).HasColumnType("text");
         builder.HasOne(t => t.Device).WithMany(d => d.RefreshTokens).HasForeignKey(t => t.DeviceId).OnDelete(DeleteBehavior.Cascade);
     }
 }

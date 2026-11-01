@@ -3,6 +3,7 @@ import type { IPendingReceiptStore } from "@/lib/db/pending-receipt-store";
 import { serializeReceiptPayload } from "@/lib/protocol/payload";
 import type { Clock } from "@/lib/session/inbound/constants";
 import { systemClock } from "@/lib/session/inbound/constants";
+import { exponentialBackoffMs } from "@/lib/session/backoff";
 import {
   RECEIPT_BACKOFF_BASE_MS,
   RECEIPT_BACKOFF_MAX_MS,
@@ -17,16 +18,16 @@ export type ReceiptSendFn = (
 
 export type ReceiptRandom = () => number;
 
-/** Exponential backoff with full jitter: U(0, min(cap, base * 2^attempt)). */
+/** @deprecated Prefer {@link exponentialBackoffMs}; kept for existing imports. */
 export function receiptBackoffMs(
   attemptCount: number,
   random: ReceiptRandom = Math.random,
 ): number {
-  const exp = Math.min(
-    RECEIPT_BACKOFF_MAX_MS,
-    RECEIPT_BACKOFF_BASE_MS * 2 ** Math.max(0, attemptCount),
-  );
-  return Math.floor(random() * (exp + 1));
+  return exponentialBackoffMs(attemptCount, {
+    baseMs: RECEIPT_BACKOFF_BASE_MS,
+    maxMs: RECEIPT_BACKOFF_MAX_MS,
+    random,
+  });
 }
 
 export type ReceiptRetryDeps = {

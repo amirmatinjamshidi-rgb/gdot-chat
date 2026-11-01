@@ -22,6 +22,10 @@ import type { IMessageStore } from "@/lib/db/message-store";
 import type { IOutboxStore, OutboxEntry } from "@/lib/db/outbox-store";
 import type { IPendingReceiptStore } from "@/lib/db/pending-receipt-store";
 import { ReceiptRetryService } from "@/lib/session/receipt-retry";
+import {
+  SendRetryService,
+  type IPendingOutgoingSendStore,
+} from "@/lib/session/send-retry";
 import type { IMediaBlobCache } from "@/lib/media/media-blob-cache";
 import type { IReactionStore } from "@/lib/db/reaction-store";
 import type { ISessionStore } from "@/lib/db/session-store";
@@ -64,6 +68,8 @@ export type SyncServiceInboundDeps = {
   outboxStore: IOutboxStore;
   /** Durable E2EE delivery-receipt retry queue (SQLCipher). */
   pendingReceiptStore?: IPendingReceiptStore;
+  /** Durable outgoing text send retry queue. */
+  pendingOutgoingSendStore?: IPendingOutgoingSendStore;
   clock?: Clock;
   resolveUsername?: (userId: string) => Promise<string | null>;
   /** When set, encryptAndPost fans out to all peer + own other devices. */
@@ -101,6 +107,7 @@ export class SyncService {
   private readonly sessionResetCooldown = new MemorySessionResetCooldownStore();
   private readonly outboxStore: IOutboxStore;
   private readonly receiptRetry: ReceiptRetryService | null;
+  private readonly sendRetry: SendRetryService | null;
   private readonly deviceDirectory: SyncServiceDeviceDirectory | null;
   private readonly mediaBlobCache: IMediaBlobCache | null;
   private readonly reuploadMediaBlob:
@@ -138,6 +145,37 @@ export class SyncService {
           sendEncrypted: (conversation, plaintext) =>
             this.encryptAndPost(conversation, plaintext).then(() => undefined),
           getConversation: (id) => this.conversationStore.getById(id),
+          clock: this.clock,
+        })
+      : null;
+    this.sendRetry = inboundDeps.pendingOutgoingSendStore
+      ? new SendRetryService({
+          store: inboundDeps.pendingOutgoingSendStore,
+          getConversation: (id) => this.conversationStore.getById(id),
+          deliver: async ({ conversation, localMessageId, clientMessageId, plaintext }) => {
+            const result = await this.encryptAndPost(
+              conversation,
+              serializeTextPayload(plaintext, clientMessageId),
+            );
+            await this.messageStore.updateServerEnvelopeId(localMessageId, result.envelopeId);
+            await this.outboxStore.upsertPending({
+              clientMessageId,
+              localMessageId,
+              conversationId: conversation.id,
+              peerUserId: conversation.peerUserId,
+              peerDeviceId: conversation.peerDeviceId,
+              plaintext,
+              payloadKind: "text",
+              createdAt: this.clock(),
+              expiresAt: this.clock() + OUTBOX_TTL_MS,
+            });
+          },
+          onDelivered: async (localMessageId) => {
+            await this.messageStore.updateStatus(localMessageId, "sent");
+          },
+          onGiveUp: async (localMessageId) => {
+            await this.messageStore.updateStatus(localMessageId, "failed");
+          },
           clock: this.clock,
         })
       : null;
@@ -242,6 +280,7 @@ export class SyncService {
         this.stopPolling();
         this.schedulePullPending();
         void this.receiptRetry?.flushDue();
+        void this.sendRetry?.flushDue();
       } else {
         // Live push lost (or SignalR disabled path) — poll until reconnect.
         this.startPolling();
@@ -252,6 +291,7 @@ export class SyncService {
     // Always try one inbox pull on start (covers poll-only and SignalR race).
     void this.pullPending();
     void this.receiptRetry?.flushDue();
+        void this.sendRetry?.flushDue();
   }
 
   async stop(): Promise<void> {
@@ -283,6 +323,7 @@ export class SyncService {
     await this.applyTransportPolicy({ syncIfConnected: true });
     void this.pullPending();
     void this.receiptRetry?.flushDue();
+        void this.sendRetry?.flushDue();
   }
 
   private schedulePullPending(): void {
@@ -655,6 +696,18 @@ export class SyncService {
       );
     } catch (e) {
       await this.messageStore.updateStatus(id, "failed");
+      if (this.sendRetry) {
+        const now = this.clock();
+        await this.sendRetry.enqueueFailed({
+          clientMessageId: clientId,
+          localMessageId: id,
+          conversationId,
+          plaintext: text,
+          createdAt: now,
+          nextAttemptAt: now,
+        });
+        void this.sendRetry.flushDue();
+      }
       throw e instanceof Error
         ? e
         : new Error("Message could not be delivered. Check connection and try again.");

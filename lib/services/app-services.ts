@@ -20,6 +20,7 @@ import { kekManager } from "@/lib/db/kek-manager";
 import { MessageStore } from "@/lib/db/message-store";
 import { OutboxStore } from "@/lib/db/outbox-store";
 import { PendingReceiptStore } from "@/lib/db/pending-receipt-store";
+import { PendingOutgoingSendStore } from "@/lib/db/pending-outgoing-send-store";
 import { EnvelopeQuarantineStore } from "@/lib/db/envelope-quarantine-store";
 import { EnvelopeAttemptStore } from "@/lib/db/envelope-attempt-store";
 import { ReactionStore } from "@/lib/db/reaction-store";
@@ -56,6 +57,7 @@ const envelopeAttemptStore = new EnvelopeAttemptStore(sqlCipherDatabase);
 const messageStore = new MessageStore(sqlCipherDatabase);
 const outboxStore = new OutboxStore(sqlCipherDatabase);
 const pendingReceiptStore = new PendingReceiptStore(sqlCipherDatabase);
+const pendingOutgoingSendStore = new PendingOutgoingSendStore(sqlCipherDatabase);
 const mediaBlobCache = new MediaBlobCacheStore(sqlCipherDatabase);
 const reactionStore = new ReactionStore(sqlCipherDatabase);
 const conversationStore = new ConversationStore(sqlCipherDatabase);
@@ -92,6 +94,7 @@ const syncService = new SyncService(
     sessionStore,
     outboxStore,
     pendingReceiptStore,
+    pendingOutgoingSendStore,
     mediaBlobCache,
     deviceDirectory: {
       listPeerDevices: async (userId) => usersApi.listDevices(userId),

@@ -9,6 +9,7 @@ describe("deliveryTicksForStatus", () => {
 
   it("shows single tick for pending/sent and double for delivered", () => {
     expect(deliveryTicksForStatus(true, "pending")).toBe(" ✓");
+    expect(deliveryTicksForStatus(true, "sending")).toBe(" ✓");
     expect(deliveryTicksForStatus(true, "sent")).toBe(" ✓");
     expect(deliveryTicksForStatus(true, "delivered")).toBe(" ✓✓");
   });

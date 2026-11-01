@@ -60,11 +60,15 @@ public sealed class AuthFlowTests
         Assert.NotNull(refreshed);
         Assert.NotEqual(auth.RefreshToken, refreshed.RefreshToken);
 
+        // Within reuse-grace: replaying the old refresh returns the same successor pair.
         var staleResponse = await _client.PostAsJsonAsync(
             "/v1/auth/refresh",
             new RefreshRequest(auth.RefreshToken));
-
-        Assert.Equal(HttpStatusCode.Unauthorized, staleResponse.StatusCode);
+        staleResponse.EnsureSuccessStatusCode();
+        var replay = await staleResponse.Content.ReadFromJsonAsync<AuthResultDto>();
+        Assert.NotNull(replay);
+        Assert.Equal(refreshed.RefreshToken, replay.RefreshToken);
+        Assert.Equal(refreshed.AccessToken, replay.AccessToken);
 
         await using var scope = _factory.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<DbContext>();
@@ -76,6 +80,7 @@ public sealed class AuthFlowTests
             .FirstAsync(t => t.TokenHash == hash);
 
         Assert.NotNull(stored.RevokedAt);
+        Assert.False(string.IsNullOrEmpty(stored.SuccessorCiphertext));
     }
 
     [Fact]

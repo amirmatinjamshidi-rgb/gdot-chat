@@ -227,8 +227,14 @@ namespace GdotChat.Infrastructure.Migrations
                     b.Property<DateTimeOffset>("ExpiresAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<Guid?>("ReplacedByTokenId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset?>("RevokedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("SuccessorCiphertext")
+                        .HasColumnType("text");
 
                     b.Property<string>("TokenHash")
                         .IsRequired()

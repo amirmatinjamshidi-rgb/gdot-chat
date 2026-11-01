@@ -52,6 +52,7 @@ public static class DependencyInjection
         services.AddScoped<ISessionResetService, SessionResetService>();
         services.AddScoped<IAttachmentService, AttachmentService>();
         services.AddScoped<IJwtTokenService, JwtTokenService>();
+        services.AddSingleton<IRefreshSuccessorProtector, RefreshSuccessorProtector>();
         services.AddScoped<IPasswordHasher, PasswordHasher>();
         services.AddScoped<IMessageNotifier, SignalRMessageNotifier>();
         services.AddSingleton<IPreKeyBundleRateLimiter, PreKeyBundleRateLimiter>();

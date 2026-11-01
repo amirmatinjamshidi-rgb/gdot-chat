@@ -5,7 +5,12 @@ export function deliveryTicksForStatus(
 ): string {
   if (!isMine || !deliveryStatus) return "";
   if (deliveryStatus === "delivered") return " ✓✓";
-  if (deliveryStatus === "sent" || deliveryStatus === "pending") return " ✓";
+  if (
+    deliveryStatus === "sent" ||
+    deliveryStatus === "pending" ||
+    deliveryStatus === "sending"
+  )
+    return " ✓";
   if (deliveryStatus === "failed") return " !";
   return "";
 }
