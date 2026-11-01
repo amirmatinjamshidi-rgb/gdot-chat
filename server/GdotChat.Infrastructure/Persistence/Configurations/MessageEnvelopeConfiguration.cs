@@ -9,6 +9,12 @@ public class MessageEnvelopeConfiguration : IEntityTypeConfiguration<MessageEnve
     public void Configure(EntityTypeBuilder<MessageEnvelope> builder)
     {
         builder.ToTable("message_envelopes");
+        builder.Property(e => e.GroupId);
+        builder.HasOne(e => e.Group)
+            .WithMany()
+            .HasForeignKey(e => e.GroupId)
+            .OnDelete(DeleteBehavior.SetNull);
+        builder.HasIndex(e => e.GroupId);
         builder.HasKey(e => e.Id);
         builder.Property(e => e.MessageType).IsRequired();
         builder.Property(e => e.Ciphertext).IsRequired();

@@ -11,6 +11,7 @@ public static class ScopePolicies
     public const string Devices = "scope:" + AuthScopes.Devices;
     public const string Session = "scope:" + AuthScopes.Session;
     public const string Users = "scope:" + AuthScopes.Users;
+    public const string Groups = "scope:" + AuthScopes.Groups;
 
     public static void AddScopePolicies(this AuthorizationOptions options)
     {
@@ -23,5 +24,6 @@ public static class ScopePolicies
         Add(Devices, AuthScopes.Devices);
         Add(Session, AuthScopes.Session);
         Add(Users, AuthScopes.Users);
+        Add(Groups, AuthScopes.Groups);
     }
 }

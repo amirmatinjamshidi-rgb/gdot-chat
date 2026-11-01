@@ -82,6 +82,18 @@ export type InboundProcessorDeps = {
   onReactionApplied?: (conversationId: string) => void;
   /** Optional: resolve username for message requests when missing. */
   resolveUsername?: (userId: string) => Promise<string | null>;
+  /**
+   * Optional Sender Keys decrypt for group envelopes (messageType 4 + groupId).
+   * Return missing_key to leave on server (retry after distribution arrives).
+   */
+  decryptGroupCiphertext?: (args: {
+    groupId: string;
+    senderUserId: string;
+    senderDeviceId: string;
+    ciphertextBase64: string;
+  }) => Promise<{ text: string } | "missing_key" | "failed">;
+  /** Ingest sender_key_distribution plaintext from a 1:1 Signal session. */
+  ingestSenderKeyDistribution?: (plaintext: string) => Promise<boolean>;
 };
 
 export class InboundEnvelopeProcessor {
@@ -198,6 +210,11 @@ export class InboundEnvelopeProcessor {
   private async processEnvelopeInner(env: MessageEnvelopeDto): Promise<void> {
     if (!this.deps.isDbReady()) {
       // Transient: leave on server, retry after unlock.
+      return;
+    }
+
+    if (env.groupId && env.messageType === 4) {
+      await this.processGroupEnvelope(env);
       return;
     }
 
@@ -446,6 +463,15 @@ export class InboundEnvelopeProcessor {
     plaintext: string,
     opts?: { skipAck?: boolean },
   ): Promise<void> {
+    if (this.deps.ingestSenderKeyDistribution) {
+      const ingested = await this.deps.ingestSenderKeyDistribution(plaintext);
+      if (ingested) {
+        if (!opts?.skipAck) {
+          await this.deps.messagesApi.ack(env.id);
+        }
+        return;
+      }
+    }
     const parsed = parseSignalPlaintext(plaintext);
 
     if (isInvalidStructuredPayload(plaintext, parsed)) {
@@ -643,6 +669,38 @@ export class InboundEnvelopeProcessor {
         );
       }
     }
+  }
+
+
+  private async processGroupEnvelope(env: MessageEnvelopeDto): Promise<void> {
+    const groupId = env.groupId!;
+    if (!this.deps.decryptGroupCiphertext) {
+      return;
+    }
+    const result = await this.deps.decryptGroupCiphertext({
+      groupId,
+      senderUserId: env.senderUserId,
+      senderDeviceId: env.senderDeviceId,
+      ciphertextBase64: env.ciphertextBase64,
+    });
+    if (result === "missing_key") {
+      return;
+    }
+    if (result === "failed") {
+      await this.deps.attemptStore.clear(env.id);
+      await this.deps.messagesApi.ack(env.id);
+      return;
+    }
+    const conversation: Conversation = {
+      id: groupId,
+      peerUserId: env.senderUserId,
+      peerUsername: env.senderUserId.slice(0, 8),
+      peerDeviceId: env.senderDeviceId,
+      lastMessagePreview: result.text.slice(0, 80),
+      lastMessageAt: this.clock(),
+      unreadCount: 0,
+    };
+    await this.dispatchPlaintext(env, conversation, result.text);
   }
 
   private async findConversationForSender(

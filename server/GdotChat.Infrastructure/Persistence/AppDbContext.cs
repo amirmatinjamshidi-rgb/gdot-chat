@@ -15,6 +15,8 @@ public class AppDbContext : DbContext
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<Attachment> Attachments => Set<Attachment>();
     public DbSet<DeviceLinkToken> DeviceLinkTokens => Set<DeviceLinkToken>();
+    public DbSet<ChatGroup> ChatGroups => Set<ChatGroup>();
+    public DbSet<GroupMember> GroupMembers => Set<GroupMember>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

@@ -90,3 +90,23 @@ public class DeviceLinkRateLimitedException : Exception
 {
     public DeviceLinkRateLimitedException() : base("Too many device link or new-device login attempts.") { }
 }
+
+public class GroupNotFoundException : Exception
+{
+    public GroupNotFoundException() : base("Group not found") { }
+}
+
+public class GroupForbiddenException : Exception
+{
+    public GroupForbiddenException(string message = "Group action forbidden") : base(message) { }
+}
+
+public class GroupFullException : Exception
+{
+    public GroupFullException() : base("Group member limit reached") { }
+}
+
+public class NotGroupMemberException : Exception
+{
+    public NotGroupMemberException() : base("Not a current group member") { }
+}

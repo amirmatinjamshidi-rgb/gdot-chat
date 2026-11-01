@@ -78,4 +78,6 @@ export interface MessageEnvelopeDto {
   messageType: number;
   ciphertextBase64: string;
   createdAt: string;
+  /** Present for Sender Keys group fan-out (messageType 4). */
+  groupId?: string | null;
 }

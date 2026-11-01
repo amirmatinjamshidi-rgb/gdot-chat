@@ -84,6 +84,9 @@ public sealed class GdotChatWebApplicationFactory : WebApplicationFactory<Progra
         builder.UseSetting("RateLimits:AuthRefreshPermitLimit", int.MaxValue.ToString());
         builder.UseSetting("RateLimits:MessagesSendPermitLimit", int.MaxValue.ToString());
         builder.UseSetting("RateLimits:UsersSearchPermitLimit", int.MaxValue.ToString());
+        builder.UseSetting("RateLimits:GroupsCreatePermitLimit", int.MaxValue.ToString());
+        builder.UseSetting("RateLimits:GroupsMutatePermitLimit", int.MaxValue.ToString());
+        builder.UseSetting("RateLimits:GroupsSendPermitLimit", int.MaxValue.ToString());
         builder.UseSetting("Attachments:CreatePermitLimit", int.MaxValue.ToString());
         builder.UseSetting("Attachments:ChunkPermitLimit", int.MaxValue.ToString());
     }

@@ -63,6 +63,8 @@ function RootNavigation() {
         <Stack.Screen name="add-contact" options={{ title: "Add contact" }} />
         <Stack.Screen name="edit-profile" options={{ title: "Edit profile" }} />
         <Stack.Screen name="CreateGroup" options={{ title: "Create Group" }} />
+        <Stack.Screen name="GroupRoom" options={{ title: "Group" }} />
+        <Stack.Screen name="GroupInfo" options={{ title: "Group info" }} />
         <Stack.Screen
           name="safety-number"
           options={{ title: "Safety number" }}

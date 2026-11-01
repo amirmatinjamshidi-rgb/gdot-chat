@@ -97,6 +97,17 @@ public interface IAttachmentService
     Task<int> PurgeExpiredAsync(CancellationToken ct = default);
 }
 
+public interface IGroupService
+{
+    Task<GroupSummaryDto> CreateAsync(Guid callerUserId, Guid callerDeviceId, CreateGroupRequest request, CancellationToken ct = default);
+    Task<IReadOnlyList<GroupSummaryDto>> ListMyGroupsAsync(Guid callerUserId, CancellationToken ct = default);
+    Task<IReadOnlyList<GroupMemberDto>> ListMembersAsync(Guid callerUserId, Guid groupId, CancellationToken ct = default);
+    Task AddMembersAsync(Guid callerUserId, Guid callerDeviceId, Guid groupId, AddGroupMembersRequest request, CancellationToken ct = default);
+    Task RemoveMemberAsync(Guid callerUserId, Guid callerDeviceId, Guid groupId, Guid subjectUserId, CancellationToken ct = default);
+    Task LeaveAsync(Guid callerUserId, Guid callerDeviceId, Guid groupId, CancellationToken ct = default);
+    Task<SendGroupMessageResponse> SendAsync(Guid callerUserId, Guid callerDeviceId, Guid groupId, SendGroupMessageRequest request, CancellationToken ct = default);
+}
+
 public interface ISessionResetService
 {
     Task RequestAsync(Guid callerDeviceId, Guid callerUserId, Guid targetDeviceId, CancellationToken ct = default);
@@ -110,5 +121,10 @@ public interface IMessageNotifier
         Guid targetDeviceId,
         Guid fromDeviceId,
         Guid fromUserId,
+        CancellationToken ct = default);
+
+    Task NotifyGroupMembershipChangedAsync(
+        Guid recipientDeviceId,
+        GroupMembershipChangedPayload payload,
         CancellationToken ct = default);
 }

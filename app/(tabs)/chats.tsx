@@ -9,6 +9,7 @@ import { ThemedText } from "@/components/themed-text";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { ScalePressable } from "@/components/ui/scale-pressable";
 import { useConversations } from "@/hooks/use-conversations";
+import { useGroups } from "@/hooks/use-groups";
 import { filterConversations } from "@/lib/chat/filter-conversations";
 import { formatConversationTime } from "@/lib/chat/format-conversation-time";
 import { useColors, useThemeStore } from "@/stores/theme-store";
@@ -23,11 +24,38 @@ export default function ChatsScreen() {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const { conversations, loading } = useConversations();
+  const { groups, loading: groupsLoading } = useGroups();
 
   const filteredChats = useMemo(
     () => filterConversations(conversations, searchQuery),
     [conversations, searchQuery],
   );
+
+  const mergedRows = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    const groupRows = groups
+      .filter((g) => {
+        if (!q) return true;
+        return g.id.toLowerCase().includes(q);
+      })
+      .map((g) => ({
+        kind: "group" as const,
+        id: g.id,
+        title: `Group ${g.id.slice(0, 8)}`,
+        preview: "",
+        at: Date.parse(g.createdAt) || 0,
+      }));
+    const chatRows = filteredChats.map((c) => ({
+      kind: "dm" as const,
+      id: c.id,
+      title: c.peerUsername,
+      preview: c.lastMessagePreview,
+      at: c.lastMessageAt,
+      unreadCount: c.unreadCount,
+      peerUsername: c.peerUsername,
+    }));
+    return [...groupRows, ...chatRows].sort((a, b) => b.at - a.at);
+  }, [filteredChats, groups, searchQuery]);
 
   return (
     <View style={styles.root}>
@@ -69,6 +97,25 @@ export default function ChatsScreen() {
               color={colors.text}
             />
           </ScalePressable>
+          <ScalePressable
+            accessibilityRole="button"
+            accessibilityLabel="Create group"
+            testID="create-group-button"
+            style={[
+              styles.iconButton,
+              {
+                backgroundColor: colors.surfaceElevated,
+                borderColor: colors.surfaceBorder,
+              },
+            ]}
+            onPress={() => router.push("/CreateGroup")}
+          >
+            <IconSymbol
+              name="person.3.fill"
+              size={22}
+              color={colors.text}
+            />
+          </ScalePressable>
         </View>
 
         <ChatSearchBar
@@ -80,14 +127,14 @@ export default function ChatsScreen() {
           glowHex={colors.accentGlow}
         />
 
-        {loading ? (
+        {loading || groupsLoading ? (
           <View style={styles.loadingWrap}>
             <ActivityIndicator color={colors.tint} />
           </View>
         ) : (
           <FlatList
             style={styles.list}
-            data={filteredChats}
+            data={mergedRows}
             keyExtractor={(item) => item.id}
             keyboardShouldPersistTaps="handled"
             alwaysBounceVertical={false}
@@ -102,13 +149,18 @@ export default function ChatsScreen() {
                   },
                 ]}
                 onPress={() =>
-                  router.push({
-                    pathname: "/ChatRoom",
-                    params: {
-                      id: item.id,
-                      name: item.peerUsername,
-                    },
-                  })
+                  item.kind === "group"
+                    ? router.push({
+                        pathname: "/GroupRoom" as never,
+                        params: { id: item.id, name: item.title },
+                      })
+                    : router.push({
+                        pathname: "/ChatRoom",
+                        params: {
+                          id: item.id,
+                          name: item.title,
+                        },
+                      })
                 }
               >
                 <View
@@ -128,7 +180,7 @@ export default function ChatsScreen() {
                     lightColor={colors.primary}
                     darkColor={colors.primary}
                   >
-                    {item.peerUsername[0]?.toUpperCase() ?? "?"}
+                    {item.title[0]?.toUpperCase() ?? "?"}
                   </ThemedText>
                 </View>
 
@@ -141,14 +193,14 @@ export default function ChatsScreen() {
                       lightColor={colors.text}
                       darkColor={colors.text}
                     >
-                      {item.peerUsername}
+                      {item.title}
                     </ThemedText>
                     <ThemedText
                       style={[styles.timeText, { color: colors.textMuted }]}
                       lightColor={colors.textMuted}
                       darkColor={colors.textMuted}
                     >
-                      {formatConversationTime(item.lastMessageAt)}
+                      {formatConversationTime(item.at)}
                     </ThemedText>
                   </View>
                   <View style={styles.bottomLine}>
@@ -161,9 +213,9 @@ export default function ChatsScreen() {
                       lightColor={colors.textSecondary}
                       darkColor={colors.textSecondary}
                     >
-                      {item.lastMessagePreview || "No messages yet"}
+                      {item.preview || "No messages yet"}
                     </ThemedText>
-                    {item.unreadCount > 0 ? (
+                    {item.kind === "dm" && (item as { unreadCount?: number }).unreadCount ? (
                       <View
                         style={[
                           styles.unreadBadge,
@@ -178,7 +230,7 @@ export default function ChatsScreen() {
                           lightColor={colors.onPrimary}
                           darkColor={colors.onPrimary}
                         >
-                          {item.unreadCount}
+                          {(item as { unreadCount?: number }).unreadCount}
                         </ThemedText>
                       </View>
                     ) : null}

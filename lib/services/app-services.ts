@@ -7,6 +7,9 @@ import { MessagesApi } from "@/lib/api/messages-api";
 import { SessionResetApi } from "@/lib/api/session-reset-api";
 import { SignalRClient } from "@/lib/api/signalr-client";
 import { UsersApi } from "@/lib/api/users-api";
+import { GroupsApi } from "@/lib/api/groups-api";
+import { GroupStore } from "@/lib/db/group-store";
+import { SenderKeyStore } from "@/lib/db/sender-key-store";
 import { LibSignalAdapter } from "@/lib/crypto/libsignal-adapter";
 import { PreKeyManager } from "@/lib/crypto/pre-key-manager";
 import { SignalService } from "@/lib/crypto/signal-service";
@@ -31,6 +34,7 @@ import { MediaBlobCacheStore } from "@/lib/media/media-blob-cache";
 import { authStore } from "@/lib/session/auth-store";
 import { appLockStore } from "@/lib/session/app-lock-store";
 import { SyncService } from "@/lib/session/sync-service";
+import { GroupSenderKeyService } from "@/lib/session/group-sender-key-service";
 
 const signalr = new SignalRClient(authStore);
 const apiClient = new ApiClient(authStore);
@@ -52,6 +56,9 @@ const devicesApi = new DevicesApi(apiClient);
 const messagesApi = new MessagesApi(apiClient);
 const sessionResetApi = new SessionResetApi(apiClient);
 const usersApi = new UsersApi(apiClient);
+const groupsApi = new GroupsApi(apiClient);
+const groupStore = new GroupStore(sqlCipherDatabase);
+const senderKeyStore = new SenderKeyStore(sqlCipherDatabase);
 const envelopeQuarantineStore = new EnvelopeQuarantineStore(sqlCipherDatabase);
 const envelopeAttemptStore = new EnvelopeAttemptStore(sqlCipherDatabase);
 const messageStore = new MessageStore(sqlCipherDatabase);
@@ -77,6 +84,40 @@ const signalService = new SignalService(
   sessionStore,
 );
 const mediaTransferRef: { current: MediaTransferService | null } = { current: null };
+
+const groupSenderKeyService = new GroupSenderKeyService({
+  store: senderKeyStore,
+  groupStore,
+  groupsApi,
+  localUserId: "",
+  localDeviceId: "",
+  listMemberDevices: async (userId) => {
+    const devices = await usersApi.listDevices(userId);
+    return devices.map((d) => ({ deviceId: d.deviceId }));
+  },
+  distribute: async ({ recipientUserId, recipientDeviceId, plaintext }) => {
+    const payload = await signalService.encryptOutgoing(
+      recipientUserId,
+      recipientDeviceId,
+      plaintext,
+    );
+    await messagesApi.send({
+      recipientUserId: payload.recipientUserId,
+      recipientDeviceId: payload.recipientDeviceId,
+      messageType: payload.messageType,
+      ciphertextBase64: payload.ciphertextBase64,
+    });
+  },
+  messageStore,
+  resolveUsername: async (userId) => {
+    try {
+      return (await usersApi.getProfile(userId)).username;
+    } catch {
+      return null;
+    }
+  },
+});
+
 const syncService = new SyncService(
   messagesApi,
   signalr,
@@ -122,8 +163,11 @@ const syncService = new SyncService(
         return null;
       }
     },
+    groupSenderKeyService,
+    groupStore,
   },
 );
+syncService.setGroupSenderKeyService(groupSenderKeyService);
 const mediaTransfer = new MediaTransferService(
   attachmentsApi,
   messageStore,
@@ -147,6 +191,9 @@ export const appServices = {
   devicesApi,
   messagesApi,
   usersApi,
+  groupsApi,
+  groupStore,
+  senderKeyStore,
   signalr,
   identityStore,
   cryptoKeyStore,
@@ -168,6 +215,7 @@ export const appServices = {
   preKeyManager,
   signalService,
   syncService,
+  groupSenderKeyService,
 };
 
 export type AppServices = typeof appServices;

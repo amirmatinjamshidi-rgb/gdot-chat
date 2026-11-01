@@ -9,6 +9,13 @@ export type EnvelopeAvailableHandler = (envelopeId: string) => void;
 export type SignalRConnectionHandler = (connected: boolean) => void;
 export type PreKeysLowHandler = (remainingCount: number) => void;
 export type SessionResetHandler = (fromDeviceId: string) => void;
+export type GroupMembershipChangedHandler = (payload: {
+  groupId: string;
+  change: string;
+  actorUserId: string;
+  subjectUserId?: string | null;
+  at?: string;
+}) => void;
 
 /** Backoff for withAutomaticReconnect (ms). Final null stops retrying until manual connect. */
 const RECONNECT_DELAYS_MS = [0, 2_000, 5_000, 10_000, 30_000];
@@ -19,6 +26,7 @@ export class SignalRClient {
   private onConnection: SignalRConnectionHandler | null = null;
   private onPreKeysLow: PreKeysLowHandler | null = null;
   private onSessionReset: SessionResetHandler | null = null;
+  private onGroupMembershipChanged: GroupMembershipChangedHandler | null = null;
   private connectInFlight: Promise<void> | null = null;
   /** When false, ignore automatic reconnect / don't auto-start (background / stop). */
   private desireConnected = false;
@@ -39,6 +47,12 @@ export class SignalRClient {
 
   setSessionResetHandler(handler: SessionResetHandler | null): void {
     this.onSessionReset = handler;
+  }
+
+  setGroupMembershipChangedHandler(
+    handler: GroupMembershipChangedHandler | null,
+  ): void {
+    this.onGroupMembershipChanged = handler;
   }
 
   isConnected(): boolean {
@@ -128,6 +142,35 @@ export class SignalRClient {
       }) => {
         const from = payload.fromDeviceId ?? payload.FromDeviceId;
         if (from) this.onSessionReset?.(from);
+      },
+    );
+
+    this.connection.on(
+      "GroupMembershipChanged",
+      (payload: {
+        groupId?: string;
+        GroupId?: string;
+        change?: string;
+        Change?: string;
+        actorUserId?: string;
+        ActorUserId?: string;
+        subjectUserId?: string | null;
+        SubjectUserId?: string | null;
+        at?: string;
+        At?: string;
+      }) => {
+        const groupId = payload.groupId ?? payload.GroupId;
+        const change = payload.change ?? payload.Change;
+        const actorUserId = payload.actorUserId ?? payload.ActorUserId;
+        if (!groupId || !change || !actorUserId) return;
+        this.onGroupMembershipChanged?.({
+          groupId,
+          change,
+          actorUserId,
+          subjectUserId:
+            payload.subjectUserId ?? payload.SubjectUserId ?? null,
+          at: payload.at ?? payload.At,
+        });
       },
     );
 

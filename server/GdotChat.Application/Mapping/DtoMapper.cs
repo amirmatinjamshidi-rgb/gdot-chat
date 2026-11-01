@@ -31,7 +31,8 @@ public static class DtoMapper
             senderUserId,
             entity.MessageType,
             ToBase64(entity.Ciphertext),
-            entity.CreatedAt);
+            entity.CreatedAt,
+            entity.GroupId);
 
     public static UserSummaryDto ToDto(User user) => new(user.Id, user.Username);
 

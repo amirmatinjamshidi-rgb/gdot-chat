@@ -14,6 +14,7 @@ public static class AuthScopes
     public const string Devices = "devices";
     public const string Session = "session";
     public const string Users = "users";
+    public const string Groups = "groups";
 
     public static readonly string[] AllUserScopes =
     [
@@ -23,6 +24,7 @@ public static class AuthScopes
         Devices,
         Session,
         Users,
+        Groups,
     ];
 
     public static string Format(IEnumerable<string> scopes) =>

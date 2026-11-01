@@ -49,6 +49,7 @@ public static class DependencyInjection
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IDeviceService, DeviceService>();
         services.AddScoped<IMessageRelayService, MessageRelayService>();
+        services.AddScoped<IGroupService, GroupService>();
         services.AddScoped<ISessionResetService, SessionResetService>();
         services.AddScoped<IAttachmentService, AttachmentService>();
         services.AddScoped<IJwtTokenService, JwtTokenService>();

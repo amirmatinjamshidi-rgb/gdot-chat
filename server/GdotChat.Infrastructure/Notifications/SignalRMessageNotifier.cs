@@ -40,5 +40,14 @@ public class SignalRMessageNotifier : IMessageNotifier
                 new SessionResetRequestedPayload(fromDeviceId, fromUserId),
                 ct);
 
+    public Task NotifyGroupMembershipChangedAsync(
+        Guid recipientDeviceId,
+        GroupMembershipChangedPayload payload,
+        CancellationToken ct = default) =>
+        _hubContext.Clients
+            .Group(DeviceGroup(recipientDeviceId))
+            .SendAsync("GroupMembershipChanged", payload, ct);
+
     private static string DeviceGroup(Guid deviceId) => $"device:{deviceId}";
 }
+

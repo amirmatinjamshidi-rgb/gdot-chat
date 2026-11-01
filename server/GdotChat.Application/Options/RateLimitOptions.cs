@@ -18,6 +18,9 @@ public class RateLimitOptions
 
     public int MessagesSendPermitLimit { get; set; } = 60;
     public int UsersSearchPermitLimit { get; set; } = 30;
+    public int GroupsCreatePermitLimit { get; set; } = 20;
+    public int GroupsMutatePermitLimit { get; set; } = 60;
+    public int GroupsSendPermitLimit { get; set; } = 60;
 
     /// <summary>Max session-reset signals from one device to one peer device per window.</summary>
     public int SessionResetPermitLimit { get; set; } = 5;

@@ -12,7 +12,8 @@ public record MessageEnvelopeDto(
     Guid SenderUserId,
     int MessageType,
     string CiphertextBase64,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    Guid? GroupId = null);
 
 public record SessionResetRequest(Guid TargetDeviceId);
 

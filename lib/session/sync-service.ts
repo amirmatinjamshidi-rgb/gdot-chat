@@ -43,6 +43,8 @@ import { assertMessageTextWithinLimit } from "@/lib/protocol/message-limits";
 import { isOfflineToken, type AuthStore } from "@/lib/session/auth-store";
 import { appLockStore } from "@/lib/session/app-lock-store";
 import { InboundEnvelopeProcessor } from "@/lib/session/inbound/inbound-envelope-processor";
+import type { GroupSenderKeyService } from "@/lib/session/group-sender-key-service";
+import type { IGroupStore } from "@/lib/db/group-store";
 import { systemClock, type Clock } from "@/lib/session/inbound/constants";
 import {
   OUTBOX_MAX_PER_CONVERSATION,
@@ -84,6 +86,15 @@ export type SyncServiceInboundDeps = {
   }) => Promise<MediaPayload>;
   /** Check whether a server attachment still exists (for media resend). */
   attachmentExists?: (attachmentId: string) => Promise<boolean>;
+  decryptGroupCiphertext?: (args: {
+    groupId: string;
+    senderUserId: string;
+    senderDeviceId: string;
+    ciphertextBase64: string;
+  }) => Promise<{ text: string } | "missing_key" | "failed">;
+  ingestSenderKeyDistribution?: (plaintext: string) => Promise<boolean>;
+  groupSenderKeyService?: GroupSenderKeyService | null;
+  groupStore?: IGroupStore | null;
 };
 
 export class SyncService {
@@ -116,6 +127,8 @@ export class SyncService {
   private readonly attachmentExists:
     | SyncServiceInboundDeps["attachmentExists"]
     | null;
+  private groupSenderKeyService: GroupSenderKeyService | null;
+  private readonly groupStore: IGroupStore | null;
 
   constructor(
     private readonly messagesApi: MessagesApi,
@@ -138,6 +151,8 @@ export class SyncService {
     this.mediaBlobCache = inboundDeps.mediaBlobCache ?? null;
     this.reuploadMediaBlob = inboundDeps.reuploadMediaBlob ?? null;
     this.attachmentExists = inboundDeps.attachmentExists ?? null;
+    this.groupSenderKeyService = inboundDeps.groupSenderKeyService ?? null;
+    this.groupStore = inboundDeps.groupStore ?? null;
     this.clock = inboundDeps.clock ?? systemClock;
     this.receiptRetry = inboundDeps.pendingReceiptStore
       ? new ReceiptRetryService({
@@ -151,8 +166,32 @@ export class SyncService {
     this.sendRetry = inboundDeps.pendingOutgoingSendStore
       ? new SendRetryService({
           store: inboundDeps.pendingOutgoingSendStore,
-          getConversation: (id) => this.conversationStore.getById(id),
+          getConversation: async (id) => {
+            const c = await this.conversationStore.getById(id);
+            if (c) return c;
+            const g = await this.groupStore?.getGroup(id);
+            if (!g) return null;
+            return {
+              id: g.id,
+              peerUserId: g.createdByUserId,
+              peerUsername: `group:${g.id.slice(0, 8)}`,
+              peerDeviceId: "group",
+              lastMessagePreview: g.lastMessagePreview,
+              lastMessageAt: g.lastMessageAt,
+              unreadCount: g.unreadCount,
+            };
+          },
           deliver: async ({ conversation, localMessageId, clientMessageId, plaintext }) => {
+            if (this.groupStore && (await this.groupStore.getGroup(conversation.id))) {
+              if (!this.groupSenderKeyService) throw new Error("Group crypto not ready");
+              const result = await this.groupSenderKeyService.encryptAndSendGroupText(
+                conversation.id,
+                plaintext,
+              );
+              const envelopeId = result.envelopeIds[0] ?? clientMessageId;
+              await this.messageStore.updateServerEnvelopeId(localMessageId, envelopeId);
+              return;
+            }
             const result = await this.encryptAndPost(
               conversation,
               serializeTextPayload(plaintext, clientMessageId),
@@ -197,6 +236,18 @@ export class SyncService {
       isDbReady: () => appLockStore.isUnlocked,
       clock: this.clock,
       resolveUsername: inboundDeps.resolveUsername,
+      decryptGroupCiphertext: (args) =>
+        inboundDeps.decryptGroupCiphertext
+          ? inboundDeps.decryptGroupCiphertext(args)
+          : this.groupSenderKeyService
+            ? this.groupSenderKeyService.tryDecryptGroupCiphertext(args)
+            : Promise.resolve("failed" as const),
+      ingestSenderKeyDistribution: (plaintext) =>
+        inboundDeps.ingestSenderKeyDistribution
+          ? inboundDeps.ingestSenderKeyDistribution(plaintext)
+          : this.groupSenderKeyService
+            ? this.groupSenderKeyService.ingestControlPlaintext(plaintext)
+            : Promise.resolve(false),
       logFailure: ({ envelopeId, errorClass, errorName }) => {
         if (__DEV__) {
           console.warn(
@@ -225,6 +276,10 @@ export class SyncService {
   setMediaTransfer(mediaTransfer: MediaTransferService): void {
     this.mediaTransfer = mediaTransfer;
     this.inbound.setMediaTransfer(mediaTransfer);
+  }
+
+  setGroupSenderKeyService(svc: GroupSenderKeyService | null): void {
+    this.groupSenderKeyService = svc;
   }
 
   setErrorHandler(handler: SyncErrorHandler | null): void {
@@ -267,9 +322,31 @@ export class SyncService {
         );
       });
     });
+    this.signalr.setGroupMembershipChangedHandler((payload) => {
+      void this.groupSenderKeyService
+        ?.handleMembershipChanged(payload)
+        .catch((e) => {
+          if (__DEV__) {
+            console.warn(
+              "[SyncService] group membership handler failed",
+              e instanceof Error ? e.message : e,
+            );
+          }
+        });
+    });
     this.signalr.setSessionResetHandler((fromDeviceId) => {
       void this.handleSessionResetRequested(fromDeviceId);
     });
+    void (async () => {
+      const local = await this.identityStore.getLocalIdentity();
+      if (local && this.groupSenderKeyService) {
+        this.groupSenderKeyService.setLocalIdentity(local.userId, local.deviceId);
+        const groups = (await this.groupStore?.listGroups()) ?? [];
+        for (const g of groups) {
+          await this.groupSenderKeyService.catchUpForLinkedDevice(g.id).catch(() => undefined);
+        }
+      }
+    })();
     this.signalr.setEnvelopeHandler(() => {
       this.schedulePullPending();
     });
@@ -302,6 +379,7 @@ export class SyncService {
     this.signalr.setConnectionHandler(null);
     this.signalr.setPreKeysLowHandler(null);
     this.signalr.setSessionResetHandler(null);
+    this.signalr.setGroupMembershipChangedHandler(null);
     this.signalRConnected = false;
     await this.signalr.disconnect();
   }
@@ -711,6 +789,78 @@ export class SyncService {
       throw e instanceof Error
         ? e
         : new Error("Message could not be delivered. Check connection and try again.");
+    }
+  }
+
+
+  async sendGroupOutgoing(groupId: string, text: string): Promise<void> {
+    const run = this.sendChain.then(() => this.sendGroupOutgoingInner(groupId, text));
+    this.sendChain = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  private async sendGroupOutgoingInner(
+    groupId: string,
+    text: string,
+  ): Promise<void> {
+    assertMessageTextWithinLimit(text);
+    if (!this.groupSenderKeyService) {
+      throw new Error("Group crypto not ready");
+    }
+    const group = await this.groupStore?.getGroup(groupId);
+    if (!group) throw new Error("Group not found");
+
+    const local = await this.identityStore.getLocalIdentity();
+    const deviceId = local?.deviceId ?? "local-device";
+    if (local) {
+      this.groupSenderKeyService.setLocalIdentity(local.userId, local.deviceId);
+    }
+    const clientId = randomUUID();
+    const id = randomUUID();
+    const createdAt = this.clock();
+
+    const optimistic = {
+      id,
+      clientId,
+      conversationId: groupId,
+      direction: "outgoing" as const,
+      kind: "text" as const,
+      plaintext: text,
+      status: "pending" as const,
+      senderDeviceId: deviceId,
+      createdAt,
+    };
+    await this.messageStore.insert(optimistic);
+
+    try {
+      const result = await this.groupSenderKeyService.encryptAndSendGroupText(
+        groupId,
+        text,
+      );
+      const envelopeId = result.envelopeIds[0] ?? clientId;
+      await this.messageStore.updateServerEnvelopeId(id, envelopeId);
+      await this.messageStore.updateStatus(id, "sent");
+      await this.groupStore?.touchPreview(groupId, text.slice(0, 120), createdAt);
+    } catch (e) {
+      await this.messageStore.updateStatus(id, "failed");
+      if (this.sendRetry) {
+        const now = this.clock();
+        await this.sendRetry.enqueueFailed({
+          clientMessageId: clientId,
+          localMessageId: id,
+          conversationId: groupId,
+          plaintext: text,
+          createdAt: now,
+          nextAttemptAt: now,
+        });
+        void this.sendRetry.flushDue();
+      }
+      throw e instanceof Error
+        ? e
+        : new Error("Group message could not be delivered. Check connection and try again.");
     }
   }
 
