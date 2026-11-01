@@ -1,12 +1,18 @@
 import type { IDatabase } from "./database-types";
 
+export type OutboxPayloadKind = "text" | "media";
+
 export type OutboxEntry = {
   clientMessageId: string;
   localMessageId: string;
   conversationId: string;
   peerUserId: string;
   peerDeviceId: string;
+  /** Text body, or serialized MediaPayload JSON for media. */
   plaintext: string;
+  payloadKind: OutboxPayloadKind;
+  mediaAttachmentId?: string;
+  mediaBlobCached: boolean;
   createdAt: number;
   expiresAt: number;
   resendCount: number;
@@ -14,12 +20,27 @@ export type OutboxEntry = {
   receiptedAt?: number;
 };
 
+export type OutboxUpsertInput = Omit<
+  OutboxEntry,
+  "resendCount" | "receiptedAt" | "lastResentAt" | "payloadKind" | "mediaBlobCached"
+> & {
+  resendCount?: number;
+  payloadKind?: OutboxPayloadKind;
+  mediaBlobCached?: boolean;
+  mediaAttachmentId?: string;
+};
+
 export interface IOutboxStore {
-  upsertPending(entry: Omit<OutboxEntry, "resendCount" | "receiptedAt" | "lastResentAt"> & { resendCount?: number }): Promise<void>;
+  upsertPending(entry: OutboxUpsertInput): Promise<void>;
   markReceipted(clientMessageId: string, at: number): Promise<boolean>;
   listPendingForPeerDevice(peerDeviceId: string, now: number): Promise<OutboxEntry[]>;
   listPendingForConversation(conversationId: string, now: number): Promise<OutboxEntry[]>;
   incrementResend(clientMessageId: string, at: number): Promise<number>;
+  updateMediaAttachment(
+    clientMessageId: string,
+    attachmentId: string,
+    blobCached: boolean,
+  ): Promise<void>;
   purgeExpired(now: number): Promise<number>;
   purgeReceipted(): Promise<number>;
   trimConversation(conversationId: string, maxPending: number): Promise<number>;
@@ -38,9 +59,13 @@ type OutboxRow = {
   resend_count: number;
   last_resent_at: number | null;
   receipted_at: number | null;
+  payload_kind?: string | null;
+  media_attachment_id?: string | null;
+  media_blob_cached?: number | null;
 };
 
 function mapRow(row: OutboxRow): OutboxEntry {
+  const kind = row.payload_kind === "media" ? "media" : "text";
   return {
     clientMessageId: row.client_message_id,
     localMessageId: row.local_message_id,
@@ -48,6 +73,9 @@ function mapRow(row: OutboxRow): OutboxEntry {
     peerUserId: row.peer_user_id,
     peerDeviceId: row.peer_device_id,
     plaintext: row.plaintext,
+    payloadKind: kind,
+    mediaAttachmentId: row.media_attachment_id ?? undefined,
+    mediaBlobCached: (row.media_blob_cached ?? 0) === 1,
     createdAt: row.created_at,
     expiresAt: row.expires_at,
     resendCount: row.resend_count,
@@ -59,20 +87,22 @@ function mapRow(row: OutboxRow): OutboxEntry {
 export class OutboxStore implements IOutboxStore {
   constructor(private readonly db: IDatabase) {}
 
-  async upsertPending(
-    entry: Omit<OutboxEntry, "resendCount" | "receiptedAt" | "lastResentAt"> & {
-      resendCount?: number;
-    },
-  ): Promise<void> {
+  async upsertPending(entry: OutboxUpsertInput): Promise<void> {
+    const kind = entry.payloadKind ?? "text";
+    const blobCached = entry.mediaBlobCached ? 1 : 0;
     await this.db.run(
       `INSERT INTO message_outbox (
          client_message_id, local_message_id, conversation_id, peer_user_id, peer_device_id,
-         plaintext, created_at, expires_at, resend_count, last_resent_at, receipted_at
-       ) VALUES (?,?,?,?,?,?,?,?,?,?,NULL)
+         plaintext, created_at, expires_at, resend_count, last_resent_at, receipted_at,
+         payload_kind, media_attachment_id, media_blob_cached
+       ) VALUES (?,?,?,?,?,?,?,?,?,?,NULL,?,?,?)
        ON CONFLICT(client_message_id) DO UPDATE SET
          plaintext = excluded.plaintext,
          expires_at = excluded.expires_at,
-         local_message_id = excluded.local_message_id
+         local_message_id = excluded.local_message_id,
+         payload_kind = excluded.payload_kind,
+         media_attachment_id = excluded.media_attachment_id,
+         media_blob_cached = excluded.media_blob_cached
        WHERE message_outbox.receipted_at IS NULL`,
       [
         entry.clientMessageId,
@@ -85,6 +115,9 @@ export class OutboxStore implements IOutboxStore {
         entry.expiresAt,
         entry.resendCount ?? 0,
         null,
+        kind,
+        entry.mediaAttachmentId ?? null,
+        blobCached,
       ],
     );
   }
@@ -133,6 +166,19 @@ export class OutboxStore implements IOutboxStore {
     );
     const row = await this.get(clientMessageId);
     return row?.resendCount ?? 0;
+  }
+
+  async updateMediaAttachment(
+    clientMessageId: string,
+    attachmentId: string,
+    blobCached: boolean,
+  ): Promise<void> {
+    await this.db.run(
+      `UPDATE message_outbox
+       SET media_attachment_id = ?, media_blob_cached = ?
+       WHERE client_message_id = ? AND receipted_at IS NULL`,
+      [attachmentId, blobCached ? 1 : 0, clientMessageId],
+    );
   }
 
   async purgeExpired(now: number): Promise<number> {
@@ -185,15 +231,14 @@ export class OutboxStore implements IOutboxStore {
 export class MemoryOutboxStore implements IOutboxStore {
   private readonly rows = new Map<string, OutboxEntry>();
 
-  async upsertPending(
-    entry: Omit<OutboxEntry, "resendCount" | "receiptedAt" | "lastResentAt"> & {
-      resendCount?: number;
-    },
-  ): Promise<void> {
+  async upsertPending(entry: OutboxUpsertInput): Promise<void> {
     const existing = this.rows.get(entry.clientMessageId);
     if (existing?.receiptedAt != null) return;
     this.rows.set(entry.clientMessageId, {
       ...entry,
+      payloadKind: entry.payloadKind ?? "text",
+      mediaBlobCached: entry.mediaBlobCached ?? false,
+      mediaAttachmentId: entry.mediaAttachmentId,
       resendCount: entry.resendCount ?? existing?.resendCount ?? 0,
       lastResentAt: existing?.lastResentAt,
       receiptedAt: undefined,
@@ -241,6 +286,20 @@ export class MemoryOutboxStore implements IOutboxStore {
     const next = { ...row, resendCount: row.resendCount + 1, lastResentAt: at };
     this.rows.set(clientMessageId, next);
     return next.resendCount;
+  }
+
+  async updateMediaAttachment(
+    clientMessageId: string,
+    attachmentId: string,
+    blobCached: boolean,
+  ): Promise<void> {
+    const row = this.rows.get(clientMessageId);
+    if (!row || row.receiptedAt != null) return;
+    this.rows.set(clientMessageId, {
+      ...row,
+      mediaAttachmentId: attachmentId,
+      mediaBlobCached: blobCached,
+    });
   }
 
   async purgeExpired(now: number): Promise<number> {

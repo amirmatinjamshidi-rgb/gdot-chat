@@ -35,6 +35,8 @@ export interface ICryptoEngine {
   computeSafetyNumber(
     localPublic: Uint8Array,
     remotePublic: Uint8Array,
+    localUserId: string,
+    remoteUserId: string,
   ): Promise<string>;
 }
 
@@ -107,8 +109,15 @@ export class LibSignalAdapter implements ICryptoEngine {
   computeSafetyNumber(
     localPublic: Uint8Array,
     remotePublic: Uint8Array,
+    localUserId: string,
+    remoteUserId: string,
   ): Promise<string> {
-    return this.engine.computeSafetyNumber(localPublic, remotePublic);
+    return this.engine.computeSafetyNumber(
+      localPublic,
+      remotePublic,
+      localUserId,
+      remoteUserId,
+    );
   }
 
   /** @deprecated Session blobs managed by SignalProtocolStore */

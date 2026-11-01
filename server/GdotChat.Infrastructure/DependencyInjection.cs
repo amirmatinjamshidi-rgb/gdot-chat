@@ -55,6 +55,7 @@ public static class DependencyInjection
         services.AddScoped<IPasswordHasher, PasswordHasher>();
         services.AddScoped<IMessageNotifier, SignalRMessageNotifier>();
         services.AddSingleton<IPreKeyBundleRateLimiter, PreKeyBundleRateLimiter>();
+        services.AddSingleton<IDeviceLinkRateLimiter, DeviceLinkRateLimiter>();
         services.AddSingleton<ISessionResetRateLimiter, SessionResetRateLimiter>();
 
         services.AddHostedService<EnvelopePurgeWorker>();

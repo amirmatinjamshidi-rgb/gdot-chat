@@ -9,6 +9,7 @@ import {
   MemoryIdentityStore,
   MemorySessionStore,
 } from "@/lib/test/memory-stores";
+import { protocolAddressId } from "@/lib/crypto/signal-address";
 
 async function buildUser(label: string) {
   const identity = new MemoryIdentityStore();
@@ -58,16 +59,18 @@ describe("Signal encrypt/decrypt round-trip (E2E)", () => {
     };
 
     // Recipient must still have the OTK private key until SessionCipher consumes it.
-    await alice.engine.ensureSession(bob.userId, bundle);
+    const bobAddr = protocolAddressId(bob.userId, bob.deviceId);
+    const aliceAddr = protocolAddressId(alice.userId, alice.deviceId);
+    await alice.engine.ensureSession(bobAddr, bundle);
     const plaintext = `hello-${crypto.randomUUID()}`;
-    const encrypted = await alice.engine.encrypt(bob.userId, plaintext);
+    const encrypted = await alice.engine.encrypt(bobAddr, plaintext);
     expect(encrypted.ciphertext.length).toBeGreaterThan(0);
     // Encoding fix: ciphertext must not be UTF-8-expanded relative to a latin1 body.
     // (If TextEncoder were used on binary string, length would often be > original.)
     expect(encrypted.messageType === 2 || encrypted.messageType === 3).toBe(true);
 
     const decrypted = await bob.engine.decrypt(
-      alice.userId,
+      aliceAddr,
       encrypted.ciphertext,
       encrypted.messageType,
     );

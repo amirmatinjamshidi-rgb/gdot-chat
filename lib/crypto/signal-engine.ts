@@ -23,11 +23,10 @@ import {
 import { ensureSignalInitialized } from "./init-signal";
 import { SignalProtocolStore } from "./signal-protocol-store";
 import type { IdentityKeyPair, PreKey, SignedPreKey } from "./types";
+import { SIGNAL_ADDRESS_DEVICE_ID } from "./signal-address";
 
-const DEVICE_ID = 1;
-
-function addressFor(peerId: string): SignalProtocolAddress {
-  return new SignalProtocolAddress(peerId, DEVICE_ID);
+function addressFor(peerAddressId: string): SignalProtocolAddress {
+  return new SignalProtocolAddress(peerAddressId, SIGNAL_ADDRESS_DEVICE_ID);
 }
 
 function bundleToDevice(bundle: PreKeyBundleDto): DeviceType {
@@ -194,14 +193,15 @@ export class SignalEngine {
   async computeSafetyNumber(
     localPublic: Uint8Array,
     remotePublic: Uint8Array,
+    localUserId: string,
+    remoteUserId: string,
   ): Promise<string> {
     await ensureSignalInitialized();
-    const local = await this.identityStore.getLocalIdentity();
     const gen = new FingerprintGenerator(5200);
     return gen.createFor(
-      local?.userId ?? "local",
+      localUserId,
       bytesToArrayBuffer(localPublic),
-      "peer",
+      remoteUserId,
       bytesToArrayBuffer(remotePublic),
     );
   }

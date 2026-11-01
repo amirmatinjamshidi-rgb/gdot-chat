@@ -9,20 +9,28 @@ import {
 import { decideSyncTransport } from "@/lib/session/sync-transport-policy";
 import type { SignalService } from "@/lib/crypto/signal-service";
 import { randomUUID } from "@/lib/crypto/random-id";
+import {
+  protocolAddressId,
+  sessionStoreKey,
+} from "@/lib/crypto/signal-address";
 import type { IConversationStore } from "@/lib/db/conversation-store";
 import { MemorySessionResetCooldownStore } from "@/lib/db/envelope-attempt-store";
 import type { IEnvelopeAttemptStore } from "@/lib/db/envelope-attempt-store";
 import type { IEnvelopeQuarantineStore } from "@/lib/db/envelope-quarantine-store";
 import type { IIdentityStore } from "@/lib/db/identity-store";
 import type { IMessageStore } from "@/lib/db/message-store";
-import type { IOutboxStore } from "@/lib/db/outbox-store";
+import type { IOutboxStore, OutboxEntry } from "@/lib/db/outbox-store";
+import type { IMediaBlobCache } from "@/lib/media/media-blob-cache";
 import type { IReactionStore } from "@/lib/db/reaction-store";
 import type { ISessionStore } from "@/lib/db/session-store";
 import type { Conversation, LocalMessage } from "@/lib/db/types";
 import type { MediaTransferService } from "@/lib/media/media-transfer";
 import {
+  parseSignalPlaintext,
+  serializeMediaPayload,
   serializeReactionPayload,
   serializeTextPayload,
+  type MediaPayload,
   type ReactionOp,
 } from "@/lib/protocol/payload";
 import { assertMessageTextWithinLimit } from "@/lib/protocol/message-limits";
@@ -39,6 +47,13 @@ import {
 export type SyncErrorHandler = (message: string) => void;
 export type ReactionAppliedHandler = (conversationId: string) => void;
 
+export type FanOutDevice = { userId: string; deviceId: string };
+
+export type SyncServiceDeviceDirectory = {
+  listPeerDevices: (userId: string) => Promise<{ deviceId: string }[]>;
+  listOwnDevices: () => Promise<{ deviceId: string }[]>;
+};
+
 export type SyncServiceInboundDeps = {
   quarantineStore: IEnvelopeQuarantineStore;
   attemptStore: IEnvelopeAttemptStore;
@@ -47,6 +62,18 @@ export type SyncServiceInboundDeps = {
   outboxStore: IOutboxStore;
   clock?: Clock;
   resolveUsername?: (userId: string) => Promise<string | null>;
+  /** When set, encryptAndPost fans out to all peer + own other devices. */
+  deviceDirectory?: SyncServiceDeviceDirectory;
+  mediaBlobCache?: IMediaBlobCache;
+  /** Re-upload encrypted blob after session reset when server attachment is gone. */
+  reuploadMediaBlob?: (params: {
+    conversation: Conversation;
+    clientMessageId: string;
+    descriptor: MediaPayload;
+    ciphertext: Uint8Array;
+  }) => Promise<MediaPayload>;
+  /** Check whether a server attachment still exists (for media resend). */
+  attachmentExists?: (attachmentId: string) => Promise<boolean>;
 };
 
 export class SyncService {
@@ -69,6 +96,14 @@ export class SyncService {
   private readonly clock: Clock;
   private readonly sessionResetCooldown = new MemorySessionResetCooldownStore();
   private readonly outboxStore: IOutboxStore;
+  private readonly deviceDirectory: SyncServiceDeviceDirectory | null;
+  private readonly mediaBlobCache: IMediaBlobCache | null;
+  private readonly reuploadMediaBlob:
+    | SyncServiceInboundDeps["reuploadMediaBlob"]
+    | null;
+  private readonly attachmentExists:
+    | SyncServiceInboundDeps["attachmentExists"]
+    | null;
 
   constructor(
     private readonly messagesApi: MessagesApi,
@@ -87,6 +122,10 @@ export class SyncService {
     }
     this.sessionStore = inboundDeps.sessionStore;
     this.outboxStore = inboundDeps.outboxStore;
+    this.deviceDirectory = inboundDeps.deviceDirectory ?? null;
+    this.mediaBlobCache = inboundDeps.mediaBlobCache ?? null;
+    this.reuploadMediaBlob = inboundDeps.reuploadMediaBlob ?? null;
+    this.attachmentExists = inboundDeps.attachmentExists ?? null;
     this.clock = inboundDeps.clock ?? systemClock;
     this.inbound = new InboundEnvelopeProcessor({
       messagesApi,
@@ -399,6 +438,12 @@ export class SyncService {
     const all = await this.conversationStore.listAll();
     const conversation = all.find((c) => c.peerDeviceId === fromDeviceId);
     if (!conversation) return;
+    await this.sessionStore.delete(
+      sessionStoreKey(conversation.peerUserId, conversation.peerDeviceId),
+    );
+    await this.sessionStore.delete(
+      protocolAddressId(conversation.peerUserId, conversation.peerDeviceId),
+    );
     await this.sessionStore.delete(`${conversation.peerUserId}.1`);
     await this.sessionStore.delete(conversation.peerUserId);
     if (__DEV__) {
@@ -419,6 +464,9 @@ export class SyncService {
   ): Promise<void> {
     const now = this.clock();
     await this.outboxStore.purgeExpired(now);
+    if (this.mediaBlobCache) {
+      await this.mediaBlobCache.purgeExpired(now);
+    }
     const pending = await this.outboxStore.listPendingForPeerDevice(
       conversation.peerDeviceId,
       now,
@@ -426,10 +474,9 @@ export class SyncService {
     for (const entry of pending) {
       if (entry.resendCount >= OUTBOX_MAX_RESENDS) continue;
       try {
-        await this.encryptAndPost(
-          conversation,
-          serializeTextPayload(entry.plaintext, entry.clientMessageId),
-        );
+        const plaintext = await this.buildResendPlaintext(conversation, entry, now);
+        if (!plaintext) continue;
+        await this.encryptAndPost(conversation, plaintext);
         await this.outboxStore.incrementResend(entry.clientMessageId, now);
         const local = await this.messageStore.getByClientId(entry.clientMessageId);
         if (local && local.status === "failed") {
@@ -445,6 +492,85 @@ export class SyncService {
         }
       }
     }
+  }
+
+  /**
+   * Text: re-wrap plaintext with stable clientMessageId.
+   * Media (full method): if server attachment still exists → resend descriptor;
+   * else re-upload cached encrypted blob (new attachment id) then descriptor;
+   * else descriptor-only fallback when blob over cap / evicted.
+   */
+  private async buildResendPlaintext(
+    conversation: Conversation,
+    entry: OutboxEntry,
+    now: number,
+  ): Promise<string | null> {
+    if (entry.payloadKind !== "media") {
+      return serializeTextPayload(entry.plaintext, entry.clientMessageId);
+    }
+
+    let descriptor: MediaPayload | null = null;
+    try {
+      const parsed = parseSignalPlaintext(entry.plaintext);
+      if (parsed.kind === "media") descriptor = parsed.payload;
+    } catch {
+      descriptor = null;
+    }
+    if (!descriptor) return null;
+    descriptor = {
+      ...descriptor,
+      clientMessageId: entry.clientMessageId,
+    };
+
+    const attachmentId = entry.mediaAttachmentId ?? descriptor.attachmentId;
+    let serverOk = false;
+    if (this.attachmentExists && attachmentId) {
+      try {
+        serverOk = await this.attachmentExists(attachmentId);
+      } catch {
+        serverOk = false;
+      }
+    }
+
+    if (serverOk) {
+      return serializeMediaPayload({ ...descriptor, attachmentId });
+    }
+
+    const blob =
+      this.mediaBlobCache != null
+        ? await this.mediaBlobCache.get(entry.clientMessageId, now)
+        : null;
+
+    if (blob && this.reuploadMediaBlob) {
+      const fresh = await this.reuploadMediaBlob({
+        conversation,
+        clientMessageId: entry.clientMessageId,
+        descriptor,
+        ciphertext: blob.ciphertext,
+      });
+      const next = {
+        ...fresh,
+        clientMessageId: entry.clientMessageId,
+      };
+      await this.outboxStore.upsertPending({
+        clientMessageId: entry.clientMessageId,
+        localMessageId: entry.localMessageId,
+        conversationId: entry.conversationId,
+        peerUserId: entry.peerUserId,
+        peerDeviceId: entry.peerDeviceId,
+        plaintext: serializeMediaPayload(next),
+        createdAt: entry.createdAt,
+        expiresAt: entry.expiresAt,
+        payloadKind: "media",
+        mediaAttachmentId: next.attachmentId,
+        mediaBlobCached: true,
+        resendCount: entry.resendCount,
+      });
+      return serializeMediaPayload(next);
+    }
+
+    // Fallback: descriptor-only (receiver may fail download if attachment gone).
+    return serializeMediaPayload(descriptor);
   }
 
   async sendOutgoing(conversationId: string, text: string): Promise<void> {
@@ -482,51 +608,38 @@ export class SyncService {
     };
     await this.messageStore.insert(optimistic);
 
-    await this.messagesApi.abortBackground();
-    this.outboundInFlight++;
     try {
-      await this.signalr.runWithTransportPaused(async () => {
-        const payload = await this.signalService.encryptOutgoing(
-          conversation.peerUserId,
-          conversation.peerDeviceId,
-          serializeTextPayload(text, clientId),
-        );
-        const result = await this.messagesApi.send({
-          recipientUserId: payload.recipientUserId,
-          recipientDeviceId: payload.recipientDeviceId,
-          messageType: payload.messageType,
-          ciphertextBase64: payload.ciphertextBase64,
-        });
-        await this.messageStore.updateServerEnvelopeId(id, result.envelopeId);
-        await this.messageStore.updateStatus(id, "sent");
-        await this.conversationStore.upsert({
-          ...conversation,
-          lastMessagePreview: text.slice(0, 120),
-          lastMessageAt: createdAt,
-        });
-        await this.outboxStore.upsertPending({
-          clientMessageId: clientId,
-          localMessageId: id,
-          conversationId,
-          peerUserId: conversation.peerUserId,
-          peerDeviceId: conversation.peerDeviceId,
-          plaintext: text,
-          createdAt,
-          expiresAt: createdAt + OUTBOX_TTL_MS,
-        });
-        await this.outboxStore.trimConversation(
-          conversationId,
-          OUTBOX_MAX_PER_CONVERSATION,
-        );
-        void result;
+      const result = await this.encryptAndPost(
+        conversation,
+        serializeTextPayload(text, clientId),
+      );
+      await this.messageStore.updateServerEnvelopeId(id, result.envelopeId);
+      await this.messageStore.updateStatus(id, "sent");
+      await this.conversationStore.upsert({
+        ...conversation,
+        lastMessagePreview: text.slice(0, 120),
+        lastMessageAt: createdAt,
       });
+      await this.outboxStore.upsertPending({
+        clientMessageId: clientId,
+        localMessageId: id,
+        conversationId,
+        peerUserId: conversation.peerUserId,
+        peerDeviceId: conversation.peerDeviceId,
+        plaintext: text,
+        payloadKind: "text",
+        createdAt,
+        expiresAt: createdAt + OUTBOX_TTL_MS,
+      });
+      await this.outboxStore.trimConversation(
+        conversationId,
+        OUTBOX_MAX_PER_CONVERSATION,
+      );
     } catch (e) {
       await this.messageStore.updateStatus(id, "failed");
       throw e instanceof Error
         ? e
         : new Error("Message could not be delivered. Check connection and try again.");
-    } finally {
-      this.outboundInFlight--;
     }
   }
 
@@ -560,22 +673,91 @@ export class SyncService {
     this.outboundInFlight++;
     try {
       return await this.signalr.runWithTransportPaused(async () => {
-        const payload = await this.signalService.encryptOutgoing(
-          conversation.peerUserId,
-          conversation.peerDeviceId,
-          plaintext,
-        );
-        const result = await this.messagesApi.send({
-          recipientUserId: payload.recipientUserId,
-          recipientDeviceId: payload.recipientDeviceId,
-          messageType: payload.messageType,
-          ciphertextBase64: payload.ciphertextBase64,
-        });
-        return { envelopeId: result.envelopeId };
+        const targets = await this.resolveFanOutTargets(conversation);
+        let primaryEnvelopeId = "";
+        for (const target of targets) {
+          const payload = await this.signalService.encryptOutgoing(
+            target.userId,
+            target.deviceId,
+            plaintext,
+          );
+          const result = await this.messagesApi.send({
+            recipientUserId: payload.recipientUserId,
+            recipientDeviceId: payload.recipientDeviceId,
+            messageType: payload.messageType,
+            ciphertextBase64: payload.ciphertextBase64,
+          });
+          if (
+            target.userId === conversation.peerUserId &&
+            target.deviceId === conversation.peerDeviceId
+          ) {
+            primaryEnvelopeId = result.envelopeId;
+          } else if (!primaryEnvelopeId) {
+            primaryEnvelopeId = result.envelopeId;
+          }
+        }
+        return { envelopeId: primaryEnvelopeId };
       });
     } finally {
       this.outboundInFlight--;
     }
+  }
+
+  /** Peer devices + own other devices (sent-message sync). Dedupes by deviceId. */
+  private async resolveFanOutTargets(
+    conversation: Conversation,
+  ): Promise<FanOutDevice[]> {
+    const byDevice = new Map<string, FanOutDevice>();
+    byDevice.set(conversation.peerDeviceId, {
+      userId: conversation.peerUserId,
+      deviceId: conversation.peerDeviceId,
+    });
+
+    if (!this.deviceDirectory) {
+      return [...byDevice.values()];
+    }
+
+    try {
+      const peerDevices = await this.deviceDirectory.listPeerDevices(
+        conversation.peerUserId,
+      );
+      for (const d of peerDevices) {
+        byDevice.set(d.deviceId, {
+          userId: conversation.peerUserId,
+          deviceId: d.deviceId,
+        });
+      }
+    } catch (e) {
+      if (__DEV__) {
+        console.warn(
+          "[SyncService] listPeerDevices failed; using conversation device",
+          e instanceof Error ? e.message : e,
+        );
+      }
+    }
+
+    const local = await this.identityStore.getLocalIdentity();
+    if (local) {
+      try {
+        const own = await this.deviceDirectory.listOwnDevices();
+        for (const d of own) {
+          if (d.deviceId === local.deviceId) continue;
+          byDevice.set(d.deviceId, {
+            userId: local.userId,
+            deviceId: d.deviceId,
+          });
+        }
+      } catch (e) {
+        if (__DEV__) {
+          console.warn(
+            "[SyncService] listOwnDevices failed",
+            e instanceof Error ? e.message : e,
+          );
+        }
+      }
+    }
+
+    return [...byDevice.values()];
   }
 
   async sendReaction(input: {

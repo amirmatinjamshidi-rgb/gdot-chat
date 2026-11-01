@@ -9,6 +9,10 @@ public interface IAuthService
     Task<AuthResultDto> RegisterAsync(RegisterRequest request, CancellationToken ct = default);
     Task<AuthResultDto> LoginAsync(LoginRequest request, CancellationToken ct = default);
     Task<AuthResultDto> RefreshAsync(string refreshToken, CancellationToken ct = default);
+    /// <summary>Password fallback: authenticate and register a brand-new device (rate limited).</summary>
+    Task<AuthResultDto> LoginNewDeviceAsync(LoginNewDeviceRequest request, CancellationToken ct = default);
+    /// <summary>Preferred multi-device path: redeem short-lived token from an existing device.</summary>
+    Task<AuthResultDto> RedeemDeviceLinkAsync(RedeemDeviceLinkRequest request, CancellationToken ct = default);
 }
 
 public interface IUserService
@@ -26,6 +30,9 @@ public interface IDeviceService
     Task<PreKeyBundleDto> GetPreKeyBundleAsync(Guid userId, Guid deviceId, CancellationToken ct = default);
     Task<IReadOnlyList<DeviceSummaryDto>> ListDevicesForUserAsync(Guid userId, CancellationToken ct = default);
     Task<int> CountAvailableOneTimePreKeysAsync(Guid deviceId, CancellationToken ct = default);
+    Task<CreateDeviceLinkTokenResponse> CreateLinkTokenAsync(Guid callerUserId, Guid callerDeviceId, CancellationToken ct = default);
+    /// <summary>Consumes a link token and registers the new device. Caller issues JWTs.</summary>
+    Task<(User User, Device Device)> RedeemLinkTokenAsync(RedeemDeviceLinkRequest request, CancellationToken ct = default);
 }
 
 public interface IMessageRelayService

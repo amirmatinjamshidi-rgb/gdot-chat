@@ -25,6 +25,7 @@ import { ReactionStore } from "@/lib/db/reaction-store";
 import { ProfileStore } from "@/lib/db/profile-store";
 import { SessionStore } from "@/lib/db/session-store";
 import { MediaTransferService } from "@/lib/media/media-transfer";
+import { MediaBlobCacheStore } from "@/lib/media/media-blob-cache";
 import { authStore } from "@/lib/session/auth-store";
 import { appLockStore } from "@/lib/session/app-lock-store";
 import { SyncService } from "@/lib/session/sync-service";
@@ -53,6 +54,7 @@ const envelopeQuarantineStore = new EnvelopeQuarantineStore(sqlCipherDatabase);
 const envelopeAttemptStore = new EnvelopeAttemptStore(sqlCipherDatabase);
 const messageStore = new MessageStore(sqlCipherDatabase);
 const outboxStore = new OutboxStore(sqlCipherDatabase);
+const mediaBlobCache = new MediaBlobCacheStore(sqlCipherDatabase);
 const reactionStore = new ReactionStore(sqlCipherDatabase);
 const conversationStore = new ConversationStore(sqlCipherDatabase);
 const attachmentStore = new AttachmentStore(sqlCipherDatabase);
@@ -70,6 +72,7 @@ const signalService = new SignalService(
   preKeyManager,
   sessionStore,
 );
+const mediaTransferRef: { current: MediaTransferService | null } = { current: null };
 const syncService = new SyncService(
   messagesApi,
   signalr,
@@ -86,6 +89,25 @@ const syncService = new SyncService(
     sessionResetApi,
     sessionStore,
     outboxStore,
+    mediaBlobCache,
+    deviceDirectory: {
+      listPeerDevices: async (userId) => usersApi.listDevices(userId),
+      listOwnDevices: async () => devicesApi.listMyDevices(),
+    },
+    attachmentExists: async (attachmentId) => {
+      try {
+        await attachmentsApi.getStatus(attachmentId);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    reuploadMediaBlob: async (params) => {
+      if (!mediaTransferRef.current) {
+        throw new Error("Media transfer not ready");
+      }
+      return mediaTransferRef.current.reuploadFromCachedCiphertext(params);
+    },
     resolveUsername: async (userId) => {
       try {
         const profile = await usersApi.getProfile(userId);
@@ -103,7 +125,10 @@ const mediaTransfer = new MediaTransferService(
   conversationStore,
   identityStore,
   (conversation, plaintext) => syncService.encryptAndPost(conversation, plaintext),
+  undefined,
+  { outboxStore, mediaBlobCache },
 );
+mediaTransferRef.current = mediaTransfer;
 syncService.setMediaTransfer(mediaTransfer);
 
 export const appServices = {
@@ -124,6 +149,7 @@ export const appServices = {
   sessionStore,
   messageStore,
   outboxStore,
+  mediaBlobCache,
   reactionStore,
   conversationStore,
   envelopeQuarantineStore,

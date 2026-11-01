@@ -13,6 +13,11 @@ import type { IAttachmentStore } from "@/lib/db/attachment-store";
 import type { IConversationStore } from "@/lib/db/conversation-store";
 import type { IIdentityStore } from "@/lib/db/identity-store";
 import type { IMessageStore } from "@/lib/db/message-store";
+import type { IOutboxStore } from "@/lib/db/outbox-store";
+import type { IMediaBlobCache } from "@/lib/media/media-blob-cache";
+import { OUTBOX_TTL_MS } from "@/lib/session/outbox-constants";
+import type { Clock } from "@/lib/session/inbound/constants";
+import { systemClock } from "@/lib/session/inbound/constants";
 import type {
   Conversation,
   LocalAttachment,
@@ -54,8 +59,17 @@ export type MediaFileAccess = {
   ): Promise<{ file: RandomAccessFile; uri: string }>;
 };
 
+export type MediaTransferExtras = {
+  outboxStore?: IOutboxStore;
+  mediaBlobCache?: IMediaBlobCache;
+  clock?: Clock;
+};
+
 export class MediaTransferService {
   private readonly files: MediaFileAccess;
+  private readonly outboxStore: IOutboxStore | null;
+  private readonly mediaBlobCache: IMediaBlobCache | null;
+  private readonly clock: Clock;
 
   constructor(
     private readonly attachmentsApi: AttachmentsApi,
@@ -68,11 +82,15 @@ export class MediaTransferService {
       plaintext: string,
     ) => Promise<{ envelopeId: string }>,
     files?: MediaFileAccess,
+    extras?: MediaTransferExtras,
   ) {
     this.files = files ?? {
       openExistingFile: defaultOpenExistingFile,
       createOutputFile: defaultCreateOutputFile,
     };
+    this.outboxStore = extras?.outboxStore ?? null;
+    this.mediaBlobCache = extras?.mediaBlobCache ?? null;
+    this.clock = extras?.clock ?? systemClock;
   }
 
   async sendOutgoingMedia(input: SendMediaInput): Promise<void> {
@@ -88,12 +106,13 @@ export class MediaTransferService {
     const key = generateMediaKey();
     const noncePrefix = generateNoncePrefix();
     const messageId = randomUUID();
-    const createdAt = Date.now();
+    const clientId = randomUUID();
+    const createdAt = this.clock();
     const tempId = `local-${randomUUID()}`;
 
     const message: LocalMessage = {
       id: messageId,
-      clientId: randomUUID(),
+      clientId,
       conversationId: input.conversationId,
       direction: "outgoing",
       kind: input.kind,
@@ -158,8 +177,15 @@ export class MediaTransferService {
       await this.messageStore.updateAttachmentId(messageId, created.attachmentId);
       await this.attachmentStore.delete(tempId);
 
-      await this.uploadRemainingChunks(row, source);
-      await this.finishOutgoingSignal(conversation, row, messageId, createdAt);
+      const encryptedBlob = await this.uploadRemainingChunks(row, source);
+      await this.finishOutgoingSignal(
+        conversation,
+        row,
+        messageId,
+        clientId,
+        createdAt,
+        encryptedBlob,
+      );
     } catch (e) {
       await this.messageStore.updateStatus(messageId, "failed");
       const stored = await this.attachmentStore.getByMessageId(messageId);
@@ -187,6 +213,13 @@ export class MediaTransferService {
     );
     if (existing) return;
 
+    if (params.payload.clientMessageId) {
+      const byClient = await this.messageStore.getByClientId(
+        params.payload.clientMessageId,
+      );
+      if (byClient) return;
+    }
+
     let transferState: LocalAttachment["transferState"] = "pending";
     try {
       const status = await this.attachmentsApi.getStatus(
@@ -206,7 +239,7 @@ export class MediaTransferService {
     const messageId = randomUUID();
     const message: LocalMessage = {
       id: messageId,
-      clientId: randomUUID(),
+      clientId: params.payload.clientMessageId ?? randomUUID(),
       conversationId: params.conversation.id,
       direction: "incoming",
       kind: params.payload.kind,
@@ -343,11 +376,14 @@ export class MediaTransferService {
       await this.uploadRemainingChunks(row, source);
       const message = await this.messageStore.getById(row.messageId);
       if (message && !message.serverEnvelopeId) {
+        const encryptedBlob = new Uint8Array(0);
         await this.finishOutgoingSignal(
           conversation,
           row,
           row.messageId,
+          message.clientId,
           message.createdAt,
+          encryptedBlob,
         );
       }
     } finally {
@@ -358,11 +394,11 @@ export class MediaTransferService {
   private async uploadRemainingChunks(
     row: LocalAttachment,
     source: RandomAccessFile,
-  ): Promise<void> {
+  ): Promise<Uint8Array> {
     const status = await this.attachmentsApi.getStatus(row.attachmentId);
     const uploaded = new Set(status.uploadedChunks);
+    const cipherChunks: Uint8Array[] = [];
     for (let i = 0; i < row.chunkCount; i++) {
-      if (uploaded.has(i)) continue;
       const len = plainChunkLength(
         row.plainSizeBytes,
         row.chunkSize,
@@ -379,20 +415,26 @@ export class MediaTransferService {
         plaintextSize: row.plainSizeBytes,
         plaintext,
       });
-      await this.attachmentsApi.putChunk(row.attachmentId, i, ciphertext);
-      uploaded.add(i);
-      await this.attachmentStore.updateTransfer(row.attachmentId, {
-        uploadedChunks: [...uploaded].sort((a, b) => a - b),
-      });
+      cipherChunks.push(ciphertext);
+      if (!uploaded.has(i)) {
+        await this.attachmentsApi.putChunk(row.attachmentId, i, ciphertext);
+        uploaded.add(i);
+        await this.attachmentStore.updateTransfer(row.attachmentId, {
+          uploadedChunks: [...uploaded].sort((a, b) => a - b),
+        });
+      }
     }
     await this.attachmentsApi.complete(row.attachmentId);
+    return packCipherChunks(cipherChunks);
   }
 
   private async finishOutgoingSignal(
     conversation: Conversation,
     row: LocalAttachment,
     messageId: string,
+    clientMessageId: string,
     createdAt: number,
+    encryptedBlob: Uint8Array,
   ): Promise<void> {
     const descriptor: MediaPayload = {
       v: 1,
@@ -409,6 +451,7 @@ export class MediaTransferService {
       height: row.height,
       key: encodeMediaKey(row.mediaKey),
       noncePrefix: encodeNoncePrefix(row.noncePrefix),
+      clientMessageId,
     };
     await this.messageStore.updateStatus(messageId, "sending");
     const sent = await this.sendSignal(
@@ -426,5 +469,134 @@ export class MediaTransferService {
       lastMessagePreview: mediaPreviewLabel(row.kind),
       lastMessageAt: createdAt,
     });
+
+    let blobCached = false;
+    if (this.mediaBlobCache && encryptedBlob.byteLength > 0) {
+      const result = await this.mediaBlobCache.put(
+        clientMessageId,
+        encryptedBlob,
+        this.clock(),
+      );
+      blobCached = result === "stored";
+    }
+    if (this.outboxStore) {
+      await this.outboxStore.upsertPending({
+        clientMessageId,
+        localMessageId: messageId,
+        conversationId: conversation.id,
+        peerUserId: conversation.peerUserId,
+        peerDeviceId: conversation.peerDeviceId,
+        plaintext: serializeMediaPayload(descriptor),
+        payloadKind: "media",
+        mediaAttachmentId: row.attachmentId,
+        mediaBlobCached: blobCached,
+        createdAt,
+        expiresAt: createdAt + OUTBOX_TTL_MS,
+      });
+    }
   }
+
+  /**
+   * Full media resend path: decrypt cached ciphertext under the old attachment id,
+   * create a new server attachment, re-encrypt under the new id, upload, return
+   * an updated descriptor (same media key / nonce).
+   */
+  async reuploadFromCachedCiphertext(params: {
+    conversation: Conversation;
+    clientMessageId: string;
+    descriptor: MediaPayload;
+    ciphertext: Uint8Array;
+  }): Promise<MediaPayload> {
+    const { conversation, descriptor, ciphertext } = params;
+    const key = base64UrlToBytes(descriptor.key);
+    const noncePrefix = base64UrlToBytes(descriptor.noncePrefix);
+    const chunks = unpackCipherChunks(ciphertext, descriptor.chunkCount);
+
+    const created = await this.attachmentsApi.create({
+      recipientUserId: conversation.peerUserId,
+      recipientDeviceId: conversation.peerDeviceId,
+      sizeBytes: descriptor.size,
+    });
+
+    for (let i = 0; i < descriptor.chunkCount; i++) {
+      const oldCipher = chunks[i]!;
+      const plain = decryptChunk({
+        key,
+        noncePrefix,
+        attachmentId: descriptor.attachmentId,
+        chunkIndex: i,
+        chunkCount: descriptor.chunkCount,
+        plaintextSize: descriptor.size,
+        ciphertext: oldCipher,
+      });
+      const newCipher = encryptChunk({
+        key,
+        noncePrefix,
+        attachmentId: created.attachmentId,
+        chunkIndex: i,
+        chunkCount: created.chunkCount,
+        plaintextSize: descriptor.size,
+        plaintext: plain,
+      });
+      await this.attachmentsApi.putChunk(created.attachmentId, i, newCipher);
+    }
+    await this.attachmentsApi.complete(created.attachmentId);
+
+    return {
+      ...descriptor,
+      attachmentId: created.attachmentId,
+      chunkSize: created.chunkSizeBytes,
+      chunkCount: created.chunkCount,
+      clientMessageId: params.clientMessageId,
+    };
+  }
+
+  async attachmentExists(attachmentId: string): Promise<boolean> {
+    try {
+      await this.attachmentsApi.getStatus(attachmentId);
+      return true;
+    } catch (e) {
+      if (e instanceof ApiError && (e.status === 404 || e.status === 410)) {
+        return false;
+      }
+      throw e;
+    }
+  }
+}
+
+/** Pack length-prefixed cipher chunks for local blob cache. */
+export function packCipherChunks(chunks: Uint8Array[]): Uint8Array {
+  let total = 4;
+  for (const c of chunks) total += 4 + c.byteLength;
+  const out = new Uint8Array(total);
+  const view = new DataView(out.buffer);
+  view.setUint32(0, chunks.length);
+  let o = 4;
+  for (const c of chunks) {
+    view.setUint32(o, c.byteLength);
+    o += 4;
+    out.set(c, o);
+    o += c.byteLength;
+  }
+  return out;
+}
+
+export function unpackCipherChunks(
+  packed: Uint8Array,
+  expectedCount: number,
+): Uint8Array[] {
+  const view = new DataView(packed.buffer, packed.byteOffset, packed.byteLength);
+  const count = view.getUint32(0);
+  if (count !== expectedCount) {
+    throw new Error("Cached media blob chunk count mismatch");
+  }
+  const chunks: Uint8Array[] = [];
+  let o = 4;
+  for (let i = 0; i < count; i++) {
+    const len = view.getUint32(o);
+    o += 4;
+    chunks.push(packed.slice(o, o + len));
+    o += len;
+  }
+  return chunks;
 }

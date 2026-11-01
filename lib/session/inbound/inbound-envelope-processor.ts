@@ -195,7 +195,10 @@ export class InboundEnvelopeProcessor {
       return;
     }
 
-    const conversation = await this.findConversationForSender(env.senderDeviceId);
+    const conversation = await this.findConversationForSender(
+      env.senderDeviceId,
+      env.senderUserId || undefined,
+    );
     if (!conversation) {
       await this.quarantineMessageRequest(env);
       await this.deps.messagesApi.ack(env.id);
@@ -224,6 +227,7 @@ export class InboundEnvelopeProcessor {
     try {
       plaintext = await this.deps.signalService.decryptIncoming(
         conversation.peerUserId,
+        env.senderDeviceId,
         env.messageType,
         ciphertext,
       );
@@ -381,6 +385,7 @@ export class InboundEnvelopeProcessor {
     try {
       const plaintext = await this.deps.signalService.decryptIncoming(
         conversation.peerUserId,
+        row.senderDeviceId,
         row.messageType,
         row.ciphertext,
       );
@@ -630,9 +635,21 @@ export class InboundEnvelopeProcessor {
 
   private async findConversationForSender(
     senderDeviceId: string,
+    senderUserId?: string,
   ): Promise<Conversation | null> {
     const all = await this.deps.conversationStore.listAll();
-    return all.find((c) => c.peerDeviceId === senderDeviceId) ?? null;
+    const byDevice = all.find((c) => c.peerDeviceId === senderDeviceId);
+    if (byDevice) return byDevice;
+    // Multi-device: same peer user, different device — attach to existing conversation.
+    if (senderUserId) {
+      const byUser = all.find((c) => c.peerUserId === senderUserId);
+      if (byUser) {
+        const updated = { ...byUser, peerDeviceId: senderDeviceId };
+        await this.deps.conversationStore.upsert(updated);
+        return updated;
+      }
+    }
+    return null;
   }
 
   private async maybeSendSessionReset(

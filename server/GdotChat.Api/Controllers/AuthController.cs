@@ -40,4 +40,24 @@ public class AuthController : ControllerBase
         [FromBody] RefreshRequest request,
         CancellationToken ct) =>
         Ok(await _authService.RefreshAsync(request.RefreshToken, ct));
+
+    /// <summary>
+    /// Password-based fallback to add a new device. Prefer link-token approval from an existing device.
+    /// Rate limited (auth-login + in-memory per-username limiter).
+    /// </summary>
+    [AllowAnonymous]
+    [EnableRateLimiting("auth-login")]
+    [HttpPost("login-new-device")]
+    public async Task<ActionResult<AuthResultDto>> LoginNewDeviceAsync(
+        [FromBody] LoginNewDeviceRequest request,
+        CancellationToken ct) =>
+        Ok(await _authService.LoginNewDeviceAsync(request, ct));
+
+    [AllowAnonymous]
+    [EnableRateLimiting("auth-login")]
+    [HttpPost("device-link")]
+    public async Task<ActionResult<AuthResultDto>> RedeemDeviceLinkAsync(
+        [FromBody] RedeemDeviceLinkRequest request,
+        CancellationToken ct) =>
+        Ok(await _authService.RedeemDeviceLinkAsync(request, ct));
 }

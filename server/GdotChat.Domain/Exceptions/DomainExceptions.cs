@@ -81,3 +81,12 @@ public class InvalidSignedPreKeySignatureException : Exception
         : base("Signed pre-key signature is invalid") { }
 }
 
+public class DeviceLinkTokenInvalidException : Exception
+{
+    public DeviceLinkTokenInvalidException() : base("Device link token is invalid or expired.") { }
+}
+
+public class DeviceLinkRateLimitedException : Exception
+{
+    public DeviceLinkRateLimitedException() : base("Too many device link or new-device login attempts.") { }
+}

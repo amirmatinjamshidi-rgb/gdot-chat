@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using GdotChat.Application.DTOs;
 using GdotChat.Application.Interfaces;
 using GdotChat.Application.Mapping;
@@ -207,4 +209,57 @@ public class DeviceService : IDeviceService
 
     public Task<int> CountAvailableOneTimePreKeysAsync(Guid deviceId, CancellationToken ct = default) =>
         _db.Set<OneTimePreKey>().CountAsync(k => k.DeviceId == deviceId && !k.IsConsumed, ct);
+
+    public async Task<CreateDeviceLinkTokenResponse> CreateLinkTokenAsync(
+        Guid callerUserId,
+        Guid callerDeviceId,
+        CancellationToken ct = default)
+    {
+        _ = await _db.Set<Device>()
+            .FirstOrDefaultAsync(d => d.Id == callerDeviceId && d.UserId == callerUserId && d.IsActive, ct)
+            ?? throw new ForbiddenDeviceException();
+
+        var plaintext = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(plaintext)));
+        var now = DateTimeOffset.UtcNow;
+        var expires = now.AddMinutes(10);
+
+        _db.Set<DeviceLinkToken>().Add(new DeviceLinkToken
+        {
+            Id = Guid.NewGuid(),
+            UserId = callerUserId,
+            CreatedByDeviceId = callerDeviceId,
+            TokenHash = hash,
+            CreatedAt = now,
+            ExpiresAt = expires,
+        });
+        await _db.SaveChangesAsync(ct);
+        return new CreateDeviceLinkTokenResponse(plaintext, expires);
+    }
+
+    public async Task<(User User, Device Device)> RedeemLinkTokenAsync(
+        RedeemDeviceLinkRequest request,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(request.Token))
+            throw new DeviceLinkTokenInvalidException();
+
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(request.Token.Trim())));
+        var now = DateTimeOffset.UtcNow;
+
+        var token = await _db.Set<DeviceLinkToken>()
+            .FirstOrDefaultAsync(t => t.TokenHash == hash, ct)
+            ?? throw new DeviceLinkTokenInvalidException();
+
+        if (token.ConsumedAt is not null || token.ExpiresAt <= now)
+            throw new DeviceLinkTokenInvalidException();
+
+        token.ConsumedAt = now;
+        await _db.SaveChangesAsync(ct);
+
+        var device = await RegisterDeviceWithPreKeysAsync(token.UserId, request.Device, ct);
+        var user = await _db.Set<User>().FirstAsync(u => u.Id == token.UserId, ct);
+        return (user, device);
+    }
 }

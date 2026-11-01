@@ -14,6 +14,7 @@ public class AppDbContext : DbContext
     public DbSet<MessageEnvelope> MessageEnvelopes => Set<MessageEnvelope>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<Attachment> Attachments => Set<Attachment>();
+    public DbSet<DeviceLinkToken> DeviceLinkTokens => Set<DeviceLinkToken>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

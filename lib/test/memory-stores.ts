@@ -21,7 +21,7 @@ export class MemoryIdentityStore implements IIdentityStore {
   }
 
   async saveRemoteIdentity(identity: RemoteIdentity): Promise<void> {
-    this.remotes.set(identity.peerDeviceId, { ...identity });
+    this.remotes.set(identity.peerUserId, { ...identity });
   }
 
   async setVerified(peerAddressId: string, verified: boolean): Promise<void> {
@@ -137,10 +137,11 @@ export class MemoryCryptoKeyStore implements ICryptoKeyStore {
   }
 }
 
+import type { IAttachmentStore } from "@/lib/db/attachment-store";
 import type { IConversationStore } from "@/lib/db/conversation-store";
 import type { IMessageStore } from "@/lib/db/message-store";
 import type { IReactionStore, ReactionApplyOp } from "@/lib/db/reaction-store";
-import type { Conversation, LocalMessage, MessageStatus } from "@/lib/db/types";
+import type { Conversation, LocalAttachment, LocalMessage, MessageStatus } from "@/lib/db/types";
 import type { Reaction } from "@/components/reactions/types";
 
 export class MemoryMessageStore implements IMessageStore {
@@ -273,5 +274,40 @@ export class MemoryReactionStore implements IReactionStore {
     return this.rows.some(
       (r) => r.messageId === messageId && r.emoji === emoji && r.userId === userId,
     );
+  }
+}
+
+export class MemoryAttachmentStore implements IAttachmentStore {
+  rows = new Map<string, LocalAttachment>();
+
+  async upsert(row: LocalAttachment): Promise<void> {
+    this.rows.set(row.attachmentId, { ...row });
+  }
+
+  async get(attachmentId: string): Promise<LocalAttachment | null> {
+    return this.rows.get(attachmentId) ?? null;
+  }
+
+  async getByMessageId(messageId: string): Promise<LocalAttachment | null> {
+    return [...this.rows.values()].find((r) => r.messageId === messageId) ?? null;
+  }
+
+  async listIncomplete(): Promise<LocalAttachment[]> {
+    return [...this.rows.values()].filter(
+      (r) => r.transferState !== "available" && r.transferState !== "failed",
+    );
+  }
+
+  async updateTransfer(
+    attachmentId: string,
+    patch: Partial<LocalAttachment>,
+  ): Promise<void> {
+    const row = this.rows.get(attachmentId);
+    if (!row) return;
+    this.rows.set(attachmentId, { ...row, ...patch, updatedAt: Date.now() });
+  }
+
+  async delete(attachmentId: string): Promise<void> {
+    this.rows.delete(attachmentId);
   }
 }

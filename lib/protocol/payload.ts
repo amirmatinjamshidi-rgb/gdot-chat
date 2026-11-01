@@ -37,6 +37,8 @@ export interface MediaPayload {
   caption?: string;
   key: string;
   noncePrefix: string;
+  /** Stable sender client id for dedupe after session-reset resend. */
+  clientMessageId?: string;
 }
 
 export interface ReactionPayload {
@@ -184,6 +186,9 @@ export function parseMediaPayload(raw: Record<string, unknown>): MediaPayload | 
   if (isOptionalInt(raw.height)) payload.height = raw.height;
   if (typeof raw.fileName === "string") payload.fileName = raw.fileName;
   if (typeof raw.caption === "string") payload.caption = raw.caption;
+  if (typeof raw.clientMessageId === "string" && raw.clientMessageId.length > 0) {
+    payload.clientMessageId = raw.clientMessageId;
+  }
   return payload;
 }
 

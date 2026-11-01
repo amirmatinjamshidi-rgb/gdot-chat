@@ -48,6 +48,8 @@ public class ExceptionHandlingMiddleware
         InvalidMessageRequestException => (400, ex.Message),
         InvalidSignedPreKeySignatureException => (400, ex.Message),
         SessionResetRateLimitedException => (429, ex.Message),
+        DeviceLinkRateLimitedException => (429, ex.Message),
+        DeviceLinkTokenInvalidException => (400, ex.Message),
         WeakPasswordException => (400, ex.Message),
         RefreshTokenReuseException => (401, ex.Message),
         InvalidCredentialsException => (401, ex.Message),

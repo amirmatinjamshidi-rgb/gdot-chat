@@ -7,15 +7,11 @@ import type { ISessionStore } from "@/lib/db/session-store";
 import { base64ToBytes, bytesToBase64 } from "./encoding";
 import type { ICryptoEngine } from "./libsignal-adapter";
 import type { PreKeyManager } from "./pre-key-manager";
+import {
+  protocolAddressId,
+  sessionStoreKey,
+} from "./signal-address";
 import type { SendPayload } from "./types";
-
-function protocolAddressId(peerUserId: string): string {
-  return peerUserId;
-}
-
-function sessionKey(peerUserId: string): string {
-  return `${peerUserId}.1`;
-}
 
 function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
@@ -48,19 +44,19 @@ export class SignalService {
   ) {}
 
   async ensureSession(peerUserId: string, peerDeviceId: string): Promise<void> {
-    const trust = await this.getIdentityTrust(peerUserId);
+    const trust = await this.getIdentityTrust(peerUserId, peerDeviceId);
     if (trust.keyChanged) {
       throw new IdentityKeyChangedError(peerUserId);
     }
 
-    const addr = protocolAddressId(peerUserId);
+    const addr = protocolAddressId(peerUserId, peerDeviceId);
     const hasSession = await this.crypto.hasSession(addr);
     if (hasSession) {
       return;
     }
     const bundle = await this.fetchBundleWithReplenish(peerUserId, peerDeviceId);
     await this.ingestBundleIdentity(peerUserId, peerDeviceId, bundle);
-    if ((await this.getIdentityTrust(peerUserId)).keyChanged) {
+    if ((await this.getIdentityTrust(peerUserId, peerDeviceId)).keyChanged) {
       throw new IdentityKeyChangedError(peerUserId);
     }
     await this.crypto.ensureSession(addr, bundle);
@@ -71,12 +67,12 @@ export class SignalService {
     peerDeviceId: string,
     plaintext: string,
   ): Promise<SendPayload> {
-    const trust = await this.getIdentityTrust(peerUserId);
+    const trust = await this.getIdentityTrust(peerUserId, peerDeviceId);
     if (trust.keyChanged) {
       throw new IdentityKeyChangedError(peerUserId);
     }
     await this.ensureSession(peerUserId, peerDeviceId);
-    const addr = protocolAddressId(peerUserId);
+    const addr = protocolAddressId(peerUserId, peerDeviceId);
     const result = await this.crypto.encrypt(addr, plaintext);
     if (result.ciphertext.length === 0) {
       throw new Error("Encryption produced empty ciphertext");
@@ -91,10 +87,11 @@ export class SignalService {
 
   async decryptIncoming(
     senderUserId: string,
+    senderDeviceId: string,
     messageType: 2 | 3,
     ciphertext: Uint8Array,
   ): Promise<string> {
-    const addr = protocolAddressId(senderUserId);
+    const addr = protocolAddressId(senderUserId, senderDeviceId);
     return this.crypto.decrypt(addr, ciphertext, messageType);
   }
 
@@ -102,22 +99,35 @@ export class SignalService {
     peerUserId: string,
     peerDeviceId: string,
   ): Promise<string> {
-    void peerDeviceId;
     const local = await this.identityStore.getLocalIdentity();
-    const remote = await this.identityStore.getRemoteIdentity(peerUserId);
+    const remoteKey = protocolAddressId(peerUserId, peerDeviceId);
+    const remote =
+      (await this.identityStore.getRemoteIdentity(remoteKey)) ??
+      (await this.identityStore.getRemoteIdentity(peerUserId));
     if (!local || !remote) return "—";
     return this.crypto.computeSafetyNumber(
       local.identityKeyPublic,
       remote.identityKeyPublic,
+      local.userId,
+      peerUserId,
     );
   }
 
-  async getIdentityTrust(peerUserId: string): Promise<{
+  async getIdentityTrust(
+    peerUserId: string,
+    peerDeviceId?: string,
+  ): Promise<{
     keyChanged: boolean;
     verified: boolean;
     hasRemote: boolean;
   }> {
-    const remote = await this.identityStore.getRemoteIdentity(peerUserId);
+    const remote =
+      peerDeviceId != null
+        ? ((await this.identityStore.getRemoteIdentity(
+            protocolAddressId(peerUserId, peerDeviceId),
+          )) ??
+          (await this.identityStore.getRemoteIdentity(peerUserId)))
+        : await this.identityStore.getRemoteIdentity(peerUserId);
     if (!remote) {
       return { keyChanged: false, verified: false, hasRemote: false };
     }
@@ -134,20 +144,25 @@ export class SignalService {
    */
   async handleIdentityKeyChange(
     peerUserId: string,
+    peerDeviceId: string,
     newPublicKey: Uint8Array,
   ): Promise<"ok" | "changed"> {
-    const existing = await this.identityStore.getRemoteIdentity(peerUserId);
+    const storeKey = protocolAddressId(peerUserId, peerDeviceId);
+    const existing =
+      (await this.identityStore.getRemoteIdentity(storeKey)) ??
+      (await this.identityStore.getRemoteIdentity(peerUserId));
     if (existing && bytesEqual(existing.identityKeyPublic, newPublicKey)) {
       if (existing.keyChanged) return "changed";
       return "ok";
     }
 
     const fingerprint = bytesToBase64(newPublicKey);
-    await this.sessionStore.delete(sessionKey(peerUserId));
+    await this.sessionStore.delete(sessionStoreKey(peerUserId, peerDeviceId));
+    await this.sessionStore.delete(storeKey);
     await this.sessionStore.delete(peerUserId);
     await this.identityStore.saveRemoteIdentity({
-      peerUserId,
-      peerDeviceId: peerUserId,
+      peerUserId: storeKey,
+      peerDeviceId,
       identityKeyPublic: newPublicKey,
       safetyNumber: "",
       verified: false,
@@ -163,14 +178,27 @@ export class SignalService {
   /** User acknowledged the new identity key (optionally after verifying safety number). */
   async acceptNewIdentityKey(
     peerUserId: string,
-    opts?: { markVerified?: boolean },
+    opts?: { markVerified?: boolean; peerDeviceId?: string },
   ): Promise<void> {
-    const remote = await this.identityStore.getRemoteIdentity(peerUserId);
+    const storeKey =
+      opts?.peerDeviceId != null
+        ? protocolAddressId(peerUserId, opts.peerDeviceId)
+        : peerUserId;
+    const remote =
+      (await this.identityStore.getRemoteIdentity(storeKey)) ??
+      (await this.identityStore.getRemoteIdentity(peerUserId));
     if (!remote) {
       throw new Error("No remote identity to accept");
     }
-    await this.sessionStore.delete(sessionKey(peerUserId));
-    await this.sessionStore.delete(peerUserId);
+    if (opts?.peerDeviceId) {
+      await this.sessionStore.delete(
+        sessionStoreKey(peerUserId, opts.peerDeviceId),
+      );
+      await this.sessionStore.delete(storeKey);
+    } else {
+      await this.sessionStore.delete(`${peerUserId}.1`);
+      await this.sessionStore.delete(peerUserId);
+    }
     await this.identityStore.saveRemoteIdentity({
       ...remote,
       keyChanged: false,
@@ -183,9 +211,8 @@ export class SignalService {
     peerDeviceId: string,
     bundle: PreKeyBundleDto,
   ): Promise<void> {
-    void peerDeviceId;
     const newKey = base64ToBytes(bundle.identityKeyPublicBase64);
-    await this.handleIdentityKeyChange(peerUserId, newKey);
+    await this.handleIdentityKeyChange(peerUserId, peerDeviceId, newKey);
   }
 
   private async fetchBundleWithReplenish(

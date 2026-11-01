@@ -22,81 +22,6 @@ namespace GdotChat.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
-            modelBuilder.Entity("GdotChat.Domain.Entities.Device", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<byte[]>("IdentityKeyPublic")
-                        .IsRequired()
-                        .HasColumnType("bytea");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("boolean");
-
-                    b.Property<DateTimeOffset>("LastSeenAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<int>("RegistrationId")
-                        .HasColumnType("integer");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserId", "RegistrationId")
-                        .IsUnique();
-
-                    b.ToTable("devices", (string)null);
-                });
-
-            modelBuilder.Entity("GdotChat.Domain.Entities.MessageEnvelope", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<byte[]>("Ciphertext")
-                        .IsRequired()
-                        .HasColumnType("bytea");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTimeOffset?>("DeliveredAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTimeOffset>("ExpiresAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("MessageType")
-                        .HasColumnType("integer");
-
-                    b.Property<Guid>("RecipientDeviceId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("SenderDeviceId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("SenderDeviceId");
-
-                    b.HasIndex("RecipientDeviceId", "CreatedAt");
-
-                    b.ToTable("message_envelopes", (string)null);
-                });
-
             modelBuilder.Entity("GdotChat.Domain.Entities.Attachment", b =>
                 {
                     b.Property<Guid>("Id")
@@ -142,6 +67,119 @@ namespace GdotChat.Infrastructure.Migrations
                     b.HasIndex("SenderDeviceId", "Status");
 
                     b.ToTable("attachments", (string)null);
+                });
+
+            modelBuilder.Entity("GdotChat.Domain.Entities.Device", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<byte[]>("IdentityKeyPublic")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset>("LastSeenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("RegistrationId")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "RegistrationId")
+                        .IsUnique();
+
+                    b.ToTable("devices", (string)null);
+                });
+
+            modelBuilder.Entity("GdotChat.Domain.Entities.DeviceLinkToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ConsumedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedByDeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByDeviceId");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "ExpiresAt");
+
+                    b.ToTable("device_link_tokens", (string)null);
+                });
+
+            modelBuilder.Entity("GdotChat.Domain.Entities.MessageEnvelope", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<byte[]>("Ciphertext")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("DeliveredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("MessageType")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("RecipientDeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("SenderDeviceId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SenderDeviceId");
+
+                    b.HasIndex("RecipientDeviceId", "CreatedAt");
+
+                    b.ToTable("message_envelopes", (string)null);
                 });
 
             modelBuilder.Entity("GdotChat.Domain.Entities.OneTimePreKey", b =>
@@ -264,18 +302,7 @@ namespace GdotChat.Infrastructure.Migrations
                     b.ToTable("users", (string)null);
                 });
 
-            modelBuilder.Entity("GdotChat.Domain.Entities.Device", b =>
-                {
-                    b.HasOne("GdotChat.Domain.Entities.User", "User")
-                        .WithMany("Devices")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("User");
-                });
-
-            modelBuilder.Entity("GdotChat.Domain.Entities.MessageEnvelope", b =>
+            modelBuilder.Entity("GdotChat.Domain.Entities.Attachment", b =>
                 {
                     b.HasOne("GdotChat.Domain.Entities.Device", "RecipientDevice")
                         .WithMany()
@@ -294,7 +321,37 @@ namespace GdotChat.Infrastructure.Migrations
                     b.Navigation("SenderDevice");
                 });
 
-            modelBuilder.Entity("GdotChat.Domain.Entities.Attachment", b =>
+            modelBuilder.Entity("GdotChat.Domain.Entities.Device", b =>
+                {
+                    b.HasOne("GdotChat.Domain.Entities.User", "User")
+                        .WithMany("Devices")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("GdotChat.Domain.Entities.DeviceLinkToken", b =>
+                {
+                    b.HasOne("GdotChat.Domain.Entities.Device", "CreatedByDevice")
+                        .WithMany()
+                        .HasForeignKey("CreatedByDeviceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("GdotChat.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("CreatedByDevice");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("GdotChat.Domain.Entities.MessageEnvelope", b =>
                 {
                     b.HasOne("GdotChat.Domain.Entities.Device", "RecipientDevice")
                         .WithMany()

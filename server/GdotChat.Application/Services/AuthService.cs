@@ -24,6 +24,7 @@ public class AuthService : IAuthService
     private readonly IJwtTokenService _jwtTokenService;
     private readonly IPasswordHasher _passwordHasher;
     private readonly JwtOptions _jwtOptions;
+    private readonly IDeviceLinkRateLimiter _deviceLinkRateLimiter;
 
     public AuthService(
         DbContext db,
@@ -31,7 +32,8 @@ public class AuthService : IAuthService
         IDeviceService deviceService,
         IJwtTokenService jwtTokenService,
         IPasswordHasher passwordHasher,
-        IOptions<JwtOptions> jwtOptions)
+        IOptions<JwtOptions> jwtOptions,
+        IDeviceLinkRateLimiter deviceLinkRateLimiter)
     {
         _db = db;
         _userService = userService;
@@ -39,6 +41,7 @@ public class AuthService : IAuthService
         _jwtTokenService = jwtTokenService;
         _passwordHasher = passwordHasher;
         _jwtOptions = jwtOptions.Value;
+        _deviceLinkRateLimiter = deviceLinkRateLimiter;
     }
 
     public async Task<AuthResultDto> RegisterAsync(RegisterRequest request, CancellationToken ct = default)
@@ -135,6 +138,33 @@ public class AuthService : IAuthService
 
         await tx.RollbackAsync(ct);
         throw new InvalidCredentialsException();
+    }
+
+
+    public async Task<AuthResultDto> LoginNewDeviceAsync(LoginNewDeviceRequest request, CancellationToken ct = default)
+    {
+        var username = request.Username.Trim().ToLowerInvariant();
+        if (!_deviceLinkRateLimiter.TryAcquireLoginNewDevice(username))
+            throw new DeviceLinkRateLimitedException();
+
+        var user = await _userService.FindByUsernameAsync(username, ct)
+            ?? throw new InvalidCredentialsException();
+
+        if (!_passwordHasher.Verify(request.Password, user.PasswordHash))
+            throw new InvalidCredentialsException();
+
+        var device = await _deviceService.RegisterDeviceWithPreKeysAsync(user.Id, request.Device, ct);
+        return await IssueTokensAsync(user, device, ct);
+    }
+
+    public async Task<AuthResultDto> RedeemDeviceLinkAsync(RedeemDeviceLinkRequest request, CancellationToken ct = default)
+    {
+        var key = request.Token?.Trim() ?? "";
+        if (!_deviceLinkRateLimiter.TryAcquireRedeem(key.Length > 16 ? key[..16] : key))
+            throw new DeviceLinkRateLimitedException();
+
+        var (user, device) = await _deviceService.RedeemLinkTokenAsync(request, ct);
+        return await IssueTokensAsync(user, device, ct);
     }
 
     private async Task RevokeAllActiveForDeviceAsync(Guid deviceId, DateTimeOffset now, CancellationToken ct)
