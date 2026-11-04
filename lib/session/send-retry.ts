@@ -1,4 +1,5 @@
 import type { Conversation } from "@/lib/db/types";
+import { isQuietDbCancel } from "@/lib/db/db-errors";
 import { exponentialBackoffMs } from "@/lib/session/backoff";
 import type { Clock } from "@/lib/session/inbound/constants";
 import { systemClock } from "@/lib/session/inbound/constants";
@@ -173,6 +174,10 @@ export class SendRetryService {
         await this.deps.onDelivered?.(row.localMessageId);
         sent += 1;
       } catch (e) {
+        if (isQuietDbCancel(e)) {
+          // Lock race: keep queued item untouched for unlock flush.
+          continue;
+        }
         const nextAttempt = row.attemptCount + 1;
         if (nextAttempt >= this.maxAttempts) {
           await this.deps.store.remove([row.clientMessageId]);

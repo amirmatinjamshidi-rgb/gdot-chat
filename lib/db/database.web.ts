@@ -1,7 +1,9 @@
 import type { IDatabase, RunResult, SqlParams } from "./database-types";
 
 export type { IDatabase, RunResult, SqlParams } from "./database-types";
+export { DbLockedError, isDbLockedError, isQuietDbCancel } from "./db-errors";
 
+// SQLCipher open pragmas (incl. secure_delete) apply only on native; web open always throws.
 const WEB_MESSAGE =
   "Encrypted SQLite is only available in the iOS/Android development build, not in the web bundle.";
 

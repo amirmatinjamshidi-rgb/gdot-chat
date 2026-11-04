@@ -22,10 +22,14 @@ export function classifyDecryptError(
 
   if (
     name === "AppAuthError" ||
+    name === "DbLockedError" ||
     msg.includes("kek_missing") ||
     msg.includes("pin_required") ||
+    msg.includes("db_locked") ||
     msg.includes("database is locked") ||
     msg.includes("db is locked") ||
+    msg.includes("db not open") ||
+    msg.includes("access to closed resource") ||
     msg.includes("sqlcipher") ||
     msg.includes("media transfer is not initialized") ||
     msg.includes("network request failed") ||

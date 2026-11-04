@@ -1,4 +1,5 @@
 import type { Conversation } from "@/lib/db/types";
+import { isQuietDbCancel } from "@/lib/db/db-errors";
 import type { IPendingReceiptStore } from "@/lib/db/pending-receipt-store";
 import { serializeReceiptPayload } from "@/lib/protocol/payload";
 import type { Clock } from "@/lib/session/inbound/constants";
@@ -155,6 +156,9 @@ export class ReceiptRetryService {
       await this.deps.store.remove(ids);
       return ids.length;
     } catch (e) {
+      if (isQuietDbCancel(e)) {
+        return 0;
+      }
       const msg = e instanceof Error ? e.message : String(e);
       for (const row of eligible) {
         const nextAttempt = row.attemptCount + 1;

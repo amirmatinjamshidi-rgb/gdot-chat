@@ -39,6 +39,7 @@ import {
 } from "./constants";
 import type { ReceiptRetryService } from "@/lib/session/receipt-retry";
 import { isInvalidStructuredPayload } from "./structured-payload";
+import { isQuietDbCancel } from "@/lib/db/db-errors";
 
 export type InboundLogFn = (event: {
   envelopeId: string;
@@ -134,6 +135,10 @@ export class InboundEnvelopeProcessor {
     try {
       await this.processEnvelopeInner(env);
     } catch (e) {
+      if (isQuietDbCancel(e)) {
+        // Lock/close race: leave on server, retry after unlock (no ack).
+        return;
+      }
       const msg = e instanceof Error ? e.message : String(e);
       if (__DEV__) {
         console.warn("[InboundEnvelopeProcessor] envelope failed", env.id, msg);
@@ -270,6 +275,10 @@ export class InboundEnvelopeProcessor {
         ciphertext,
       );
     } catch (e) {
+      if (isQuietDbCancel(e)) {
+        // Do not burn attempt budget or ack — retry after unlock.
+        return;
+      }
       await this.handleDecryptFailure(env, conversation, ciphertext, e);
       return;
     }

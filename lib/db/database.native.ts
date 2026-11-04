@@ -2,47 +2,51 @@ import * as SQLite from "expo-sqlite";
 
 import { DB_NAME } from "./constants";
 import type { IDatabase, RunResult, SqlParams } from "./database-types";
+import { DbLockedError } from "./db-errors";
+import { DbOperationGate } from "./db-operation-gate";
 import { MigrationRunner } from "./migration-runner";
+import { sqlcipherPostKeyPragmas } from "./sqlcipher-open-pragmas";
 import { escapeSqlString } from "./sql-utils";
 
 export type { IDatabase, RunResult, SqlParams } from "./database-types";
+export { DbLockedError, isDbLockedError, isQuietDbCancel } from "./db-errors";
 
 const BUSY_TIMEOUT_MS = 5000;
 
 export class SqlCipherDatabase implements IDatabase {
   private db: SQLite.SQLiteDatabase | null = null;
-  private mutex: Promise<void> = Promise.resolve();
-  private depth = 0;
-
-  /** Serialize all DB access; re-entrant while inside withTransaction. */
-  private async serialize<T>(fn: () => Promise<T>): Promise<T> {
-    if (this.depth > 0) {
-      return fn();
-    }
-    const previous = this.mutex;
-    let release!: () => void;
-    this.mutex = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    await previous;
-    this.depth++;
-    try {
-      return await fn();
-    } finally {
-      this.depth--;
-      release();
-    }
-  }
+  private readonly gate = new DbOperationGate();
 
   async open(passphrase: string): Promise<void> {
-    if (this.db) return;
+    if (this.db) {
+      this.gate.markOpen();
+      return;
+    }
+    this.gate.markOpen();
     this.db = await SQLite.openDatabaseAsync(DB_NAME);
     await this.db.execAsync(
       `PRAGMA key = '${escapeSqlString(passphrase)}'`,
     );
-    await this.db.execAsync("PRAGMA foreign_keys = ON");
-    await this.db.execAsync("PRAGMA cipher_memory_security = ON");
-    await this.db.execAsync(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
+    for (const pragma of sqlcipherPostKeyPragmas(BUSY_TIMEOUT_MS)) {
+      await this.db.execAsync(pragma);
+    }
+    const secureRow = await this.db.getFirstAsync<{ secure_delete: number }>(
+      "PRAGMA secure_delete",
+    );
+    const secureDelete = secureRow
+      ? Number(
+          (secureRow as { secure_delete?: number }).secure_delete ??
+            Object.values(secureRow)[0],
+        )
+      : NaN;
+    if (secureDelete !== 1) {
+      throw new Error(
+        `PRAGMA secure_delete expected 1 after open, got ${String(secureDelete)}`,
+      );
+    }
+    if (__DEV__) {
+      console.log("[SqlCipher] PRAGMA secure_delete =", secureDelete);
+    }
     const runner = new MigrationRunner();
     const self: IDatabase = this;
     await runner.runMigrations(self);
@@ -50,8 +54,9 @@ export class SqlCipherDatabase implements IDatabase {
   }
 
   async close(): Promise<void> {
-    await this.serialize(async () => {
-      await this.db?.closeAsync();
+    await this.gate.closeExclusive(async () => {
+      if (!this.db) return;
+      await this.db.closeAsync();
       this.db = null;
     });
   }
@@ -74,8 +79,8 @@ export class SqlCipherDatabase implements IDatabase {
   }
 
   async run(sql: string, params: SqlParams = []): Promise<RunResult> {
-    return this.serialize(async () => {
-      if (!this.db) throw new Error("DB not open");
+    return this.gate.runExclusive(async () => {
+      if (!this.db) throw new DbLockedError();
       const result = await this.db.runAsync(sql, params);
       return {
         changes: result.changes,
@@ -85,22 +90,22 @@ export class SqlCipherDatabase implements IDatabase {
   }
 
   async getFirst<T>(sql: string, params: SqlParams = []): Promise<T | null> {
-    return this.serialize(async () => {
-      if (!this.db) throw new Error("DB not open");
+    return this.gate.runExclusive(async () => {
+      if (!this.db) throw new DbLockedError();
       return (await this.db.getFirstAsync<T>(sql, params)) ?? null;
     });
   }
 
   async getAll<T>(sql: string, params: SqlParams = []): Promise<T[]> {
-    return this.serialize(async () => {
-      if (!this.db) throw new Error("DB not open");
+    return this.gate.runExclusive(async () => {
+      if (!this.db) throw new DbLockedError();
       return this.db.getAllAsync<T>(sql, params);
     });
   }
 
   async withTransaction<T>(fn: () => Promise<T>): Promise<T> {
-    return this.serialize(async () => {
-      if (!this.db) throw new Error("DB not open");
+    return this.gate.runExclusive(async () => {
+      if (!this.db) throw new DbLockedError();
       await this.db.runAsync("BEGIN IMMEDIATE");
       try {
         const result = await fn();

@@ -19,6 +19,7 @@ import { isPublicRoute } from "@/lib/auth/public-routes";
 import { ensureSignalInitialized } from "@/lib/crypto/init-signal";
 import { useAppServices } from "@/lib/services/app-services-context";
 import { shouldLockOnAppStateChange } from "@/lib/session/app-lock-store";
+import { runLockShutdown } from "@/lib/session/lock-shutdown";
 
 export type UnlockResult =
   | { ok: true }
@@ -39,7 +40,7 @@ const AppLockContext = createContext<AppLockContextValue | null>(null);
 
 const LOCK_ROUTE = "/lock";
 export function AppLockProvider({ children }: { children: React.ReactNode }) {
-  const { appLockStore, kekManager, db } = useAppServices();
+  const { appLockStore, kekManager, db, syncService } = useAppServices();
   const router = useRouter();
   const pathname = usePathname();
   const [isUnlocked, setIsUnlocked] = useState(false);
@@ -120,9 +121,13 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
       if (!isPublicRoute(path)) {
         routerRef.current.replace(LOCK_ROUTE as Href);
       }
-      void db.close();
+      // stop sync/SignalR (+ abort HTTP) before draining/closing DB.
+      void runLockShutdown({
+        stopSync: () => syncService.stop(),
+        closeDb: () => db.close(),
+      });
     });
-  }, [appLockStore, kekManager, db]);
+  }, [appLockStore, kekManager, db, syncService]);
 
   // Stable subscription — pathname/router read via refs so we never flip the listener.
   useEffect(() => {

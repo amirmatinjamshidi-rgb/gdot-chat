@@ -1,5 +1,7 @@
 export * from "./constants";
 export * from "./database-types";
+export * from "./db-errors";
+export * from "./sqlcipher-open-pragmas";
 export * from "./database";
 export * from "./kek-manager";
 export * from "./types";

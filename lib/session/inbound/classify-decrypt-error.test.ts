@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { DbLockedError } from "@/lib/db/db-errors";
+
 import {
   classifyDecryptError,
   shouldRequestSessionReset,
@@ -21,6 +23,14 @@ describe("classifyDecryptError", () => {
       classifyDecryptError(new Error("Media transfer is not initialized")),
     ).toBe("transient");
     expect(classifyDecryptError(new Error("Failed to fetch"))).toBe("transient");
+  });
+
+  it("treats DbLockedError / DB not open as transient", () => {
+    expect(classifyDecryptError(new DbLockedError())).toBe("transient");
+    expect(classifyDecryptError(new Error("DB not open"))).toBe("transient");
+    expect(classifyDecryptError(new Error("Access to closed resource"))).toBe(
+      "transient",
+    );
   });
 
   it("classifies duplicate/corrupt/session/prekey as permanent", () => {

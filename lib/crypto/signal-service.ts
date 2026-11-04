@@ -2,6 +2,7 @@ import type { DevicesApi } from "@/lib/api/devices-api";
 import { ApiError } from "@/lib/api/api-client";
 import type { PreKeyBundleDto } from "@/lib/api/api-types";
 import type { IIdentityStore } from "@/lib/db/identity-store";
+import { isQuietDbCancel } from "@/lib/db/db-errors";
 import type { ISessionStore } from "@/lib/db/session-store";
 
 import { base64ToBytes, bytesToBase64 } from "./encoding";
@@ -237,11 +238,17 @@ export class SignalService {
     try {
       await run();
     } catch (first) {
+      if (isQuietDbCancel(first)) return;
       console.warn(
         "[SignalService] pre-key replenish failed; retrying once",
         first instanceof Error ? first.message : first,
       );
-      await run();
+      try {
+        await run();
+      } catch (second) {
+        if (isQuietDbCancel(second)) return;
+        throw second;
+      }
     }
   }
 }

@@ -43,6 +43,7 @@ import {
 import { assertMessageTextWithinLimit } from "@/lib/protocol/message-limits";
 import { isOfflineToken, type AuthStore } from "@/lib/session/auth-store";
 import { appLockStore } from "@/lib/session/app-lock-store";
+import { isQuietDbCancel } from "@/lib/db/db-errors";
 import { InboundEnvelopeProcessor } from "@/lib/session/inbound/inbound-envelope-processor";
 import type { GroupSenderKeyService } from "@/lib/session/group-sender-key-service";
 import type { IGroupStore } from "@/lib/db/group-store";
@@ -316,10 +317,33 @@ export class SyncService {
     if (this.started) return;
     this.started = true;
 
-    await this.signalService.replenishLocalPreKeysIfNeeded();
-    void this.mediaTransfer?.resumeInterrupted();
+    try {
+      await this.signalService.replenishLocalPreKeysIfNeeded();
+    } catch (e) {
+      if (isQuietDbCancel(e) || !this.started) {
+        this.started = false;
+        return;
+      }
+      throw e;
+    }
+    if (!this.started || !appLockStore.isUnlocked) {
+      this.started = false;
+      return;
+    }
+    void this.mediaTransfer?.resumeInterrupted().catch((e) => {
+      if (!isQuietDbCancel(e) && __DEV__) {
+        console.warn(
+          "[SyncService] resumeInterrupted failed",
+          e instanceof Error ? e.message : e,
+        );
+      }
+    });
 
     const accessToken = await this.authStore.getAccessToken();
+    if (!this.started || !appLockStore.isUnlocked) {
+      this.started = false;
+      return;
+    }
     if (isOfflineToken(accessToken)) {
       await this.authStore.clearSessionExpired();
       this.started = false;
@@ -328,6 +352,7 @@ export class SyncService {
 
     this.signalr.setPreKeysLowHandler(() => {
       void this.signalService.replenishLocalPreKeysIfNeeded().catch((e) => {
+        if (isQuietDbCancel(e)) return;
         console.warn(
           "[SyncService] PreKeysLow replenish failed",
           e instanceof Error ? e.message : e,
@@ -338,6 +363,7 @@ export class SyncService {
       void this.groupSenderKeyService
         ?.handleMembershipChanged(payload)
         .catch((e) => {
+          if (isQuietDbCancel(e)) return;
           if (__DEV__) {
             console.warn(
               "[SyncService] group membership handler failed",
@@ -393,7 +419,17 @@ export class SyncService {
     this.signalr.setSessionResetHandler(null);
     this.signalr.setGroupMembershipChangedHandler(null);
     this.signalRConnected = false;
+    try {
+      await this.messagesApi.abortBackground();
+    } catch {
+      /* ignore */
+    }
     await this.signalr.disconnect();
+    // Let in-flight start/pull settle (they gate on started / isUnlocked / DB_LOCKED).
+    if (this.startInFlight) {
+      await this.startInFlight.catch(() => undefined);
+    }
+    await this.pullChain.catch(() => undefined);
   }
 
   /** App moved to background: drop live connection and polling. */
@@ -550,6 +586,9 @@ export class SyncService {
         this.transientBackoffUntil = now + 2_000;
       }
     } catch (e) {
+      if (isQuietDbCancel(e)) {
+        return;
+      }
       const msg = e instanceof Error ? e.message : String(e);
       const abortedForSend =
         this.outboundInFlight > 0 &&
@@ -632,6 +671,7 @@ export class SyncService {
           await this.messageStore.updateStatus(local.id, "sent");
         }
       } catch (e) {
+        if (isQuietDbCancel(e)) continue;
         if (__DEV__) {
           console.warn(
             "[SyncService] outbox resend failed",
@@ -785,6 +825,25 @@ export class SyncService {
         OUTBOX_MAX_PER_CONVERSATION,
       );
     } catch (e) {
+      if (isQuietDbCancel(e)) {
+        // Keep optimistic row pending; queue for unlock flush — never mark failed.
+        if (this.sendRetry) {
+          try {
+            const now = this.clock();
+            await this.sendRetry.enqueueFailed({
+              clientMessageId: clientId,
+              localMessageId: id,
+              conversationId,
+              plaintext: text,
+              createdAt: now,
+              nextAttemptAt: now,
+            });
+          } catch (enqueueErr) {
+            if (!isQuietDbCancel(enqueueErr)) throw enqueueErr;
+          }
+        }
+        return;
+      }
       await this.messageStore.updateStatus(id, "failed");
       if (this.sendRetry) {
         const now = this.clock();
@@ -857,6 +916,24 @@ export class SyncService {
       await this.messageStore.updateStatus(id, "sent");
       await this.groupStore?.touchPreview(groupId, text.slice(0, 120), createdAt);
     } catch (e) {
+      if (isQuietDbCancel(e)) {
+        if (this.sendRetry) {
+          try {
+            const now = this.clock();
+            await this.sendRetry.enqueueFailed({
+              clientMessageId: clientId,
+              localMessageId: id,
+              conversationId: groupId,
+              plaintext: text,
+              createdAt: now,
+              nextAttemptAt: now,
+            });
+          } catch (enqueueErr) {
+            if (!isQuietDbCancel(enqueueErr)) throw enqueueErr;
+          }
+        }
+        return;
+      }
       await this.messageStore.updateStatus(id, "failed");
       if (this.sendRetry) {
         const now = this.clock();
