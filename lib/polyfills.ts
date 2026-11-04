@@ -3,28 +3,26 @@ import {
   textEncode,
   type SupportedEncoding,
 } from "@borewit/text-codec";
-import { getRandomBytes } from "expo-crypto";
 import { Platform } from "react-native";
 import { polyfillGlobal } from "react-native/Libraries/Utilities/PolyfillFunctions";
 
-if (typeof globalThis.crypto?.getRandomValues !== "function") {
-  const getRandomValues = <T extends ArrayBufferView>(typedArray: T): T => {
-    const bytes = getRandomBytes(typedArray.byteLength);
-    const view = new Uint8Array(
-      typedArray.buffer,
-      typedArray.byteOffset,
-      typedArray.byteLength,
-    );
-    view.set(bytes);
-    return typedArray;
-  };
-  const cryptoObj =
-    globalThis.crypto ??
-    ({ getRandomValues } as Crypto);
-  if (!globalThis.crypto) {
+import {
+  ensureWebCrypto,
+  expoGetRandomValues,
+} from "@/lib/crypto/ensure-webcrypto";
+
+ensureWebCrypto({
+  installCrypto: (cryptoObj) => {
     polyfillGlobal("crypto", () => cryptoObj);
+  },
+});
+
+// Historical safety net if crypto still lacks getRandomValues.
+if (typeof globalThis.crypto?.getRandomValues !== "function") {
+  if (!globalThis.crypto) {
+    polyfillGlobal("crypto", () => ({ getRandomValues: expoGetRandomValues }));
   } else {
-    globalThis.crypto.getRandomValues = getRandomValues;
+    globalThis.crypto.getRandomValues = expoGetRandomValues;
   }
 }
 

@@ -13,7 +13,16 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "."),
+      // More-specific react-native paths must precede the package alias.
+      "react-native/Libraries/Utilities/PolyfillFunctions": path.resolve(
+        __dirname,
+        "lib/test/polyfill-functions-stub.ts",
+      ),
       "react-native": path.resolve(__dirname, "lib/test/react-native-stub.ts"),
+      "react-native-quick-crypto": path.resolve(
+        __dirname,
+        "lib/test/quick-crypto-stub.ts",
+      ),
       "expo-crypto": path.resolve(__dirname, "lib/test/expo-crypto-stub.ts"),
       "expo-constants": path.resolve(__dirname, "lib/test/expo-constants-stub.ts"),
       "expo-secure-store": path.resolve(__dirname, "lib/test/expo-secure-store-stub.ts"),
