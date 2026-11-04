@@ -171,6 +171,8 @@ describe("ensureKek + registerUser", () => {
         throw new Error("should not create PIN in this assertion");
       },
       getPassphraseForDb: async () => "",
+      clearCachedPassphrase: () => undefined,
+      hasCachedPassphrase: () => false,
       wipeKek: async () => undefined,
     };
     await expect(ensureKek(kekManager)).rejects.toMatchObject({
@@ -210,6 +212,8 @@ describe("ensureKek + registerUser", () => {
       },
       getPassphraseForDb: (opts?: { pin?: string }) =>
         inner.getPassphraseForDb(opts),
+      clearCachedPassphrase: () => inner.clearCachedPassphrase(),
+      hasCachedPassphrase: () => inner.hasCachedPassphrase(),
       wipeKek: () => inner.wipeKek(),
     };
     const pin = `pin-${crypto.randomUUID().slice(0, 8)}!!`;
@@ -262,7 +266,7 @@ describe("ensureKek + registerUser", () => {
     expect(await cryptoKeyStore.getSignedPreKey(1)).not.toBeNull();
     expect(await authStore.getAccessToken()).toMatch(/^a\./);
     expect(db.openCount).toBe(1);
-    expect(db.isOpen()).toBe(false);
+    expect(db.isOpen()).toBe(true);
   });
 });
 
@@ -353,7 +357,7 @@ describe("loginUser + getPassphraseForDb", () => {
     expect(await kek.getLockMode()).toBe("pin");
     expect(db.deleteCount).toBe(1);
     expect(db.openCount).toBe(1);
-    expect(db.isOpen()).toBe(false);
+    expect(db.isOpen()).toBe(true);
     const local = await identityStore.getLocalIdentity();
     expect(local?.userId).toBe(userId);
     expect(local?.deviceId).toBe(deviceId);
@@ -457,5 +461,63 @@ describe("loginUser + getPassphraseForDb", () => {
     });
 
     expect(await kek.getLockMode()).toBe("biometric");
+  });
+
+  it("loginUser biometric path leaves DB open and does not require a second unwrap", async () => {
+    setSecureStoreBiometric(true);
+    __setBiometricStub({
+      hasHardware: true,
+      enrolled: true,
+      level: SecurityLevel.BIOMETRIC_STRONG,
+    });
+    const kek = new KekManager();
+    const userId = crypto.randomUUID();
+    const deviceId = crypto.randomUUID();
+    const username = `u_${crypto.randomUUID().slice(0, 8)}`;
+    const authApi = {
+      login: async () => {
+        throw new Error("should use loginNewDevice");
+      },
+      loginNewDevice: async () => ({
+        accessToken: `a.${crypto.randomUUID()}`,
+        refreshToken: `r.${crypto.randomUUID()}`,
+        accessTokenExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+        userId,
+        deviceId,
+      }),
+    } as unknown as AuthApi;
+
+    const db = fakeDb();
+    await loginUser({
+      username,
+      password: `pw-${crypto.randomUUID()}`,
+      authApi,
+      crypto: fakeCrypto(),
+      authStore: new AuthStore(),
+      kekManager: kek,
+      db,
+      identityStore: new MemoryIdentityStore(),
+      cryptoKeyStore: new MemoryCryptoKeyStore(),
+    });
+
+    expect(db.isOpen()).toBe(true);
+    (SecureStore as { __clearCallLog?: () => void }).__clearCallLog?.();
+    const beforeAuth = (
+      await import("expo-local-authentication")
+    ).__getAuthenticateCallCount();
+    // Cached from create/unwrap during login — no SecureStore auth read.
+    const pass = await kek.getPassphraseForDb();
+    expect(pass).toHaveLength(64);
+    const gets =
+      (SecureStore as { __getGetCalls?: () => { key: string; options?: { requireAuthentication?: boolean } }[] })
+        .__getGetCalls?.() ?? [];
+    expect(
+      gets.filter(
+        (c) => c.key === "gdot.db.kek" && c.options?.requireAuthentication === true,
+      ),
+    ).toHaveLength(0);
+    expect(
+      (await import("expo-local-authentication")).__getAuthenticateCallCount(),
+    ).toBe(beforeAuth);
   });
 });

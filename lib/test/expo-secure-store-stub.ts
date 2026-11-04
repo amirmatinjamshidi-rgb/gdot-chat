@@ -1,5 +1,7 @@
 const store = new Map<string, string>();
 const lastOptions = new Map<string, SecureStoreOptions | undefined>();
+const getCalls: { key: string; options?: SecureStoreOptions }[] = [];
+const setCalls: { key: string; options?: SecureStoreOptions }[] = [];
 let canUseBiometric = false;
 
 export const WHEN_UNLOCKED = 1;
@@ -23,13 +25,15 @@ export async function setItemAsync(
   options?: SecureStoreOptions,
 ): Promise<void> {
   lastOptions.set(key, options);
+  setCalls.push({ key, options });
   store.set(key, value);
 }
 
 export async function getItemAsync(
   key: string,
-  _options?: SecureStoreOptions,
+  options?: SecureStoreOptions,
 ): Promise<string | null> {
+  getCalls.push({ key, options });
   return store.has(key) ? store.get(key)! : null;
 }
 
@@ -55,6 +59,8 @@ export async function isAvailableAsync(): Promise<boolean> {
 export function __resetSecureStoreStub(): void {
   store.clear();
   lastOptions.clear();
+  getCalls.length = 0;
+  setCalls.length = 0;
   canUseBiometric = false;
 }
 
@@ -62,4 +68,17 @@ export function __getLastOptions(
   key: string,
 ): SecureStoreOptions | undefined {
   return lastOptions.get(key);
+}
+
+export function __getGetCalls(): { key: string; options?: SecureStoreOptions }[] {
+  return [...getCalls];
+}
+
+export function __getSetCalls(): { key: string; options?: SecureStoreOptions }[] {
+  return [...setCalls];
+}
+
+export function __clearCallLog(): void {
+  getCalls.length = 0;
+  setCalls.length = 0;
 }

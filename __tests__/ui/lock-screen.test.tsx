@@ -5,14 +5,17 @@ import LockScreen from "@/app/lock";
 import { mockAppServices, randomId, renderWithServices } from "./helpers";
 
 const mockUnlock = jest.fn();
+let mockLockEpoch = 0;
 
 jest.mock("@/lib/providers/app-lock-provider", () => ({
   useAppLock: () => ({
     unlock: (...args: unknown[]) => mockUnlock(...args),
     isUnlocked: false,
     dbReady: false,
-    lockEpoch: 0,
+    lockEpoch: mockLockEpoch,
     lock: jest.fn(),
+    beginSuppressBackgroundLock: jest.fn(),
+    endSuppressBackgroundLock: jest.fn(),
   }),
 }));
 
@@ -23,6 +26,7 @@ const expoRouter = jest.requireMock("expo-router") as {
 describe("LockScreen PIN unlock", () => {
   beforeEach(() => {
     mockUnlock.mockReset();
+    mockLockEpoch = 0;
   });
 
   it("unlocks with a valid app PIN and navigates to chats", async () => {
@@ -33,8 +37,11 @@ describe("LockScreen PIN unlock", () => {
         hasKek: jest.fn(async () => true),
         getLockMode: jest.fn(async () => "pin" as const),
         getPassphraseForDb: jest.fn(async () => "pass"),
+        clearCachedPassphrase: jest.fn(),
+        hasCachedPassphrase: jest.fn(() => false),
         createKekAfterBiometric: jest.fn(async () => undefined),
         createKekWithPin: jest.fn(async () => undefined),
+        wipeKek: jest.fn(async () => undefined),
       } as never,
     });
     const user = userEvent.setup();
@@ -70,8 +77,11 @@ describe("LockScreen PIN unlock", () => {
         hasKek: jest.fn(async () => true),
         getLockMode: jest.fn(async () => "pin" as const),
         getPassphraseForDb: jest.fn(async () => "pass"),
+        clearCachedPassphrase: jest.fn(),
+        hasCachedPassphrase: jest.fn(() => false),
         createKekAfterBiometric: jest.fn(async () => undefined),
         createKekWithPin: jest.fn(async () => undefined),
+        wipeKek: jest.fn(async () => undefined),
       } as never,
     });
     const user = userEvent.setup();
@@ -95,6 +105,71 @@ describe("LockScreen PIN unlock", () => {
       expect(expoRouter.useRouter().replace).toHaveBeenCalledWith(
         "/(tabs)/chats",
       );
+    });
+  });
+
+  it("warm session (cached passphrase) auto-unlocks once without PIN entry", async () => {
+    mockUnlock.mockResolvedValue({ ok: true });
+    const services = mockAppServices({
+      kekManager: {
+        hasKek: jest.fn(async () => true),
+        getLockMode: jest.fn(async () => "pin" as const),
+        getPassphraseForDb: jest.fn(async () => "pass"),
+        clearCachedPassphrase: jest.fn(),
+        hasCachedPassphrase: jest.fn(() => true),
+        createKekAfterBiometric: jest.fn(async () => undefined),
+        createKekWithPin: jest.fn(async () => undefined),
+        wipeKek: jest.fn(async () => undefined),
+      } as never,
+    });
+
+    renderWithServices(<LockScreen />, services);
+    await waitFor(() => {
+      expect(mockUnlock).toHaveBeenCalledTimes(1);
+      expect(mockUnlock).toHaveBeenCalledWith(undefined);
+      expect(expoRouter.useRouter().replace).toHaveBeenCalledWith(
+        "/(tabs)/chats",
+      );
+    });
+  });
+});
+
+describe("LockScreen biometric auto-unlock", () => {
+  beforeEach(() => {
+    mockUnlock.mockReset();
+    mockLockEpoch = 42;
+    mockUnlock.mockResolvedValue({ ok: true });
+  });
+
+  it("auto-unlock calls unlock only once under double mount (same lockEpoch)", async () => {
+    const services = mockAppServices({
+      kekManager: {
+        hasKek: jest.fn(async () => true),
+        getLockMode: jest.fn(async () => "biometric" as const),
+        getPassphraseForDb: jest.fn(async () => "pass"),
+        clearCachedPassphrase: jest.fn(),
+        hasCachedPassphrase: jest.fn(() => false),
+        createKekAfterBiometric: jest.fn(async () => undefined),
+        createKekWithPin: jest.fn(async () => undefined),
+        wipeKek: jest.fn(async () => undefined),
+      } as never,
+    });
+
+    const first = renderWithServices(<LockScreen />, services);
+    await waitFor(() => {
+      expect(mockUnlock).toHaveBeenCalledTimes(1);
+    });
+
+    first.unmount();
+
+    // Strict Mode-style remount with the same lockEpoch must not unlock again.
+    renderWithServices(<LockScreen />, services);
+    await waitFor(() => {
+      expect(screen.getByText("Locked")).toBeTruthy();
+    });
+    // Give effects a turn; count must stay 1.
+    await waitFor(() => {
+      expect(mockUnlock).toHaveBeenCalledTimes(1);
     });
   });
 });

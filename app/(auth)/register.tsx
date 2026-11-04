@@ -16,6 +16,7 @@ import {
 import { setPendingAppPinAuth } from "@/lib/auth/pending-app-pin-auth";
 import { registerUser } from "@/lib/auth/registration";
 import type { LibSignalAdapter } from "@/lib/crypto/libsignal-adapter";
+import { useAppLock } from "@/lib/providers/app-lock-provider";
 import { useAuth } from "@/lib/providers/auth-provider";
 import { useAppServices } from "@/lib/services/app-services-context";
 
@@ -30,6 +31,7 @@ function authErrorCode(error: unknown): AppAuthErrorCode | null {
 export default function RegisterScreen() {
   const router = useRouter();
   const { refresh } = useAuth();
+  const { unlock, beginSuppressBackgroundLock, endSuppressBackgroundLock } = useAppLock();
   const services = useAppServices();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -41,6 +43,7 @@ export default function RegisterScreen() {
       return;
     }
     setLoading(true);
+    beginSuppressBackgroundLock();
     try {
       await registerUser({
         username,
@@ -55,6 +58,8 @@ export default function RegisterScreen() {
         cryptoKeyStore: services.cryptoKeyStore,
       });
       await refresh();
+      // Mark session unlocked so /lock does not prompt again.
+      await unlock();
       router.replace("/lock" as Href);
     } catch (e) {
       const code = authErrorCode(e);
@@ -77,6 +82,7 @@ export default function RegisterScreen() {
         e instanceof Error ? e.message : "Unknown error",
       );
     } finally {
+      endSuppressBackgroundLock();
       setLoading(false);
     }
   };

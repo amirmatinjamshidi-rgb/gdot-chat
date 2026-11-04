@@ -200,6 +200,8 @@ jest.mock("@/lib/providers/app-lock-provider", () => {
       lockEpoch: 0,
       unlock: jest.fn(async () => ({ ok: true })),
       lock: jest.fn(),
+      beginSuppressBackgroundLock: jest.fn(),
+      endSuppressBackgroundLock: jest.fn(),
     }),
   };
 });

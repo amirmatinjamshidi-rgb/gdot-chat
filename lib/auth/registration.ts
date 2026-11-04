@@ -127,10 +127,7 @@ export async function registerUser(params: {
     oneTimePreKeys[oneTimePreKeys.length - 1]!.keyId + 1,
   );
   await params.authStore.setTokens(auth);
-  // Close so /lock re-authenticates (biometric or PIN) before app use.
-  if (params.db.isOpen()) {
-    await params.db.close();
-  }
+  // Leave DB open and KEK cached so /lock can enter without a second biometric.
 }
 
 
@@ -236,7 +233,5 @@ export async function loginUser(params: {
       : new Error("Login failed. Check your connection and try again.");
   }
   await params.authStore.setTokens(auth);
-  if (params.db.isOpen()) {
-    await params.db.close();
-  }
+  // Leave DB open and KEK cached so /lock can enter without a second biometric.
 }

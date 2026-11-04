@@ -8,4 +8,5 @@ declare module "expo-local-authentication" {
     authError?: string | null;
   }): void;
   export function __resetBiometricStub(): void;
+  export function __getAuthenticateCallCount(): number;
 }

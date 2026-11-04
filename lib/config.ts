@@ -8,7 +8,8 @@ export const API_BASE_URL = resolveApiBaseUrl();
 export const SIGNALR_HUB_URL =
   API_BASE_URL.replace(/\/v1\/?$/, "") + "/hubs/messages";
 
-export const APP_LOCK_BACKGROUND_MS = 60_000;
+/** @deprecated Immediate lock on background; kept as 0 for any leftover imports. */
+export const APP_LOCK_BACKGROUND_MS = 0;
 
 export const SYNC_POLL_INTERVAL_MS = 30_000;
 

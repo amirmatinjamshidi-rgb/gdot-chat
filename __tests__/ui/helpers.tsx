@@ -21,8 +21,11 @@ export function mockAppServices(
       hasKek: jest.fn(async () => true),
       getLockMode: jest.fn(async () => "pin" as const),
       getPassphraseForDb: jest.fn(async () => "pass"),
+      clearCachedPassphrase: jest.fn(),
+      hasCachedPassphrase: jest.fn(() => false),
       createKekAfterBiometric: jest.fn(async () => undefined),
       createKekWithPin: jest.fn(async () => undefined),
+      wipeKek: jest.fn(async () => undefined),
     },
     db: {
       isOpen: jest.fn(() => false),
@@ -59,6 +62,13 @@ export function mockAppServices(
     },
     appLockStore: {
       lock: jest.fn(),
+      unlock: jest.fn(),
+      beginSuppressBackgroundLock: jest.fn(),
+      endSuppressBackgroundLock: jest.fn(),
+      isSuppressingBackgroundLock: jest.fn(() => false),
+      onBackground: jest.fn(),
+      onForeground: jest.fn(),
+      onLock: jest.fn(() => () => undefined),
     },
     mediaTransfer: {
       downloadAttachment: jest.fn(async () => undefined),

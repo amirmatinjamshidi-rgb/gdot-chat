@@ -13,4 +13,23 @@ declare module "expo-secure-store" {
         keychainService?: string;
       }
     | undefined;
+  export function __getGetCalls(): {
+    key: string;
+    options?: {
+      keychainAccessible?: number;
+      requireAuthentication?: boolean;
+      authenticationPrompt?: string;
+      keychainService?: string;
+    };
+  }[];
+  export function __getSetCalls(): {
+    key: string;
+    options?: {
+      keychainAccessible?: number;
+      requireAuthentication?: boolean;
+      authenticationPrompt?: string;
+      keychainService?: string;
+    };
+  }[];
+  export function __clearCallLog(): void;
 }

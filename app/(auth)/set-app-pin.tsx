@@ -23,6 +23,7 @@ import {
   APP_PIN_MIN_LENGTH,
   validateAppPin,
 } from "@/lib/crypto/pin-kek";
+import { useAppLock } from "@/lib/providers/app-lock-provider";
 import { useAuth } from "@/lib/providers/auth-provider";
 import { useAppServices } from "@/lib/services/app-services-context";
 
@@ -38,6 +39,7 @@ function yieldToUi(): Promise<void> {
 export default function SetAppPinScreen() {
   const router = useRouter();
   const { refresh } = useAuth();
+  const { unlock, beginSuppressBackgroundLock, endSuppressBackgroundLock } = useAppLock();
   const services = useAppServices();
   const pending = peekPendingAppPinAuth();
   const [isCreate, setIsCreate] = useState(pending?.kind === "register");
@@ -86,6 +88,7 @@ export default function SetAppPinScreen() {
 
     setLoading(true);
     await yieldToUi();
+    beginSuppressBackgroundLock();
     try {
       if (pendingAuth.kind === "register") {
         await registerUser({
@@ -117,6 +120,8 @@ export default function SetAppPinScreen() {
         });
       }
       await refresh();
+      // DB already open + KEK cached — mark unlocked so /lock skips a second PIN.
+      await unlock();
       router.replace("/lock" as Href);
     } catch (e) {
       setPendingAppPinAuth(pendingAuth);
@@ -129,6 +134,7 @@ export default function SetAppPinScreen() {
             : "Unknown error",
       );
     } finally {
+      endSuppressBackgroundLock();
       setLoading(false);
     }
   };

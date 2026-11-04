@@ -15,6 +15,7 @@ let hasHardware = false;
 let enrolled = false;
 let level = SecurityLevel.NONE;
 let authError: string | null = null;
+let authenticateCallCount = 0;
 
 export async function hasHardwareAsync(): Promise<boolean> {
   return hasHardware;
@@ -38,6 +39,7 @@ export async function authenticateAsync(_opts?: {
   biometricsSecurityLevel?: string;
   cancelLabel?: string;
 }): Promise<{ success: boolean; error?: string }> {
+  authenticateCallCount += 1;
   if (authError) {
     return { success: false, error: authError };
   }
@@ -63,4 +65,9 @@ export function __resetBiometricStub(): void {
   enrolled = false;
   level = SecurityLevel.NONE;
   authError = null;
+  authenticateCallCount = 0;
+}
+
+export function __getAuthenticateCallCount(): number {
+  return authenticateCallCount;
 }

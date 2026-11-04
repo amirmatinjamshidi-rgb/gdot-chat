@@ -1,5 +1,5 @@
 import { type Href, useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -20,6 +20,9 @@ import type { LockMode } from "@/lib/db/kek-manager";
 import { useAppLock } from "@/lib/providers/app-lock-provider";
 import { useAppServices } from "@/lib/services/app-services-context";
 
+/** Survives React Strict Mode remounts; keyed by lockEpoch. */
+const handledAutoUnlockEpochs = new Set<number>();
+
 function yieldToUi(): Promise<void> {
   return new Promise((resolve) => {
     requestAnimationFrame(() => {
@@ -31,10 +34,11 @@ function yieldToUi(): Promise<void> {
 export default function LockScreen() {
   const router = useRouter();
   const { kekManager } = useAppServices();
-  const { unlock, isUnlocked, dbReady } = useAppLock();
+  const { unlock, isUnlocked, dbReady, lockEpoch } = useAppLock();
   const [busy, setBusy] = useState(false);
   const [lockMode, setLockMode] = useState<LockMode | null>(null);
   const [pin, setPin] = useState("");
+  const unlockInFlightRef = useRef(false);
 
   useEffect(() => {
     if (isUnlocked && dbReady) {
@@ -42,28 +46,50 @@ export default function LockScreen() {
     }
   }, [isUnlocked, dbReady, router]);
 
+  const tryUnlock = useCallback(
+    async (appPin?: string) => {
+      if (unlockInFlightRef.current) return;
+      unlockInFlightRef.current = true;
+      setBusy(true);
+      try {
+        await yieldToUi();
+        const result = await unlock(appPin);
+        if (result.ok) {
+          router.replace("/(tabs)/chats" as Href);
+          return;
+        }
+        if (result.code === "USER_CANCEL") return;
+        showUnlockAlert(result.code);
+      } finally {
+        unlockInFlightRef.current = false;
+        setBusy(false);
+      }
+    },
+    [unlock, router],
+  );
+
   useEffect(() => {
+    let cancelled = false;
     void (async () => {
       const mode = await kekManager.getLockMode();
+      if (cancelled) return;
       setLockMode(mode);
-      if (mode !== "pin") {
+      if (handledAutoUnlockEpochs.has(lockEpoch)) return;
+      // Warm session after login/register: passphrase still cached (lock clears it
+      // synchronously). Do not key off db.isOpen() — close() is async and races.
+      if (kekManager.hasCachedPassphrase()) {
+        handledAutoUnlockEpochs.add(lockEpoch);
         void tryUnlock();
+        return;
       }
+      if (mode === "pin") return;
+      handledAutoUnlockEpochs.add(lockEpoch);
+      void tryUnlock();
     })();
-  }, []);
-
-  const tryUnlock = async (appPin?: string) => {
-    setBusy(true);
-    await yieldToUi();
-    const result = await unlock(appPin);
-    setBusy(false);
-    if (result.ok) {
-      router.replace("/(tabs)/chats" as Href);
-      return;
-    }
-    if (result.code === "USER_CANCEL") return;
-    showUnlockAlert(result.code);
-  };
+    return () => {
+      cancelled = true;
+    };
+  }, [kekManager, lockEpoch, tryUnlock]);
 
   const onPinUnlock = () => {
     if (pin.length < APP_PIN_MIN_LENGTH) {
