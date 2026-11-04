@@ -173,3 +173,37 @@ describe("LockScreen biometric auto-unlock", () => {
     });
   });
 });
+
+describe("LockScreen biometric-first (no PIN / no scrypt UI)", () => {
+  beforeEach(() => {
+    mockUnlock.mockReset();
+    mockLockEpoch = 7;
+    mockUnlock.mockResolvedValue({ ok: true });
+  });
+
+  it("shows biometric unlock CTA and never renders PIN field", async () => {
+    const services = mockAppServices({
+      kekManager: {
+        hasKek: jest.fn(async () => true),
+        getLockMode: jest.fn(async () => "biometric" as const),
+        getPassphraseForDb: jest.fn(async () => "pass"),
+        clearCachedPassphrase: jest.fn(),
+        hasCachedPassphrase: jest.fn(() => false),
+        createKekAfterBiometric: jest.fn(async () => undefined),
+        createKekWithPin: jest.fn(async () => undefined),
+        wipeKek: jest.fn(async () => undefined),
+      } as never,
+    });
+
+    renderWithServices(<LockScreen />, services);
+    await waitFor(() => {
+      expect(screen.getByTestId("biometric-unlock-button")).toBeTruthy();
+      expect(screen.getByText(/Unlock with biometrics/i)).toBeTruthy();
+    });
+    expect(screen.queryByPlaceholderText(/App PIN/i)).toBeNull();
+    // Auto-unlock path uses SecureStore biometric — unlock(undefined), never a PIN.
+    await waitFor(() => {
+      expect(mockUnlock).toHaveBeenCalledWith(undefined);
+    });
+  });
+});

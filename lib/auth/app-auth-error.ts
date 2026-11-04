@@ -8,6 +8,7 @@ export type AppAuthErrorCode =
   | "LOCKOUT"
   | "AUTH_FAILED"
   | "KEK_MISSING"
+  | "NATIVE_SCRYPT_UNAVAILABLE"
   | "UNKNOWN";
 
 const MESSAGES: Record<AppAuthErrorCode, string> = {
@@ -27,6 +28,8 @@ const MESSAGES: Record<AppAuthErrorCode, string> = {
   AUTH_FAILED: "Authentication failed. Try again with fingerprint or device PIN.",
   KEK_MISSING:
     "Encrypted database key is missing. Sign out and register again on this device.",
+  NATIVE_SCRYPT_UNAVAILABLE:
+    "Secure PIN unlock needs the native crypto module. Reinstall the app or update to the latest build, then try again.",
   UNKNOWN: "Could not authenticate. Try again.",
 };
 

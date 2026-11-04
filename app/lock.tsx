@@ -149,17 +149,19 @@ export default function LockScreen() {
     <SafeAreaView style={styles.container}>
       <ThemedText type="title">Locked</ThemedText>
       <ThemedText style={styles.sub}>
-        Authenticate to open your encrypted database.
+        Use your fingerprint (or other Strong biometric) to open your encrypted
+        database. PIN unlock is only for devices without Strong biometrics.
       </ThemedText>
       <ScalePressable
         style={styles.button}
         disabled={busy}
+        testID="biometric-unlock-button"
         onPress={() => void tryUnlock()}
       >
         {busy ? (
           <ActivityIndicator color="#fff" />
         ) : (
-          <ThemedText style={styles.buttonText}>Unlock</ThemedText>
+          <ThemedText style={styles.buttonText}>Unlock with biometrics</ThemedText>
         )}
       </ScalePressable>
     </SafeAreaView>
@@ -174,7 +176,9 @@ function showUnlockAlert(code: AppAuthErrorCode) {
         ? "Biometrics not set up"
         : code === "PIN_REQUIRED" || code === "PIN_INVALID"
           ? "App PIN required"
-          : "Unlock failed";
+          : code === "NATIVE_SCRYPT_UNAVAILABLE"
+            ? "Native crypto unavailable"
+            : "Unlock failed";
   Alert.alert(title, messageForAppAuthCode(code));
 }
 

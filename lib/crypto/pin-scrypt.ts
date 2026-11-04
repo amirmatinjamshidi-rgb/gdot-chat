@@ -1,4 +1,8 @@
 import { scrypt as nobleScrypt } from "@noble/hashes/scrypt.js";
+import { Platform } from "react-native";
+import { scrypt as quickCryptoScrypt } from "react-native-quick-crypto";
+
+import { AppAuthError } from "@/lib/auth/app-auth-error";
 
 export type PinScryptParams = {
   N: number;
@@ -26,10 +30,32 @@ export function setPinScryptDeriveForTests(fn: PinScryptDeriveFn | null): void {
   deriveOverride = fn;
 }
 
+/** True on iOS/Android app builds. Web and Node/vitest stubs may differ. */
+export function isNativePinScryptPlatform(
+  os: string = Platform.OS,
+): boolean {
+  return os === "ios" || os === "android";
+}
+
+type QuickScryptFn = (
+  password: Uint8Array,
+  salt: Uint8Array,
+  keylen: number,
+  options: {
+    N: number;
+    r: number;
+    p: number;
+    maxmem: number;
+  },
+  callback: (err: Error | null, key?: Uint8Array) => void,
+) => void;
+
 /**
  * Derive a PIN wrap key with scrypt.
  * Prefers react-native-quick-crypto (native OpenSSL, off JS thread).
- * Falls back to @noble/hashes for Node/vitest when native is unavailable.
+ * On native (ios/android): native failure is a hard error — never falls back
+ * to @noble/hashes (blocks UI and is weaker). Noble is allowed only on web
+ * (and via setPinScryptDeriveForTests in unit tests).
  */
 export async function derivePinScryptKey(
   password: Uint8Array,
@@ -40,6 +66,7 @@ export async function derivePinScryptKey(
     return deriveOverride(password, salt, params);
   }
 
+  const native = isNativePinScryptPlatform();
   const t0 = Date.now();
   try {
     const key = await deriveWithQuickCrypto(password, salt, params);
@@ -50,9 +77,21 @@ export async function derivePinScryptKey(
     }
     return key;
   } catch (err) {
+    if (native) {
+      if (typeof __DEV__ !== "undefined" && __DEV__) {
+        console.warn(
+          `[pin-scrypt] native failed (no noble fallback on ${Platform.OS}):`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+      throw new AppAuthError(
+        "NATIVE_SCRYPT_UNAVAILABLE",
+        err instanceof Error ? err.message : undefined,
+      );
+    }
     if (typeof __DEV__ !== "undefined" && __DEV__) {
       console.warn(
-        `[pin-scrypt] native failed, falling back to noble:`,
+        `[pin-scrypt] native unavailable on ${Platform.OS}, using noble:`,
         err instanceof Error ? err.message : err,
       );
     }
@@ -76,22 +115,10 @@ async function deriveWithQuickCrypto(
   salt: Uint8Array,
   params: PinScryptParams,
 ): Promise<Uint8Array> {
-  // Lazy require so vitest/Node can load pin-kek without linking Nitro.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { scrypt } = require("react-native-quick-crypto") as {
-    scrypt: (
-      password: Uint8Array,
-      salt: Uint8Array,
-      keylen: number,
-      options: {
-        N: number;
-        r: number;
-        p: number;
-        maxmem: number;
-      },
-      callback: (err: Error | null, key?: Uint8Array) => void,
-    ) => void;
-  };
+  const scrypt = quickCryptoScrypt as QuickScryptFn | undefined;
+  if (typeof scrypt !== "function") {
+    throw new Error("react-native-quick-crypto scrypt is unavailable");
+  }
 
   return new Promise<Uint8Array>((resolve, reject) => {
     scrypt(

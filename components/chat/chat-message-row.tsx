@@ -27,9 +27,9 @@ const VIDEO_BUBBLE_PLAYING_MIN_HEIGHT = Math.max(
 export type ChatMessageRowProps = {
   item: Message;
   currentUserId: string;
-  activePlaybackId: string | null;
+  /** Whether this row's media is the active playback target. */
+  isActive: boolean;
   highlightEmoji?: string | null;
-  pickerMessageId?: string | null;
   onLongPress: (messageId: string, layout: { x: number; y: number }) => void;
   onReactionPress: (messageId: string, emoji: string) => void;
   onActivatePlayback: (messageId: string) => void;
@@ -41,12 +41,11 @@ export type ChatMessageRowProps = {
   header?: React.ReactNode;
 };
 
-export function ChatMessageRow({
+function ChatMessageRowImpl({
   item,
   currentUserId,
-  activePlaybackId,
+  isActive,
   highlightEmoji = null,
-  pickerMessageId = null,
   onLongPress,
   onReactionPress,
   onActivatePlayback,
@@ -106,9 +105,7 @@ export function ChatMessageRow({
           ]}
           reactions={item.reactions ?? []}
           myId={currentUserId}
-          highlightEmoji={
-            pickerMessageId === item.id ? highlightEmoji : null
-          }
+          highlightEmoji={highlightEmoji}
           onLongPress={onLongPress}
           onReactionPress={onReactionPress}
         />
@@ -139,7 +136,7 @@ export function ChatMessageRow({
             seed={item.id}
             durationMs={item.durationMs}
             isMine={item.isMine ?? item.sender === "me"}
-            isActive={activePlaybackId === item.id}
+            isActive={isActive}
             onActivate={() => onActivatePlayback(item.id)}
             onDeactivate={() => onDeactivatePlayback(item.id)}
           />
@@ -148,14 +145,14 @@ export function ChatMessageRow({
           <View
             style={[
               styles.videoBubbleWrap,
-              activePlaybackId === item.id && styles.videoBubbleWrapPlaying,
+              isActive && styles.videoBubbleWrapPlaying,
             ]}
           >
             <VideoMessageBubble
               uri={item.mediaUri}
               isMine={item.sender === "me"}
               durationMs={item.durationMs}
-              isActive={activePlaybackId === item.id}
+              isActive={isActive}
               onActivate={() => onActivatePlayback(item.id)}
               onDeactivate={() => onDeactivatePlayback(item.id)}
             />
@@ -216,6 +213,9 @@ export function ChatMessageRow({
   );
 }
 
+
+export const ChatMessageRow = React.memo(ChatMessageRowImpl);
+ChatMessageRow.displayName = "ChatMessageRow";
 
 const styles = StyleSheet.create({
   myVideoBubble: {

@@ -148,6 +148,16 @@ jest.mock("@react-navigation/native", () => {
   };
 });
 
+jest.mock("@shopify/flash-list", () => {
+  const React = require("react");
+  const { FlatList } = require("react-native");
+  return {
+    FlashList: React.forwardRef((props: object, ref: unknown) =>
+      React.createElement(FlatList, { ...props, ref }),
+    ),
+  };
+});
+
 jest.mock("react-native-reanimated", () => {
   const Reanimated = require("react-native-reanimated/mock");
   Reanimated.default.call = () => {};

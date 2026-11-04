@@ -8,8 +8,9 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import {
-  FlatList,
+  ActivityIndicator,
   KeyboardAvoidingView,
   LayoutChangeEvent,
   PanResponder,
@@ -133,7 +134,7 @@ export default function ChatRoomScreen() {
   const [dragY, setDragY] = useState(0);
   const [recordHudTick, setRecordHudTick] = useState(0);
   const [inputFocused, setInputFocused] = useState(false);
-  const listRef = useRef<FlatList>(null);
+  const listRef = useRef<FlashListRef<import("@/stores/messages-store").Message>>(null);
   const inputRef = useRef<TextInput>(null);
   const holdRecordControlsRef = useRef<HoldRecordControlsHandle>(null);
   const slideCancelFabX = useSharedValue(0);
@@ -148,6 +149,9 @@ export default function ChatRoomScreen() {
     messages: localMessages,
     attachments,
     reload: reloadMessages,
+    loadOlder,
+    loadingOlder,
+    hasMore,
   } = useConversationMessages(chatId);
   const { reactionsByMessageId, sendReaction, currentUserId } = useReactions({
     conversationId: chatId,
@@ -235,6 +239,31 @@ export default function ChatRoomScreen() {
     },
     [messages, peerDeviceId, sendReaction],
   );
+
+  const onActivatePlayback = useCallback(
+    (mid: string) => setActivePlayback(mid),
+    [setActivePlayback],
+  );
+  const onDeactivatePlayback = useCallback((_mid: string) => {
+    setActivePlayback(null);
+  }, [setActivePlayback]);
+  const onDownloadMedia = useCallback(
+    (attachmentId: string) => {
+      void mediaTransfer
+        .downloadAttachment(attachmentId)
+        .then(() => reloadMessages())
+        .catch((e: unknown) => {
+          setComposerError(
+            e instanceof Error ? e.message : "Download failed.",
+          );
+        });
+    },
+    [mediaTransfer, reloadMessages],
+  );
+  const onEndReachedOlder = useCallback(() => {
+    if (!hasMore || loadingOlder) return;
+    void loadOlder();
+  }, [hasMore, loadingOlder, loadOlder]);
 
   const swipeBackGesture = useSwipeBackGesture(!recordingLive);
 
@@ -836,41 +865,39 @@ export default function ChatRoomScreen() {
                 </View>
               ) : null}
 
-              <FlatList
+              <FlashList
                 ref={listRef}
+                testID="chat-message-list"
                 data={messages}
                 keyExtractor={(item) => item.id}
                 contentContainerStyle={styles.messageList}
                 keyboardShouldPersistTaps="handled"
-                windowSize={9}
-                maxToRenderPerBatch={12}
-                initialNumToRender={14}
-                removeClippedSubviews={Platform.OS === "android"}
+                maintainVisibleContentPosition={{
+                  startRenderingFromBottom: true,
+                  autoscrollToBottomThreshold: 40,
+                  animateAutoScrollToBottom: true,
+                }}
+                drawDistance={280}
+                onStartReached={onEndReachedOlder}
+                onStartReachedThreshold={0.4}
+                ListHeaderComponent={
+                  loadingOlder ? (
+                    <ActivityIndicator style={{ marginVertical: 12 }} />
+                  ) : null
+                }
                 renderItem={({ item }) => (
                   <ChatMessageRow
                     item={item}
                     currentUserId={currentUserId}
-                    activePlaybackId={activePlaybackId}
-                    highlightEmoji={highlightEmoji}
-                    pickerMessageId={pickerMessageId}
+                    isActive={activePlaybackId === item.id}
+                    highlightEmoji={
+                      pickerMessageId === item.id ? highlightEmoji : null
+                    }
                     onLongPress={handleMessageLongPress}
                     onReactionPress={handleReactionPress}
-                    onActivatePlayback={(mid) => setActivePlayback(mid)}
-                    onDeactivatePlayback={(mid) => {
-                      if (activePlaybackId === mid) setActivePlayback(null);
-                    }}
-                    onDownloadMedia={(attachmentId) => {
-                      void mediaTransfer
-                        .downloadAttachment(attachmentId)
-                        .then(() => reloadMessages())
-                        .catch((e: unknown) => {
-                          setComposerError(
-                            e instanceof Error
-                              ? e.message
-                              : "Download failed.",
-                          );
-                        });
-                    }}
+                    onActivatePlayback={onActivatePlayback}
+                    onDeactivatePlayback={onDeactivatePlayback}
+                    onDownloadMedia={onDownloadMedia}
                   />
                 )}
               />

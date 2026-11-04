@@ -22,7 +22,7 @@ describe("ChatMessageRow", () => {
           durationMs: 1200,
         }}
         currentUserId={randomId("u")}
-        activePlaybackId={null}
+        isActive={false}
         onLongPress={jest.fn()}
         onReactionPress={jest.fn()}
         onActivatePlayback={jest.fn()}
@@ -48,7 +48,7 @@ describe("ChatMessageRow", () => {
           isMine: true,
         }}
         currentUserId={randomId("u")}
-        activePlaybackId={null}
+        isActive={false}
         onLongPress={jest.fn()}
         onReactionPress={jest.fn()}
         onActivatePlayback={jest.fn()}

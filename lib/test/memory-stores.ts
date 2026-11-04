@@ -163,7 +163,8 @@ export class MemoryMessageStore implements IMessageStore {
           (before == null || m.createdAt < before),
       )
       .sort((a, b) => b.createdAt - a.createdAt)
-      .slice(0, limit);
+      .slice(0, limit)
+      .reverse();
   }
 
   async updateStatus(id: string, status: MessageStatus): Promise<void> {

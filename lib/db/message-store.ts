@@ -1,8 +1,13 @@
+import { MESSAGE_FULL_SELECT, MESSAGE_LIST_SELECT } from "./message-list-columns";
 import type { IDatabase } from "./database-types";
 import type { LocalMessage, MessageStatus } from "./types";
 
 export interface IMessageStore {
   insert(message: LocalMessage): Promise<void>;
+  /**
+   * Oldest-first page for a conversation (newest at the end).
+   * `before` is an exclusive createdAt cursor (load older than this).
+   */
   listByConversation(
     conversationId: string,
     limit: number,
@@ -23,8 +28,8 @@ type MessageRow = {
   direction: string;
   kind: string | null;
   plaintext: string;
-  ciphertext: Uint8Array | null;
-  message_type: number | null;
+  ciphertext?: Uint8Array | null;
+  message_type?: number | null;
   status: string;
   sender_device_id: string;
   sender_user_id: string | null;
@@ -91,15 +96,18 @@ export class MessageStore implements IMessageStore {
   ): Promise<LocalMessage[]> {
     const rows = before
       ? await this.db.getAll<MessageRow>(
-          `SELECT * FROM messages WHERE conversation_id = ? AND created_at < ?
+          `SELECT ${MESSAGE_LIST_SELECT} FROM messages
+           WHERE conversation_id = ? AND created_at < ?
            ORDER BY created_at DESC LIMIT ?`,
           [conversationId, before, limit],
         )
       : await this.db.getAll<MessageRow>(
-          `SELECT * FROM messages WHERE conversation_id = ?
+          `SELECT ${MESSAGE_LIST_SELECT} FROM messages
+           WHERE conversation_id = ?
            ORDER BY created_at DESC LIMIT ?`,
           [conversationId, limit],
         );
+    // SQL is DESC (newest first); reverse to oldest-first for bottom-anchored FlashList.
     return rows.map(mapRow).reverse();
   }
 
@@ -129,7 +137,7 @@ export class MessageStore implements IMessageStore {
 
   async getById(id: string): Promise<LocalMessage | null> {
     const row = await this.db.getFirst<MessageRow>(
-      `SELECT * FROM messages WHERE id = ?`,
+      `SELECT ${MESSAGE_FULL_SELECT} FROM messages WHERE id = ?`,
       [id],
     );
     return row ? mapRow(row) : null;
@@ -137,7 +145,7 @@ export class MessageStore implements IMessageStore {
 
   async getByClientId(clientId: string): Promise<LocalMessage | null> {
     const row = await this.db.getFirst<MessageRow>(
-      `SELECT * FROM messages WHERE client_id = ?`,
+      `SELECT ${MESSAGE_FULL_SELECT} FROM messages WHERE client_id = ?`,
       [clientId],
     );
     return row ? mapRow(row) : null;
@@ -147,7 +155,7 @@ export class MessageStore implements IMessageStore {
     serverEnvelopeId: string,
   ): Promise<LocalMessage | null> {
     const row = await this.db.getFirst<MessageRow>(
-      `SELECT * FROM messages WHERE server_envelope_id = ?`,
+      `SELECT ${MESSAGE_FULL_SELECT} FROM messages WHERE server_envelope_id = ?`,
       [serverEnvelopeId],
     );
     return row ? mapRow(row) : null;
