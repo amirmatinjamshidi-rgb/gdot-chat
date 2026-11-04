@@ -196,6 +196,18 @@ export class SyncService {
               );
               const envelopeId = result.envelopeIds[0] ?? clientMessageId;
               await this.messageStore.updateServerEnvelopeId(localMessageId, envelopeId);
+              await this.outboxStore.upsertPending({
+                clientMessageId,
+                localMessageId,
+                conversationId: conversation.id,
+                peerUserId: "group",
+                peerDeviceId: "group",
+                plaintext,
+                payloadKind: "text",
+                groupId: conversation.id,
+                createdAt: this.clock(),
+                expiresAt: this.clock() + OUTBOX_TTL_MS,
+              });
               return;
             }
             const result = await this.encryptAndPost(
@@ -406,7 +418,7 @@ export class SyncService {
     // Always try one inbox pull on start (covers poll-only and SignalR race).
     void this.pullPending();
     void this.receiptRetry?.flushDue();
-        void this.sendRetry?.flushDue();
+    void this.sendRetry?.flushDue();
   }
 
   async stop(): Promise<void> {
@@ -762,6 +774,79 @@ export class SyncService {
     return serializeMediaPayload(descriptor);
   }
 
+  /**
+   * Re-encrypt pending group outbox entries with the current sender key
+   * (plaintext stays in SQLCipher; ciphertext is never reused across rotations).
+   */
+  async flushGroupOutbox(): Promise<void> {
+    if (!this.groupSenderKeyService) return;
+    const now = this.clock();
+    await this.outboxStore.purgeExpired(now);
+    if (this.mediaBlobCache) {
+      await this.mediaBlobCache.purgeExpired(now);
+    }
+    const pending = await this.outboxStore.listPendingGroups(now);
+    for (const entry of pending) {
+      if (!entry.groupId) continue;
+      if (entry.resendCount >= OUTBOX_MAX_RESENDS) continue;
+      try {
+        const local = await this.messageStore.getByClientId(entry.clientMessageId);
+        // Text: only auto-resend when the local row failed (sendRetry / explicit flush).
+        // Media: also resend when the server attachment is gone (blob cache rebuild).
+        if (entry.payloadKind !== "media") {
+          if (!local || local.status !== "failed") continue;
+        } else if (local && local.status !== "failed" && this.attachmentExists) {
+          const attId = entry.mediaAttachmentId;
+          if (attId) {
+            try {
+              if (await this.attachmentExists(attId)) continue;
+            } catch {
+              /* treat as missing → resend */
+            }
+          }
+        }
+        const body =
+          entry.payloadKind === "media"
+            ? await this.buildGroupResendPlaintext(entry, now)
+            : entry.plaintext;
+        if (!body) continue;
+        await this.groupSenderKeyService.encryptAndSendGroupPlaintext(
+          entry.groupId,
+          body,
+        );
+        await this.outboxStore.incrementResend(entry.clientMessageId, now);
+        if (local && local.status === "failed") {
+          await this.messageStore.updateStatus(local.id, "sent");
+        }
+      } catch (e) {
+        if (isQuietDbCancel(e)) continue;
+        if (__DEV__) {
+          console.warn(
+            "[SyncService] group outbox resend failed",
+            entry.clientMessageId,
+            e instanceof Error ? e.message : e,
+          );
+        }
+      }
+    }
+  }
+
+  private async buildGroupResendPlaintext(
+    entry: OutboxEntry,
+    now: number,
+  ): Promise<string | null> {
+    const conversation: Conversation = {
+      id: entry.conversationId,
+      peerUserId: entry.peerUserId,
+      peerUsername: `group:${(entry.groupId ?? "x").slice(0, 8)}`,
+      peerDeviceId: "group",
+      lastMessagePreview: "",
+      lastMessageAt: 0,
+      unreadCount: 0,
+    };
+    return this.buildResendPlaintext(conversation, entry, now);
+  }
+
   async sendOutgoing(conversationId: string, text: string): Promise<void> {
     const run = this.sendChain.then(() =>
       this.sendOutgoingInner(conversationId, text),
@@ -915,6 +1000,19 @@ export class SyncService {
       await this.messageStore.updateServerEnvelopeId(id, envelopeId);
       await this.messageStore.updateStatus(id, "sent");
       await this.groupStore?.touchPreview(groupId, text.slice(0, 120), createdAt);
+      await this.outboxStore.upsertPending({
+        clientMessageId: clientId,
+        localMessageId: id,
+        conversationId: groupId,
+        peerUserId: "group",
+        peerDeviceId: "group",
+        plaintext: text,
+        payloadKind: "text",
+        groupId,
+        createdAt,
+        expiresAt: createdAt + OUTBOX_TTL_MS,
+      });
+      await this.outboxStore.trimConversation(groupId, OUTBOX_MAX_PER_CONVERSATION);
     } catch (e) {
       if (isQuietDbCancel(e)) {
         if (this.sendRetry) {

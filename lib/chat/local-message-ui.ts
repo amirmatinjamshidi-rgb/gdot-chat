@@ -19,11 +19,19 @@ export function localMessageToUi(
     kind,
     text: kind === "text" ? m.plaintext : undefined,
     durationMs: attachment?.durationMs,
-    mediaUri:
-      attachment?.localUri &&
-      (m.direction === "outgoing" || attachment.transferState === "available")
-        ? attachment.localUri
-        : undefined,
+    mediaUri: (() => {
+      if (!attachment) return undefined;
+      if (!(m.direction === "outgoing" || attachment.transferState === "available")) {
+        return undefined;
+      }
+      // Prefer ephemeral plaintext playback URI; never hand .genc ciphertext to AV players.
+      if (attachment.playbackUri) return attachment.playbackUri;
+      if (attachment.atRestEncrypted) return undefined;
+      const uri = attachment.localUri;
+      if (!uri) return undefined;
+      if (uri.endsWith(".genc")) return undefined;
+      return uri;
+    })(),
     isMine,
     reactions,
     serverEnvelopeId: m.serverEnvelopeId,

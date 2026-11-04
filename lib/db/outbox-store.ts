@@ -13,6 +13,8 @@ export type OutboxEntry = {
   payloadKind: OutboxPayloadKind;
   mediaAttachmentId?: string;
   mediaBlobCached: boolean;
+  /** When set, this outbox row is a group (Sender Keys) send. */
+  groupId?: string;
   createdAt: number;
   expiresAt: number;
   resendCount: number;
@@ -28,6 +30,7 @@ export type OutboxUpsertInput = Omit<
   payloadKind?: OutboxPayloadKind;
   mediaBlobCached?: boolean;
   mediaAttachmentId?: string;
+  groupId?: string;
 };
 
 export interface IOutboxStore {
@@ -35,6 +38,7 @@ export interface IOutboxStore {
   markReceipted(clientMessageId: string, at: number): Promise<boolean>;
   listPendingForPeerDevice(peerDeviceId: string, now: number): Promise<OutboxEntry[]>;
   listPendingForConversation(conversationId: string, now: number): Promise<OutboxEntry[]>;
+  listPendingGroups(now: number): Promise<OutboxEntry[]>;
   incrementResend(clientMessageId: string, at: number): Promise<number>;
   updateMediaAttachment(
     clientMessageId: string,
@@ -62,6 +66,7 @@ type OutboxRow = {
   payload_kind?: string | null;
   media_attachment_id?: string | null;
   media_blob_cached?: number | null;
+  group_id?: string | null;
 };
 
 function mapRow(row: OutboxRow): OutboxEntry {
@@ -76,6 +81,7 @@ function mapRow(row: OutboxRow): OutboxEntry {
     payloadKind: kind,
     mediaAttachmentId: row.media_attachment_id ?? undefined,
     mediaBlobCached: (row.media_blob_cached ?? 0) === 1,
+    groupId: row.group_id ?? undefined,
     createdAt: row.created_at,
     expiresAt: row.expires_at,
     resendCount: row.resend_count,
@@ -94,15 +100,16 @@ export class OutboxStore implements IOutboxStore {
       `INSERT INTO message_outbox (
          client_message_id, local_message_id, conversation_id, peer_user_id, peer_device_id,
          plaintext, created_at, expires_at, resend_count, last_resent_at, receipted_at,
-         payload_kind, media_attachment_id, media_blob_cached
-       ) VALUES (?,?,?,?,?,?,?,?,?,?,NULL,?,?,?)
+         payload_kind, media_attachment_id, media_blob_cached, group_id
+       ) VALUES (?,?,?,?,?,?,?,?,?,?,NULL,?,?,?,?)
        ON CONFLICT(client_message_id) DO UPDATE SET
          plaintext = excluded.plaintext,
          expires_at = excluded.expires_at,
          local_message_id = excluded.local_message_id,
          payload_kind = excluded.payload_kind,
          media_attachment_id = excluded.media_attachment_id,
-         media_blob_cached = excluded.media_blob_cached
+         media_blob_cached = excluded.media_blob_cached,
+         group_id = excluded.group_id
        WHERE message_outbox.receipted_at IS NULL`,
       [
         entry.clientMessageId,
@@ -118,6 +125,7 @@ export class OutboxStore implements IOutboxStore {
         kind,
         entry.mediaAttachmentId ?? null,
         blobCached,
+        entry.groupId ?? null,
       ],
     );
   }
@@ -153,6 +161,16 @@ export class OutboxStore implements IOutboxStore {
        WHERE conversation_id = ? AND receipted_at IS NULL AND expires_at > ?
        ORDER BY created_at ASC`,
       [conversationId, now],
+    );
+    return rows.map(mapRow);
+  }
+
+  async listPendingGroups(now: number): Promise<OutboxEntry[]> {
+    const rows = await this.db.getAll<OutboxRow>(
+      `SELECT * FROM message_outbox
+       WHERE group_id IS NOT NULL AND receipted_at IS NULL AND expires_at > ?
+       ORDER BY created_at ASC`,
+      [now],
     );
     return rows.map(mapRow);
   }
@@ -239,6 +257,7 @@ export class MemoryOutboxStore implements IOutboxStore {
       payloadKind: entry.payloadKind ?? "text",
       mediaBlobCached: entry.mediaBlobCached ?? false,
       mediaAttachmentId: entry.mediaAttachmentId,
+      groupId: entry.groupId ?? existing?.groupId,
       resendCount: entry.resendCount ?? existing?.resendCount ?? 0,
       lastResentAt: existing?.lastResentAt,
       receiptedAt: undefined,
@@ -274,6 +293,17 @@ export class MemoryOutboxStore implements IOutboxStore {
       .filter(
         (r) =>
           r.conversationId === conversationId &&
+          r.receiptedAt == null &&
+          r.expiresAt > now,
+      )
+      .sort((a, b) => a.createdAt - b.createdAt);
+  }
+
+  async listPendingGroups(now: number): Promise<OutboxEntry[]> {
+    return [...this.rows.values()]
+      .filter(
+        (r) =>
+          r.groupId != null &&
           r.receiptedAt == null &&
           r.expiresAt > now,
       )

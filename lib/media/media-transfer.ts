@@ -25,7 +25,6 @@ import type {
 } from "@/lib/db/types";
 import {
   createOutputFile as defaultCreateOutputFile,
-  extensionForMime,
   openExistingFile as defaultOpenExistingFile,
   type RandomAccessFile,
 } from "@/lib/media/chunk-file";
@@ -38,7 +37,19 @@ import {
   type MediaKind,
   type MediaPayload,
 } from "@/lib/protocol/payload";
+import {
+  cipherChunkByteLength,
+  cipherChunkOffset,
+  cipherFileSize,
+  MEDIA_AT_REST_EXT,
+} from "@/lib/media/media-at-rest";
+import {
+  packCipherChunks,
+  unpackCipherChunks,
+} from "@/lib/media/media-pack";
+import type { MediaPlaybackVault } from "@/lib/media/media-playback-vault";
 import { useMediaStore } from "@/stores/media-store";
+export { packCipherChunks, unpackCipherChunks } from "@/lib/media/media-pack";
 
 export type SendMediaInput = {
   conversationId: string;
@@ -65,6 +76,8 @@ export type MediaTransferExtras = {
   outboxStore?: IOutboxStore;
   mediaBlobCache?: IMediaBlobCache;
   clock?: Clock;
+  /** Optional vault for persisting at-rest ciphertext / playback materialization. */
+  mediaVault?: MediaPlaybackVault;
   /** Group fan-out for media Signal payload (Sender Keys). */
   sendGroupPlaintext?: (
     groupId: string,
@@ -76,6 +89,7 @@ export class MediaTransferService {
   private readonly files: MediaFileAccess;
   private readonly outboxStore: IOutboxStore | null;
   private readonly mediaBlobCache: IMediaBlobCache | null;
+  private readonly mediaVault: MediaPlaybackVault | null;
   private readonly clock: Clock;
   private sendGroupPlaintext:
     | ((groupId: string, plaintext: string) => Promise<{ envelopeIds: string[] }>)
@@ -100,6 +114,7 @@ export class MediaTransferService {
     };
     this.outboxStore = extras?.outboxStore ?? null;
     this.mediaBlobCache = extras?.mediaBlobCache ?? null;
+    this.mediaVault = extras?.mediaVault ?? null;
     this.clock = extras?.clock ?? systemClock;
     this.sendGroupPlaintext = extras?.sendGroupPlaintext ?? null;
   }
@@ -197,6 +212,8 @@ export class MediaTransferService {
         noncePrefix,
         sourceUri: input.uri,
         localUri: input.uri,
+        groupId: input.groupId,
+        atRestEncrypted: false,
         transferState: "uploading",
         uploadedChunks: [],
         downloadedChunks: [],
@@ -315,7 +332,9 @@ export class MediaTransferService {
   async downloadAttachment(attachmentId: string): Promise<void> {
     const row = await this.attachmentStore.get(attachmentId);
     if (!row) throw new Error("Attachment not found");
-    if (row.transferState === "available" && row.localUri) return;
+    if (row.transferState === "available" && row.localUri && row.atRestEncrypted) {
+      return;
+    }
 
     const status = await this.attachmentsApi.getStatus(attachmentId);
     if (
@@ -334,19 +353,27 @@ export class MediaTransferService {
     });
 
     const downloaded = new Set(row.downloadedChunks);
-    const dest = row.localUri
-      ? { file: await this.files.openExistingFile(row.localUri), uri: row.localUri }
-      : await this.files.createOutputFile(
-          attachmentId,
-          extensionForMime(row.mimeType),
-          row.plainSizeBytes,
-        );
+    const cipherSize = cipherFileSize(
+      row.plainSizeBytes,
+      row.chunkSize,
+      row.chunkCount,
+    );
+    // Durable file stores wire ciphertext (not plaintext) under Documents/gdot-media.
+    const dest =
+      row.localUri && row.atRestEncrypted
+        ? { file: await this.files.openExistingFile(row.localUri), uri: row.localUri }
+        : await this.files.createOutputFile(
+            attachmentId,
+            MEDIA_AT_REST_EXT,
+            cipherSize,
+          );
 
     try {
       for (let i = 0; i < row.chunkCount; i++) {
         if (downloaded.has(i)) continue;
         const ciphertext = await this.attachmentsApi.getChunk(attachmentId, i);
-        const plain = decryptChunk({
+        // Authenticate chunk before writing durable ciphertext.
+        decryptChunk({
           key: row.mediaKey,
           noncePrefix: row.noncePrefix,
           attachmentId,
@@ -355,7 +382,22 @@ export class MediaTransferService {
           plaintextSize: row.plainSizeBytes,
           ciphertext,
         });
-        await dest.file.write(i * row.chunkSize, plain);
+        const off = cipherChunkOffset(
+          row.plainSizeBytes,
+          row.chunkSize,
+          row.chunkCount,
+          i,
+        );
+        const expectLen = cipherChunkByteLength(
+          row.plainSizeBytes,
+          row.chunkSize,
+          row.chunkCount,
+          i,
+        );
+        if (ciphertext.byteLength !== expectLen) {
+          throw new Error("Unexpected ciphertext chunk length");
+        }
+        await dest.file.write(off, ciphertext);
         downloaded.add(i);
         await this.attachmentStore.updateTransfer(attachmentId, {
           downloadedChunks: [...downloaded].sort((a, b) => a - b),
@@ -364,11 +406,17 @@ export class MediaTransferService {
       }
       await dest.file.close();
       await this.attachmentsApi.downloadComplete(attachmentId);
-      await this.attachmentStore.updateTransfer(attachmentId, {
-        transferState: "available",
-        localUri: dest.uri,
-        downloadedChunks: [...downloaded].sort((a, b) => a - b),
-      });
+      const current = await this.attachmentStore.get(attachmentId);
+      if (current) {
+        await this.attachmentStore.upsert({
+          ...current,
+          transferState: "available",
+          localUri: dest.uri,
+          atRestEncrypted: true,
+          downloadedChunks: [...downloaded].sort((a, b) => a - b),
+          updatedAt: Date.now(),
+        });
+      }
       await this.messageStore.updateStatus(row.messageId, "available");
     } catch (e) {
       await this.attachmentStore.updateTransfer(attachmentId, {
@@ -400,16 +448,28 @@ export class MediaTransferService {
 
   private async resumeOutgoing(row: LocalAttachment): Promise<void> {
     if (!row.sourceUri) return;
-    const conversation = await this.conversationStore.getById(
-      (await this.messageStore.getById(row.messageId))?.conversationId ?? "",
-    );
+    const message = await this.messageStore.getById(row.messageId);
+    const conversationId = message?.conversationId ?? "";
+    let conversation = await this.conversationStore.getById(conversationId);
+    const groupId = row.groupId;
+    if (!conversation && groupId) {
+      const localId = await this.identityStore.getLocalIdentity();
+      conversation = {
+        id: groupId,
+        peerUserId: localId?.userId ?? "group",
+        peerUsername: `group:${groupId.slice(0, 8)}`,
+        peerDeviceId: localId?.deviceId ?? "group",
+        lastMessagePreview: "",
+        lastMessageAt: 0,
+        unreadCount: 0,
+      };
+    }
     if (!conversation) return;
     const source = await this.files.openExistingFile(row.sourceUri);
     try {
-      await this.uploadRemainingChunks(row, source);
-      const message = await this.messageStore.getById(row.messageId);
+      // Must keep packed ciphertext so media_blob_cache can reupload after resume.
+      const encryptedBlob = await this.uploadRemainingChunks(row, source);
       if (message && !message.serverEnvelopeId) {
-        const encryptedBlob = new Uint8Array(0);
         await this.finishOutgoingSignal(
           conversation,
           row,
@@ -417,6 +477,13 @@ export class MediaTransferService {
           message.clientId,
           message.createdAt,
           encryptedBlob,
+          groupId,
+        );
+      } else if (encryptedBlob.byteLength > 0 && this.mediaBlobCache && message) {
+        await this.mediaBlobCache.put(
+          message.clientId,
+          encryptedBlob,
+          this.clock(),
         );
       }
     } finally {
@@ -502,10 +569,33 @@ export class MediaTransferService {
     }
     await this.messageStore.updateServerEnvelopeId(messageId, envelopeId);
     await this.messageStore.updateStatus(messageId, "sent");
-    await this.attachmentStore.updateTransfer(row.attachmentId, {
-      transferState: "available",
-      localUri: row.localUri ?? row.sourceUri,
-    });
+
+    let durableUri = row.localUri ?? row.sourceUri;
+    let atRest = false;
+    if (encryptedBlob.byteLength > 0 && this.mediaVault) {
+      durableUri = await this.mediaVault.persistPackedCipher(
+        row.attachmentId,
+        encryptedBlob,
+      );
+      atRest = true;
+    }
+
+    const current = await this.attachmentStore.get(row.attachmentId);
+    if (current) {
+      await this.attachmentStore.upsert({
+        ...current,
+        transferState: "available",
+        localUri: durableUri,
+        groupId: groupId ?? current.groupId,
+        atRestEncrypted: atRest || current.atRestEncrypted,
+        updatedAt: Date.now(),
+      });
+    } else {
+      await this.attachmentStore.updateTransfer(row.attachmentId, {
+        transferState: "available",
+        localUri: durableUri,
+      });
+    }
     if (!groupId) {
       await this.conversationStore.upsert({
         ...conversation,
@@ -523,17 +613,18 @@ export class MediaTransferService {
       );
       blobCached = result === "stored";
     }
-    if (this.outboxStore && !groupId) {
+    if (this.outboxStore) {
       await this.outboxStore.upsertPending({
         clientMessageId,
         localMessageId: messageId,
-        conversationId: conversation.id,
-        peerUserId: conversation.peerUserId,
-        peerDeviceId: conversation.peerDeviceId,
+        conversationId: groupId ?? conversation.id,
+        peerUserId: groupId ? "group" : conversation.peerUserId,
+        peerDeviceId: groupId ? "group" : conversation.peerDeviceId,
         plaintext,
         payloadKind: "media",
         mediaAttachmentId: row.attachmentId,
         mediaBlobCached: blobCached,
+        groupId,
         createdAt,
         expiresAt: createdAt + OUTBOX_TTL_MS,
       });
@@ -608,39 +699,3 @@ export class MediaTransferService {
   }
 }
 
-/** Pack length-prefixed cipher chunks for local blob cache. */
-export function packCipherChunks(chunks: Uint8Array[]): Uint8Array {
-  let total = 4;
-  for (const c of chunks) total += 4 + c.byteLength;
-  const out = new Uint8Array(total);
-  const view = new DataView(out.buffer);
-  view.setUint32(0, chunks.length);
-  let o = 4;
-  for (const c of chunks) {
-    view.setUint32(o, c.byteLength);
-    o += 4;
-    out.set(c, o);
-    o += c.byteLength;
-  }
-  return out;
-}
-
-export function unpackCipherChunks(
-  packed: Uint8Array,
-  expectedCount: number,
-): Uint8Array[] {
-  const view = new DataView(packed.buffer, packed.byteOffset, packed.byteLength);
-  const count = view.getUint32(0);
-  if (count !== expectedCount) {
-    throw new Error("Cached media blob chunk count mismatch");
-  }
-  const chunks: Uint8Array[] = [];
-  let o = 4;
-  for (let i = 0; i < count; i++) {
-    const len = view.getUint32(o);
-    o += 4;
-    chunks.push(packed.slice(o, o + len));
-    o += len;
-  }
-  return chunks;
-}

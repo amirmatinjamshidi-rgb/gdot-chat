@@ -40,7 +40,7 @@ const AppLockContext = createContext<AppLockContextValue | null>(null);
 
 const LOCK_ROUTE = "/lock";
 export function AppLockProvider({ children }: { children: React.ReactNode }) {
-  const { appLockStore, kekManager, db, syncService } = useAppServices();
+  const { appLockStore, kekManager, db, syncService, mediaVault } = useAppServices();
   const router = useRouter();
   const pathname = usePathname();
   const [isUnlocked, setIsUnlocked] = useState(false);
@@ -113,6 +113,8 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
       // Clear cache first (sync) so /lock warm-path cannot auto-unlock
       // against the async DB close.
       kekManager.clearCachedPassphrase();
+      // Wipe ephemeral plaintext media playback temps (Documents stay ciphertext-only).
+      void mediaVault.clearOnLock();
       setIsUnlocked(false);
       setDbReady(false);
       setLockEpoch((n) => n + 1);
@@ -127,7 +129,7 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
         closeDb: () => db.close(),
       });
     });
-  }, [appLockStore, kekManager, db, syncService]);
+  }, [appLockStore, kekManager, db, syncService, mediaVault]);
 
   // Stable subscription — pathname/router read via refs so we never flip the listener.
   useEffect(() => {

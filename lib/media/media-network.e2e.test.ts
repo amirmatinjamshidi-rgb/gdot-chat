@@ -161,7 +161,21 @@ describe("media network E2E Alice→relay→Bob", () => {
       messageType: 3,
     });
     await bob.downloadAttachment(parsed.payload.attachmentId);
-    const out = await bobFile!.read(0, plain.length);
+    const row = await bobAttachments.get(parsed.payload.attachmentId);
+    expect(row?.atRestEncrypted).toBe(true);
+    const { decryptFixedSlotCipherToPlaintext } = await import(
+      "@/lib/media/media-at-rest"
+    );
+    const { base64UrlToBytes } = await import("@/lib/crypto/encoding");
+    const out = decryptFixedSlotCipherToPlaintext({
+      key: base64UrlToBytes(parsed.payload.key),
+      noncePrefix: base64UrlToBytes(parsed.payload.noncePrefix),
+      attachmentId: parsed.payload.attachmentId,
+      plainSize: parsed.payload.size,
+      chunkSize: parsed.payload.chunkSize,
+      chunkCount: parsed.payload.chunkCount,
+      fileBytes: bobFile!.bytes(),
+    });
     expect([...out]).toEqual([...plain]);
   });
 });

@@ -25,12 +25,29 @@ async function loadAttachmentsFor(
     get: (id: string) => Promise<LocalAttachment | null>;
   },
   base: Record<string, LocalAttachment> = {},
+  mediaVault?: {
+    ensurePlaybackUri: (row: LocalAttachment) => Promise<string | undefined>;
+  },
 ): Promise<Record<string, LocalAttachment>> {
   const next = { ...base };
   for (const m of list) {
     if (!m.attachmentId || next[m.attachmentId]) continue;
     const att = await attachmentStore.get(m.attachmentId);
-    if (att) next[m.attachmentId] = att;
+    if (!att) continue;
+    if (
+      mediaVault &&
+      att.transferState === "available" &&
+      (att.atRestEncrypted || (att.localUri && att.localUri.endsWith(".genc")))
+    ) {
+      try {
+        const playbackUri = await mediaVault.ensurePlaybackUri(att);
+        next[m.attachmentId] = { ...att, playbackUri, atRestEncrypted: true };
+        continue;
+      } catch {
+        /* playback materialization best-effort */
+      }
+    }
+    next[m.attachmentId] = att;
   }
   return next;
 }
@@ -41,7 +58,7 @@ async function loadAttachmentsFor(
  * Clears in-memory plaintext when the app locks (lockEpoch).
  */
 export function useConversationMessages(conversationId: string | undefined) {
-  const { messageStore, attachmentStore } = useAppServices();
+  const { messageStore, attachmentStore, mediaVault } = useAppServices();
   const { dbReady, lockEpoch } = useAppLock();
   const [messages, setMessages] = useState<LocalMessage[]>([]);
   const [attachments, setAttachments] = useState<
@@ -84,12 +101,13 @@ export function useConversationMessages(conversationId: string | undefined) {
         merged,
         attachmentStore,
         attachmentsRef.current,
+        mediaVault,
       );
       setAttachments(att);
     } finally {
       setLoading(false);
     }
-  }, [conversationId, messageStore, attachmentStore, dbReady, pageSize]);
+  }, [conversationId, messageStore, attachmentStore, mediaVault, dbReady, pageSize]);
 
   const loadOlder = useCallback(async () => {
     if (!conversationId || !dbReady) return;
@@ -117,13 +135,14 @@ export function useConversationMessages(conversationId: string | undefined) {
         older,
         attachmentStore,
         attachmentsRef.current,
+        mediaVault,
       );
       setAttachments(att);
     } finally {
       loadingOlderRef.current = false;
       setLoadingOlder(false);
     }
-  }, [conversationId, dbReady, messageStore, pageSize, attachmentStore]);
+  }, [conversationId, dbReady, messageStore, pageSize, attachmentStore, mediaVault]);
 
   useFocusEffect(
     useCallback(() => {

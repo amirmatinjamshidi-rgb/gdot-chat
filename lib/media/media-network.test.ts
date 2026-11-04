@@ -247,9 +247,26 @@ describe("MediaTransferService network path", () => {
 
     await media.downloadAttachment(attachmentId);
     expect(dest).not.toBeNull();
-    const out = await dest!.read(0, plain.length);
-    expect([...out]).toEqual([...plain]);
+    // Durable file stores wire ciphertext, not plaintext.
+    const storedBytes = dest!.bytes();
+    expect(storedBytes.byteLength).toBeGreaterThan(plain.length);
+    expect([...storedBytes.subarray(0, plain.length)]).not.toEqual([...plain]);
     const row = await attachmentStore.get(attachmentId);
     expect(row?.transferState).toBe("available");
+    expect(row?.atRestEncrypted).toBe(true);
+    // Round-trip decrypt via fixed-slot helper proves integrity.
+    const { decryptFixedSlotCipherToPlaintext } = await import(
+      "@/lib/media/media-at-rest"
+    );
+    const roundtrip = decryptFixedSlotCipherToPlaintext({
+      key,
+      noncePrefix,
+      attachmentId,
+      plainSize: plain.length,
+      chunkSize,
+      chunkCount,
+      fileBytes: storedBytes,
+    });
+    expect([...roundtrip]).toEqual([...plain]);
   });
 });

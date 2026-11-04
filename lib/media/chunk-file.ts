@@ -3,4 +3,11 @@ export {
   MemoryRandomAccessFile,
   extensionForMime,
 } from "./random-access-file";
-export { openExistingFile, createOutputFile, deleteLocalFile } from "./chunk-file.web";
+export {
+  openExistingFile,
+  createOutputFile,
+  createPlainOutputFile,
+  deleteLocalFile,
+  wipeMediaPlaybackTemp,
+  createNativeVaultFileAccess,
+} from "./chunk-file.web";

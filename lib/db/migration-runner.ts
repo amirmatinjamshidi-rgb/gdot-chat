@@ -12,6 +12,7 @@ import { MIGRATION_009_SQL } from "./migrations/009-pending-delivery-receipts";
 import { MIGRATION_010_SQL } from "./migrations/010-pending-outgoing-sends";
 import { MIGRATION_011_SQL } from "./migrations/011-groups-sender-keys";
 import { MIGRATION_012_SQL } from "./migrations/012-group-receipts";
+import { MIGRATION_013_SQL } from "./migrations/013-group-outbox-media-at-rest";
 import { splitStatements } from "./sql-utils";
 
 const MIGRATIONS: { version: number; sql: string }[] = [
@@ -27,6 +28,7 @@ const MIGRATIONS: { version: number; sql: string }[] = [
   { version: 10, sql: MIGRATION_010_SQL },
   { version: 11, sql: MIGRATION_011_SQL },
   { version: 12, sql: MIGRATION_012_SQL },
+  { version: 13, sql: MIGRATION_013_SQL },
 ];
 
 export class MigrationRunner {

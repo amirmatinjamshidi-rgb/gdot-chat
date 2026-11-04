@@ -32,6 +32,8 @@ import { ProfileStore } from "@/lib/db/profile-store";
 import { SessionStore } from "@/lib/db/session-store";
 import { MediaTransferService } from "@/lib/media/media-transfer";
 import { MediaBlobCacheStore } from "@/lib/media/media-blob-cache";
+import { createNativeVaultFileAccess } from "@/lib/media/chunk-file";
+import { MediaPlaybackVault } from "@/lib/media/media-playback-vault";
 import { authStore } from "@/lib/session/auth-store";
 import { appLockStore } from "@/lib/session/app-lock-store";
 import { SyncService } from "@/lib/session/sync-service";
@@ -68,6 +70,7 @@ const outboxStore = new OutboxStore(sqlCipherDatabase);
 const pendingReceiptStore = new PendingReceiptStore(sqlCipherDatabase);
 const pendingOutgoingSendStore = new PendingOutgoingSendStore(sqlCipherDatabase);
 const mediaBlobCache = new MediaBlobCacheStore(sqlCipherDatabase);
+const mediaVault = new MediaPlaybackVault({ files: createNativeVaultFileAccess() });
 const reactionStore = new ReactionStore(sqlCipherDatabase);
 const conversationStore = new ConversationStore(sqlCipherDatabase);
 const attachmentStore = new AttachmentStore(sqlCipherDatabase);
@@ -182,6 +185,7 @@ const mediaTransfer = new MediaTransferService(
   {
     outboxStore,
     mediaBlobCache,
+    mediaVault,
     sendGroupPlaintext: (groupId, plaintext) => {
       if (!groupSenderKeyService) {
         return Promise.reject(new Error("Group crypto not ready"));
@@ -215,6 +219,7 @@ export const appServices = {
   messageStore,
   outboxStore,
   mediaBlobCache,
+  mediaVault,
   reactionStore,
   conversationStore,
   envelopeQuarantineStore,

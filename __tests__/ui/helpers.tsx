@@ -73,6 +73,12 @@ export function mockAppServices(
     mediaTransfer: {
       downloadAttachment: jest.fn(async () => undefined),
     },
+    mediaVault: {
+      clearOnLock: jest.fn(async () => undefined),
+      ensurePlaybackUri: jest.fn(async () => undefined),
+      persistPackedCipher: jest.fn(async () => "memory://x.genc"),
+      getCachedPlaybackUri: jest.fn(() => undefined),
+    },
     messageStore: {
       listByConversation: jest.fn(async () => []),
     },

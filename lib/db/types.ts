@@ -50,6 +50,15 @@ export interface LocalAttachment {
   noncePrefix: Uint8Array;
   localUri?: string;
   sourceUri?: string;
+  /** Set for group-scoped attachments (Sender Keys send path). */
+  groupId?: string;
+  /**
+   * Durable local file is packed wire ciphertext (.genc) under gdot-media.
+   * Plaintext playback lives only in an ephemeral cache wiped on lock.
+   */
+  atRestEncrypted?: boolean;
+  /** Ephemeral plaintext playback URI; never persisted to SQLCipher. */
+  playbackUri?: string;
   transferState: AttachmentTransferState;
   uploadedChunks: number[];
   downloadedChunks: number[];

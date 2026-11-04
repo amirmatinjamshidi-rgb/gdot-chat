@@ -43,6 +43,8 @@ type AttachmentRow = {
   downloaded_chunks: string;
   created_at: number;
   updated_at: number;
+  group_id?: string | null;
+  at_rest_encrypted?: number | null;
 };
 
 function parseIndexes(raw: string): number[] {
@@ -71,6 +73,8 @@ function mapRow(row: AttachmentRow): LocalAttachment {
     noncePrefix: row.nonce_prefix,
     localUri: row.local_uri ?? undefined,
     sourceUri: row.source_uri ?? undefined,
+    groupId: row.group_id ?? undefined,
+    atRestEncrypted: (row.at_rest_encrypted ?? 0) === 1,
     transferState: row.transfer_state as AttachmentTransferState,
     uploadedChunks: parseIndexes(row.uploaded_chunks),
     downloadedChunks: parseIndexes(row.downloaded_chunks),
@@ -87,8 +91,9 @@ export class AttachmentStore implements IAttachmentStore {
       `INSERT OR REPLACE INTO local_attachments (
         attachment_id, message_id, kind, mime_type, plain_size_bytes, duration_ms,
         width, height, chunk_size, chunk_count, media_key, nonce_prefix, local_uri,
-        source_uri, transfer_state, uploaded_chunks, downloaded_chunks, created_at, updated_at
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        source_uri, transfer_state, uploaded_chunks, downloaded_chunks, created_at, updated_at,
+        group_id, at_rest_encrypted
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         row.attachmentId,
         row.messageId,
@@ -109,6 +114,8 @@ export class AttachmentStore implements IAttachmentStore {
         JSON.stringify(row.downloadedChunks),
         row.createdAt,
         row.updatedAt,
+        row.groupId ?? null,
+        row.atRestEncrypted ? 1 : 0,
       ],
     );
   }
