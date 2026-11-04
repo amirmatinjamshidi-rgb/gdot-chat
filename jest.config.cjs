@@ -8,6 +8,7 @@ module.exports = {
   setupFilesAfterEnv: ["<rootDir>/__tests__/ui/setup.ts"],
   moduleNameMapper: {
     "^@/(.*)$": "<rootDir>/$1",
+    "^gdot-encrypted-media$": "<rootDir>/__mocks__/gdot-encrypted-media.ts",
   },
   testTimeout: 20000,
   clearMocks: true,

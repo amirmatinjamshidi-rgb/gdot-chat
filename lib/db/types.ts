@@ -59,6 +59,8 @@ export interface LocalAttachment {
   atRestEncrypted?: boolean;
   /** Ephemeral plaintext playback URI; never persisted to SQLCipher. */
   playbackUri?: string;
+  /** Native streaming decrypt session registered (no plaintext on disk). */
+  nativePlaybackReady?: boolean;
   transferState: AttachmentTransferState;
   uploadedChunks: number[];
   downloadedChunks: number[];

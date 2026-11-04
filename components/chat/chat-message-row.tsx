@@ -130,9 +130,11 @@ function ChatMessageRowImpl({
           },
         ]}
       >
-        {item.kind === "voice" && item.mediaUri ? (
+        {item.kind === "voice" && (item.mediaUri || (item.encryptedPlayback && item.attachmentId)) ? (
           <VoiceMessageBubble
             uri={item.mediaUri}
+            attachmentId={item.attachmentId}
+            encrypted={!!item.encryptedPlayback}
             seed={item.id}
             durationMs={item.durationMs}
             isMine={item.isMine ?? item.sender === "me"}
@@ -141,7 +143,7 @@ function ChatMessageRowImpl({
             onDeactivate={() => onDeactivatePlayback(item.id)}
           />
         ) : null}
-        {item.kind === "video" && item.mediaUri ? (
+        {item.kind === "video" && (item.mediaUri || (item.encryptedPlayback && item.attachmentId)) ? (
           <View
             style={[
               styles.videoBubbleWrap,
@@ -150,6 +152,8 @@ function ChatMessageRowImpl({
           >
             <VideoMessageBubble
               uri={item.mediaUri}
+              attachmentId={item.attachmentId}
+              encrypted={!!item.encryptedPlayback}
               isMine={item.sender === "me"}
               durationMs={item.durationMs}
               isActive={isActive}
@@ -158,7 +162,7 @@ function ChatMessageRowImpl({
             />
           </View>
         ) : null}
-        {isMediaBubble && !item.mediaUri ? (
+        {isMediaBubble && !item.mediaUri && !item.encryptedPlayback ? (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={

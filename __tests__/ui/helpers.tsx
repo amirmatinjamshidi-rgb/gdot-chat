@@ -76,6 +76,8 @@ export function mockAppServices(
     mediaVault: {
       clearOnLock: jest.fn(async () => undefined),
       ensurePlaybackUri: jest.fn(async () => undefined),
+      registerForPlayback: jest.fn(async () => true),
+      unregister: jest.fn(async () => undefined),
       persistPackedCipher: jest.fn(async () => "memory://x.genc"),
       getCachedPlaybackUri: jest.fn(() => undefined),
     },

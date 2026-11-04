@@ -53,6 +53,7 @@
     "expo-system-ui": "~6.0.9",
     "expo-video": "~3.0.16",
     "expo-web-browser": "~15.0.10",
+    "gdot-encrypted-media": "file:modules/gdot-encrypted-media",
     "libphonenumber-js": "^1.13.3",
     "react": "19.1.0",
     "react-dom": "19.1.0",

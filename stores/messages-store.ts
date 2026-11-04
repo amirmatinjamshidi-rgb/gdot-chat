@@ -13,6 +13,8 @@ export type Message = {
   text?: string;
   durationMs?: number;
   mediaUri?: string;
+  /** Play via native EncryptedVideo/Audio (at-rest .genc). */
+  encryptedPlayback?: boolean;
   storyUri?: string;
   isMine?: boolean;
   reactions?: Reaction[];

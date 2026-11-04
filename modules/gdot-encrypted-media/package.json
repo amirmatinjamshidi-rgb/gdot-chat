@@ -1,0 +1,13 @@
+{
+  "name": "gdot-encrypted-media",
+  "version": "1.0.0",
+  "description": "On-device streaming AEAD decrypt for .genc media (no plaintext on disk)",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {},
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}

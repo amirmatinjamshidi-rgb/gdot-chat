@@ -165,7 +165,7 @@ describe("B1 media resume keeps packed ciphertext", () => {
 });
 
 describe("B5 media at-rest vault", () => {
-  it("persists ciphertext and materializes plaintext only in tmp; wipe on lock", async () => {
+  it("persists ciphertext and registers native streaming session; clears keys on lock", async () => {
     const plain = new Uint8Array(32).map((_, i) => i + 1);
     const key = generateMediaKey();
     const noncePrefix = generateNoncePrefix();
@@ -174,7 +174,17 @@ describe("B5 media at-rest vault", () => {
     const chunkCount = 2;
 
     const files = new MemoryVaultFileAccess();
-    const vault = new MediaPlaybackVault({ files });
+    const sessions: Array<Record<string, unknown>> = [];
+    const native = {
+      registerSession: (params: Record<string, unknown>) => {
+        sessions.push(params);
+      },
+      unregisterSession: () => undefined,
+      clearAll: () => {
+        sessions.length = 0;
+      },
+    };
+    const vault = new MediaPlaybackVault({ files, native });
 
     const { encryptPlaintextToPackedCipher } = await import(
       "@/lib/media/media-at-rest"
@@ -190,7 +200,6 @@ describe("B5 media at-rest vault", () => {
     });
     const durable = await vault.persistPackedCipher(attachmentId, packed);
     expect(durable.endsWith(".genc")).toBe(true);
-    // Durable bytes are not plaintext
     expect(Buffer.from(await files.readFileBytes(durable)).equals(Buffer.from(plain))).toBe(
       false,
     );
@@ -214,16 +223,16 @@ describe("B5 media at-rest vault", () => {
       updatedAt: 1,
     };
 
-    const playback = await vault.ensurePlaybackUri(row);
-    expect(playback).toBeTruthy();
-    expect(playback!.includes("gdot-media-tmp")).toBe(true);
-    const played = await files.readFileBytes(playback!);
-    expect(Buffer.from(played).equals(Buffer.from(plain))).toBe(true);
+    const ok = await vault.registerForPlayback(row);
+    expect(ok).toBe(true);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]!.attachmentId).toBe(attachmentId);
+    expect(sessions[0]!.format).toBe("packed");
+    expect(files.tmp.size).toBe(0); // no plaintext on disk
 
     await vault.clearOnLock();
-    expect(files.tmp.size).toBe(0);
-    expect(vault.getCachedPlaybackUri(attachmentId)).toBeUndefined();
-    // Durable ciphertext remains
+    expect(sessions).toHaveLength(0);
+    expect(vault.isRegistered(attachmentId)).toBe(false);
     expect(files.durable.size).toBe(1);
   });
 

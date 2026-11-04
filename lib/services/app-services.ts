@@ -32,8 +32,9 @@ import { ProfileStore } from "@/lib/db/profile-store";
 import { SessionStore } from "@/lib/db/session-store";
 import { MediaTransferService } from "@/lib/media/media-transfer";
 import { MediaBlobCacheStore } from "@/lib/media/media-blob-cache";
-import { createNativeVaultFileAccess } from "@/lib/media/chunk-file";
+import { createNativeVaultFileAccess, wipeMediaPlaybackTemp } from "@/lib/media/chunk-file";
 import { MediaPlaybackVault } from "@/lib/media/media-playback-vault";
+import * as GdotEncryptedMedia from "gdot-encrypted-media";
 import { authStore } from "@/lib/session/auth-store";
 import { appLockStore } from "@/lib/session/app-lock-store";
 import { SyncService } from "@/lib/session/sync-service";
@@ -70,7 +71,16 @@ const outboxStore = new OutboxStore(sqlCipherDatabase);
 const pendingReceiptStore = new PendingReceiptStore(sqlCipherDatabase);
 const pendingOutgoingSendStore = new PendingOutgoingSendStore(sqlCipherDatabase);
 const mediaBlobCache = new MediaBlobCacheStore(sqlCipherDatabase);
-const mediaVault = new MediaPlaybackVault({ files: createNativeVaultFileAccess() });
+const mediaVault = new MediaPlaybackVault({
+  files: createNativeVaultFileAccess(),
+  native: {
+    registerSession: (params) => GdotEncryptedMedia.registerSession(params),
+    unregisterSession: (id) => GdotEncryptedMedia.unregisterSession(id),
+    clearAll: () => GdotEncryptedMedia.clearAll(),
+  },
+});
+// Wipe any leftover plaintext temps from older app versions (startup).
+void wipeMediaPlaybackTemp().catch(() => undefined);
 const reactionStore = new ReactionStore(sqlCipherDatabase);
 const conversationStore = new ConversationStore(sqlCipherDatabase);
 const attachmentStore = new AttachmentStore(sqlCipherDatabase);

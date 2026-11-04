@@ -3,6 +3,7 @@ import { useVideoPlayer, VideoView } from "expo-video";
 import React, {
   useCallback,
   useEffect,
+  useRef,
   useState,
   type ComponentProps,
 } from "react";
@@ -15,6 +16,7 @@ import Animated, {
 } from "react-native-reanimated";
 
 import { CircularProgressRing } from "@/components/circular-progress-ring";
+import { EncryptedVideo } from "gdot-encrypted-media";
 import { useColors } from "@/stores/theme-store";
 
 export const VIDEO_BUBBLE_SIZE = 160;
@@ -25,7 +27,11 @@ const PLAY_MS = 170;
 const EASE = Easing.out(Easing.cubic);
 
 type VideoMessageBubbleProps = {
-  uri: string;
+  /** Legacy plaintext file URI (non-encrypted). */
+  uri?: string;
+  /** At-rest encrypted attachment — streams via native module. */
+  attachmentId?: string;
+  encrypted?: boolean;
   isMine: boolean;
   durationMs?: number;
   isActive: boolean;
@@ -35,12 +41,199 @@ type VideoMessageBubbleProps = {
 
 export function VideoMessageBubble({
   uri,
+  attachmentId,
+  encrypted = false,
   isMine,
   durationMs,
   isActive,
   onActivate,
   onDeactivate,
 }: VideoMessageBubbleProps) {
+  const useEncrypted = encrypted && !!attachmentId;
+  if (useEncrypted) {
+    return (
+      <EncryptedVideoBubble
+        attachmentId={attachmentId!}
+        isMine={isMine}
+        durationMs={durationMs}
+        isActive={isActive}
+        onActivate={onActivate}
+        onDeactivate={onDeactivate}
+      />
+    );
+  }
+  if (!uri) return null;
+  return (
+    <PlainVideoBubble
+      uri={uri}
+      isMine={isMine}
+      durationMs={durationMs}
+      isActive={isActive}
+      onActivate={onActivate}
+      onDeactivate={onDeactivate}
+    />
+  );
+}
+
+function EncryptedVideoBubble({
+  attachmentId,
+  isMine,
+  durationMs,
+  isActive,
+  onActivate,
+  onDeactivate,
+}: {
+  attachmentId: string;
+  isMine: boolean;
+  durationMs?: number;
+  isActive: boolean;
+  onActivate: () => void;
+  onDeactivate: () => void;
+}) {
+  const colors = useColors();
+  const [playing, setPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const scale = useSharedValue(1);
+  const translateX = useSharedValue(0);
+  const playShift = isMine ? -PLAY_SHIFT : PLAY_SHIFT;
+  const videoRef = useRef<{
+    play?: () => Promise<void>;
+    pause?: () => Promise<void>;
+    seekTo?: (s: number) => Promise<void>;
+  } | null>(null);
+
+  const resetPlayback = useCallback(() => {
+    scale.value = withTiming(1, { duration: PLAY_MS, easing: EASE });
+    translateX.value = withTiming(0, { duration: PLAY_MS, easing: EASE });
+    setPlaying(false);
+    setProgress(0);
+    void videoRef.current?.pause?.();
+    void videoRef.current?.seekTo?.(0);
+  }, [scale, translateX]);
+
+  useEffect(() => {
+    if (!isActive && playing) {
+      resetPlayback();
+    }
+  }, [isActive, playing, resetPlayback]);
+
+  const togglePlayback = useCallback(() => {
+    if (playing) {
+      void videoRef.current?.pause?.();
+      scale.value = withTiming(1, { duration: PLAY_MS, easing: EASE });
+      translateX.value = withTiming(0, { duration: PLAY_MS, easing: EASE });
+      setPlaying(false);
+      onDeactivate();
+      return;
+    }
+    onActivate();
+    void videoRef.current?.play?.();
+    scale.value = withTiming(PLAY_SCALE, { duration: PLAY_MS, easing: EASE });
+    translateX.value = withTiming(playShift, {
+      duration: PLAY_MS,
+      easing: EASE,
+    });
+    setPlaying(true);
+  }, [onActivate, onDeactivate, playShift, playing, scale, translateX]);
+
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.value }, { scale: scale.value }],
+    zIndex: scale.value > 1.05 ? 20 : 1,
+  }));
+
+  const ringSize = VIDEO_BUBBLE_SIZE + 10;
+  const progressFill = isMine ? colors.primary : colors.tint;
+  const trackColor = `${colors.textMuted}4D`;
+  void trackColor;
+
+  return (
+    <Pressable
+      onPress={togglePlayback}
+      accessibilityRole="button"
+      accessibilityLabel={
+        playing ? "Pause video message" : "Play video message"
+      }
+      style={({ pressed }) => [styles.pressable, pressed && { opacity: 0.92 }]}
+    >
+      <Animated.View
+        style={[
+          styles.outer,
+          animStyle,
+          {
+            shadowColor: colors.text,
+            shadowOpacity: playing ? 0.14 : 0.06,
+            shadowRadius: playing ? 16 : 8,
+            shadowOffset: { width: 0, height: playing ? 6 : 3 },
+            elevation: playing ? 8 : 3,
+          },
+        ]}
+      >
+        {(playing || progress > 0) && (
+          <CircularProgressRing
+            size={ringSize}
+            stroke={4}
+            progress={progress}
+            fillColor={progressFill}
+          />
+        )}
+        <View
+          style={[
+            styles.videoRing,
+            {
+              borderColor: isMine
+                ? `${colors.primary}D9`
+                : `${colors.surfaceBorder}E6`,
+            },
+            playing && {
+              borderColor: progressFill,
+            },
+          ]}
+        >
+          <EncryptedVideo
+            ref={videoRef}
+            attachmentId={attachmentId}
+            style={styles.video}
+            contentFit="cover"
+            nativeControls={false}
+            playing={playing}
+            onProgress={(e) => {
+              const { currentTime, duration } = e.nativeEvent;
+              const durationSec =
+                duration > 0
+                  ? duration
+                  : durationMs
+                    ? durationMs / 1000
+                    : 1;
+              setProgress(
+                Math.min(1, currentTime / Math.max(durationSec, 0.001)),
+              );
+            }}
+            onEnd={() => {
+              resetPlayback();
+              onDeactivate();
+            }}
+          />
+        </View>
+      </Animated.View>
+    </Pressable>
+  );
+}
+
+function PlainVideoBubble({
+  uri,
+  isMine,
+  durationMs,
+  isActive,
+  onActivate,
+  onDeactivate,
+}: {
+  uri: string;
+  isMine: boolean;
+  durationMs?: number;
+  isActive: boolean;
+  onActivate: () => void;
+  onDeactivate: () => void;
+}) {
   const colors = useColors();
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -110,7 +303,6 @@ export function VideoMessageBubble({
 
   const ringSize = VIDEO_BUBBLE_SIZE + 10;
   const progressFill = isMine ? colors.primary : colors.tint;
-  const trackColor = `${colors.textMuted}4D`;
 
   return (
     <Pressable
@@ -156,8 +348,6 @@ export function VideoMessageBubble({
           ]}
         >
           <VideoView
-            // expo-video web typings intersect VideoViewProps with the web class instance
-            // (VideoPlayerWeb & VideoPlayer); useVideoPlayer is typed as VideoPlayer only.
             player={player as ComponentProps<typeof VideoView>["player"]}
             style={styles.video}
             contentFit="cover"

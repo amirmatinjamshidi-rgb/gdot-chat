@@ -5,7 +5,8 @@ import {
   useAudioPlayerStatus,
 } from "expo-audio";
 import { BlurView } from "expo-blur";
-import React, { useCallback, useEffect, useLayoutEffect } from "react";
+import { createEncryptedAudioPlayer } from "gdot-encrypted-media";
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import Animated, {
   Easing,
@@ -13,6 +14,7 @@ import Animated, {
   useSharedValue,
   withSequence,
   withTiming,
+  type SharedValue,
 } from "react-native-reanimated";
 
 import { VoiceWaveformSkia } from "@/components/voice-waveform-skia";
@@ -22,7 +24,9 @@ const ICON_MS = 200;
 const ICON_EASE = Easing.out(Easing.cubic);
 
 type VoiceMessageBubbleProps = {
-  uri: string;
+  uri?: string;
+  attachmentId?: string;
+  encrypted?: boolean;
   seed: string;
   durationMs?: number;
   isMine: boolean;
@@ -40,7 +44,155 @@ function formatDuration(ms: number) {
     : `0:${r.toString().padStart(2, "0")}`;
 }
 
-export function VoiceMessageBubble({
+export function VoiceMessageBubble(props: VoiceMessageBubbleProps) {
+  if (props.encrypted && props.attachmentId) {
+    return (
+      <EncryptedVoiceMessageBubble
+        {...props}
+        attachmentId={props.attachmentId}
+      />
+    );
+  }
+  if (!props.uri) return null;
+  return <PlainVoiceMessageBubble {...props} uri={props.uri} />;
+}
+
+function EncryptedVoiceMessageBubble({
+  attachmentId,
+  seed,
+  durationMs,
+  isMine,
+  isActive,
+  onActivate,
+  onDeactivate,
+}: VoiceMessageBubbleProps & { attachmentId: string }) {
+  const colors = useColors();
+  const mode = useThemeStore((state) => state.mode);
+  const playerRef = useRef(createEncryptedAudioPlayer(attachmentId));
+  const [status, setStatus] = useState({
+    playing: false,
+    currentTime: 0,
+    duration: 0,
+    didJustFinish: false,
+  });
+
+  useEffect(() => {
+    const player = createEncryptedAudioPlayer(attachmentId);
+    playerRef.current = player;
+    const timer = setInterval(() => {
+      void player.getStatus().then(setStatus);
+    }, 50);
+    return () => {
+      clearInterval(timer);
+      void player.release();
+    };
+  }, [attachmentId]);
+
+  const waveformProgressSV = useSharedValue(0);
+  const playOpacity = useSharedValue(1);
+  const pauseOpacity = useSharedValue(0);
+  const buttonScale = useSharedValue(1);
+
+  const durationSec =
+    status.duration > 0 ? status.duration : durationMs ? durationMs / 1000 : 0;
+  const progress =
+    durationSec > 0 ? Math.min(1, status.currentTime / durationSec) : 0;
+  const playing = status.playing;
+
+  useLayoutEffect(() => {
+    waveformProgressSV.value = progress;
+  }, [progress, waveformProgressSV]);
+
+  const resetPlayback = useCallback(() => {
+    void playerRef.current.pause();
+    void playerRef.current.seekTo(0);
+    playOpacity.value = withTiming(1, { duration: ICON_MS, easing: ICON_EASE });
+    pauseOpacity.value = withTiming(0, {
+      duration: ICON_MS,
+      easing: ICON_EASE,
+    });
+  }, [pauseOpacity, playOpacity]);
+
+  useEffect(() => {
+    if (!isActive && playing) resetPlayback();
+  }, [isActive, playing, resetPlayback]);
+
+  useEffect(() => {
+    if (status.didJustFinish) {
+      resetPlayback();
+      onDeactivate();
+    }
+  }, [status.didJustFinish, onDeactivate, resetPlayback]);
+
+  useEffect(() => {
+    if (playing) {
+      playOpacity.value = withTiming(0, { duration: ICON_MS, easing: ICON_EASE });
+      pauseOpacity.value = withTiming(1, { duration: ICON_MS, easing: ICON_EASE });
+      return;
+    }
+    playOpacity.value = withTiming(1, { duration: ICON_MS, easing: ICON_EASE });
+    pauseOpacity.value = withTiming(0, { duration: ICON_MS, easing: ICON_EASE });
+  }, [pauseOpacity, playOpacity, playing]);
+
+  const togglePlayback = useCallback(async () => {
+    buttonScale.value = withSequence(
+      withTiming(0.94, { duration: 70, easing: ICON_EASE }),
+      withTiming(1, { duration: 130, easing: ICON_EASE }),
+    );
+    if (playing) {
+      await playerRef.current.pause();
+      onDeactivate();
+      return;
+    }
+    onActivate();
+    await setAudioModeAsync({
+      allowsRecording: false,
+      playsInSilentMode: true,
+      interruptionMode: "mixWithOthers",
+      shouldPlayInBackground: false,
+      shouldRouteThroughEarpiece: false,
+    });
+    await playerRef.current.play();
+  }, [buttonScale, onActivate, onDeactivate, playing]);
+
+  const seekToProgress = useCallback(
+    (next: number) => {
+      if (durationSec <= 0) return;
+      void playerRef.current.seekTo(next * durationSec);
+      if (!playing) {
+        onActivate();
+        void setAudioModeAsync({
+          allowsRecording: false,
+          playsInSilentMode: true,
+          interruptionMode: "mixWithOthers",
+          shouldPlayInBackground: false,
+          shouldRouteThroughEarpiece: false,
+        }).then(() => playerRef.current.play());
+      }
+    },
+    [durationSec, onActivate, playing],
+  );
+
+  return (
+    <VoiceChrome
+      colors={colors}
+      mode={mode}
+      isMine={isMine}
+      playing={playing}
+      durationMs={durationMs}
+      currentTime={status.currentTime}
+      seed={seed}
+      waveformProgressSV={waveformProgressSV}
+      playOpacity={playOpacity}
+      pauseOpacity={pauseOpacity}
+      buttonScale={buttonScale}
+      onToggle={() => void togglePlayback()}
+      onSeek={seekToProgress}
+    />
+  );
+}
+
+function PlainVoiceMessageBubble({
   uri,
   seed,
   durationMs,
@@ -48,14 +200,13 @@ export function VoiceMessageBubble({
   isActive,
   onActivate,
   onDeactivate,
-}: VoiceMessageBubbleProps) {
+}: VoiceMessageBubbleProps & { uri: string }) {
   const colors = useColors();
   const mode = useThemeStore((state) => state.mode);
   const player = useAudioPlayer(uri, { updateInterval: 20 });
   const status = useAudioPlayerStatus(player);
 
   const waveformProgressSV = useSharedValue(0);
-
   const playOpacity = useSharedValue(1);
   const pauseOpacity = useSharedValue(0);
   const buttonScale = useSharedValue(1);
@@ -81,9 +232,7 @@ export function VoiceMessageBubble({
   }, [pauseOpacity, playOpacity, player]);
 
   useEffect(() => {
-    if (!isActive && playing) {
-      resetPlayback();
-    }
+    if (!isActive && playing) resetPlayback();
   }, [isActive, playing, resetPlayback]);
 
   useEffect(() => {
@@ -95,21 +244,12 @@ export function VoiceMessageBubble({
 
   useEffect(() => {
     if (playing) {
-      playOpacity.value = withTiming(0, {
-        duration: ICON_MS,
-        easing: ICON_EASE,
-      });
-      pauseOpacity.value = withTiming(1, {
-        duration: ICON_MS,
-        easing: ICON_EASE,
-      });
+      playOpacity.value = withTiming(0, { duration: ICON_MS, easing: ICON_EASE });
+      pauseOpacity.value = withTiming(1, { duration: ICON_MS, easing: ICON_EASE });
       return;
     }
     playOpacity.value = withTiming(1, { duration: ICON_MS, easing: ICON_EASE });
-    pauseOpacity.value = withTiming(0, {
-      duration: ICON_MS,
-      easing: ICON_EASE,
-    });
+    pauseOpacity.value = withTiming(0, { duration: ICON_MS, easing: ICON_EASE });
   }, [pauseOpacity, playOpacity, playing]);
 
   const togglePlayback = useCallback(async () => {
@@ -117,13 +257,11 @@ export function VoiceMessageBubble({
       withTiming(0.94, { duration: 70, easing: ICON_EASE }),
       withTiming(1, { duration: 130, easing: ICON_EASE }),
     );
-
     if (playing) {
       player.pause();
       onDeactivate();
       return;
     }
-
     onActivate();
     await setAudioModeAsync({
       allowsRecording: false,
@@ -153,28 +291,69 @@ export function VoiceMessageBubble({
     [durationSec, onActivate, player, playing],
   );
 
+  return (
+    <VoiceChrome
+      colors={colors}
+      mode={mode}
+      isMine={isMine}
+      playing={playing}
+      durationMs={durationMs}
+      currentTime={status.currentTime}
+      seed={seed}
+      waveformProgressSV={waveformProgressSV}
+      playOpacity={playOpacity}
+      pauseOpacity={pauseOpacity}
+      buttonScale={buttonScale}
+      onToggle={() => void togglePlayback()}
+      onSeek={seekToProgress}
+    />
+  );
+}
+
+function VoiceChrome({
+  colors,
+  mode,
+  isMine,
+  playing,
+  durationMs,
+  currentTime,
+  seed,
+  waveformProgressSV,
+  playOpacity,
+  pauseOpacity,
+  buttonScale,
+  onToggle,
+  onSeek,
+}: {
+  colors: ReturnType<typeof useColors>;
+  mode: string;
+  isMine: boolean;
+  playing: boolean;
+  durationMs?: number;
+  currentTime: number;
+  seed: string;
+  waveformProgressSV: SharedValue<number>;
+  playOpacity: SharedValue<number>;
+  pauseOpacity: SharedValue<number>;
+  buttonScale: SharedValue<number>;
+  onToggle: () => void;
+  onSeek: (n: number) => void;
+}) {
   const playIconStyle = useAnimatedStyle(() => ({
     opacity: playOpacity.value,
     transform: [{ scale: 0.85 + playOpacity.value * 0.15 }],
   }));
-
   const pauseIconStyle = useAnimatedStyle(() => ({
     opacity: pauseOpacity.value,
     transform: [{ scale: 0.85 + pauseOpacity.value * 0.15 }],
   }));
-
   const buttonAnimStyle = useAnimatedStyle(() => ({
     transform: [{ scale: buttonScale.value }],
   }));
 
   const elapsedMs =
-    status.currentTime > 0
-      ? status.currentTime * 1000
-      : playing
-        ? 0
-        : (durationMs ?? 0);
+    currentTime > 0 ? currentTime * 1000 : playing ? 0 : (durationMs ?? 0);
   const displayMs = playing ? elapsedMs : (durationMs ?? elapsedMs);
-
   const shellBorder = isMine
     ? `${colors.primary}66`
     : `${colors.surfaceBorder}CC`;
@@ -183,7 +362,7 @@ export function VoiceMessageBubble({
     <View style={styles.content}>
       <Animated.View style={buttonAnimStyle}>
         <Pressable
-          onPress={() => void togglePlayback()}
+          onPress={onToggle}
           accessibilityRole="button"
           accessibilityLabel={
             playing ? "Pause voice message" : "Play voice message"
@@ -214,7 +393,7 @@ export function VoiceMessageBubble({
         progressSV={waveformProgressSV}
         playedColor={`${colors.tint}D9`}
         unplayedColor={`${colors.textMuted}66`}
-        onSeek={seekToProgress}
+        onSeek={onSeek}
       />
 
       <Text style={[styles.duration, { color: colors.textSecondary }]}>
@@ -246,7 +425,6 @@ export function VoiceMessageBubble({
       ) : (
         <BlurView
           intensity={mode === "dark" ? 48 : 56}
-          // tint={blurTint}
           style={[styles.blur, { backgroundColor: `${colors.background}B3` }]}
         >
           {glass}

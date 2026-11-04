@@ -1,18 +1,17 @@
 /**
- * Materializes plaintext media for AV playback into an ephemeral cache.
- * Durable Documents/gdot-media holds only ciphertext (.genc). On lock, wipe
- * all plaintext temps so nothing readable remains outside SQLCipher.
+ * Registers at-rest .genc attachments with the native streaming decryptor.
+ * Durable Documents/gdot-media holds only ciphertext. No plaintext is written
+ * to disk; keys are passed to native only for active playback and cleared on lock.
  */
 import type { LocalAttachment } from "@/lib/db/types";
 import {
-  decryptFixedSlotCipherToPlaintext,
-  decryptPackedCipherToPlaintext,
+  encryptPlaintextToPackedCipher,
   isAtRestUri,
   MEDIA_AT_REST_EXT,
   unwrapLocalFileV1,
   wrapLocalFileV1,
 } from "@/lib/media/media-at-rest";
-import { extensionForMime } from "@/lib/media/random-access-file";
+import { detectGencFormat, type GencFormat } from "@/lib/media/genc-range-map";
 
 export type VaultFileAccess = {
   readFileBytes(uri: string): Promise<Uint8Array>;
@@ -26,94 +25,169 @@ export type VaultFileAccess = {
   wipeTmp(): Promise<number>;
 };
 
-export type MediaPlaybackVaultDeps = {
-  files: VaultFileAccess;
+export type NativePlaybackBridge = {
+  registerSession(params: {
+    attachmentId: string;
+    fileUri: string;
+    keyBase64: string;
+    noncePrefixBase64: string;
+    plainSize: number;
+    chunkSize: number;
+    chunkCount: number;
+    mimeType: string;
+    format: "fixed-slot" | "packed";
+  }): void;
+  unregisterSession(attachmentId: string): void;
+  clearAll(): void;
 };
 
+export type MediaPlaybackVaultDeps = {
+  files: VaultFileAccess;
+  native?: NativePlaybackBridge | null;
+  /** Encode bytes to standard base64 for native. */
+  bytesToBase64?: (bytes: Uint8Array) => string;
+};
+
+function defaultBytesToBase64(bytes: Uint8Array): string {
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(bytes).toString("base64");
+  }
+  let s = "";
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]!);
+  return btoa(s);
+}
+
 export class MediaPlaybackVault {
-  private readonly playbackByAttachment = new Map<string, string>();
+  private readonly registered = new Set<string>();
   private readonly files: VaultFileAccess;
+  private readonly native: NativePlaybackBridge | null;
+  private readonly bytesToBase64: (bytes: Uint8Array) => string;
 
   constructor(deps: MediaPlaybackVaultDeps) {
     this.files = deps.files;
+    this.native = deps.native ?? null;
+    this.bytesToBase64 = deps.bytesToBase64 ?? defaultBytesToBase64;
   }
 
-  /** Clear in-memory playback map and delete plaintext temps (call on lock). */
+  /** Clear native keys/sessions and delete any leftover plaintext temps. */
   async clearOnLock(): Promise<void> {
-    this.playbackByAttachment.clear();
+    this.registered.clear();
+    try {
+      this.native?.clearAll();
+    } catch {
+      /* native may be unavailable in tests/web */
+    }
     await this.files.wipeTmp();
   }
 
-  getCachedPlaybackUri(attachmentId: string): string | undefined {
-    return this.playbackByAttachment.get(attachmentId);
+  /**
+   * @deprecated Temp-file playback removed. Prefer registerForPlayback.
+   * Kept as a no-op-returning-undefined so call sites compile during migration.
+   */
+  async ensurePlaybackUri(_row: LocalAttachment): Promise<string | undefined> {
+    return undefined;
+  }
+
+  getCachedPlaybackUri(_attachmentId: string): string | undefined {
+    return undefined;
+  }
+
+  isRegistered(attachmentId: string): boolean {
+    return this.registered.has(attachmentId);
   }
 
   /**
-   * Ensure a plaintext file exists for AV playback. Returns undefined when the
-   * durable ciphertext is missing or the attachment is not at-rest encrypted.
+   * Register attachment with native streaming decryptor. Converts legacy
+   * local-wrap files to packed ciphertext first. Returns true when ready.
    */
-  async ensurePlaybackUri(row: LocalAttachment): Promise<string | undefined> {
-    const cached = this.playbackByAttachment.get(row.attachmentId);
-    if (cached) return cached;
+  async registerForPlayback(row: LocalAttachment): Promise<boolean> {
+    if (this.registered.has(row.attachmentId) && this.native) {
+      return true;
+    }
+    if (!row.localUri) return false;
 
-    if (!row.localUri) return undefined;
-
-    // Legacy plaintext in Documents — migrate then play from tmp.
     if (!row.atRestEncrypted && !isAtRestUri(row.localUri)) {
       await this.migratePlaintextFile(row);
     }
 
-    const durable =
+    let durable =
       row.localUri && isAtRestUri(row.localUri)
         ? row.localUri
         : this.files.durableUri(row.attachmentId, MEDIA_AT_REST_EXT);
 
-    let packed: Uint8Array;
+    let fileBytes: Uint8Array;
     try {
-      packed = await this.files.readFileBytes(durable);
+      fileBytes = await this.files.readFileBytes(durable);
     } catch {
-      return undefined;
+      return false;
     }
 
-    let plain: Uint8Array;
-    try {
-      plain = decryptPackedCipherToPlaintext({
+    let format: GencFormat = detectGencFormat(
+      fileBytes,
+      row.chunkCount,
+      row.plainSizeBytes,
+      row.chunkSize,
+    );
+
+    if (format === "local-wrap") {
+      // Convert legacy whole-file wrap → packed wire chunks (still ciphertext on disk).
+      let plain: Uint8Array;
+      try {
+        plain = unwrapLocalFileV1({
+          key: row.mediaKey,
+          attachmentId: row.attachmentId,
+          wrapped: fileBytes,
+        });
+      } catch {
+        return false;
+      }
+      const packed = encryptPlaintextToPackedCipher({
         key: row.mediaKey,
         noncePrefix: row.noncePrefix,
         attachmentId: row.attachmentId,
         plainSize: row.plainSizeBytes,
+        chunkSize: row.chunkSize,
         chunkCount: row.chunkCount,
-        packed,
+        plaintext: plain,
       });
-    } catch {
-      try {
-        plain = decryptFixedSlotCipherToPlaintext({
-          key: row.mediaKey,
-          noncePrefix: row.noncePrefix,
-          attachmentId: row.attachmentId,
-          plainSize: row.plainSizeBytes,
-          chunkSize: row.chunkSize,
-          chunkCount: row.chunkCount,
-          fileBytes: packed,
-        });
-      } catch {
-        // Legacy whole-file wrap migration format.
-        plain = unwrapLocalFileV1({
-          key: row.mediaKey,
-          attachmentId: row.attachmentId,
-          wrapped: packed,
-        });
-      }
+      plain.fill(0);
+      durable = await this.persistPackedCipher(row.attachmentId, packed);
+      fileBytes = packed;
+      format = "packed";
     }
 
-    await this.files.ensureDir("tmp");
-    const ext = extensionForMime(row.mimeType);
-    const tmp = this.files.tmpUri(row.attachmentId, ext);
-    await this.files.writeFileBytes(tmp, plain);
-    // Scrub plaintext buffer reference eagerly where possible.
-    plain.fill(0);
-    this.playbackByAttachment.set(row.attachmentId, tmp);
-    return tmp;
+    if (!this.native) {
+      // Web / unit tests without native: mark registered for UI gated paths.
+      this.registered.add(row.attachmentId);
+      return true;
+    }
+
+    try {
+      this.native.registerSession({
+        attachmentId: row.attachmentId,
+        fileUri: durable,
+        keyBase64: this.bytesToBase64(row.mediaKey),
+        noncePrefixBase64: this.bytesToBase64(row.noncePrefix),
+        plainSize: row.plainSizeBytes,
+        chunkSize: row.chunkSize,
+        chunkCount: row.chunkCount,
+        mimeType: row.mimeType,
+        format: format === "packed" ? "packed" : "fixed-slot",
+      });
+      this.registered.add(row.attachmentId);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async unregister(attachmentId: string): Promise<void> {
+    this.registered.delete(attachmentId);
+    try {
+      this.native?.unregisterSession(attachmentId);
+    } catch {
+      /* ignore */
+    }
   }
 
   /**
@@ -139,12 +213,8 @@ export class MediaPlaybackVault {
     } catch {
       return null;
     }
-    // Prefer packed wire chunks when sizes match attachment metadata.
     let durableBytes: Uint8Array;
     try {
-      const { encryptPlaintextToPackedCipher } = await import(
-        "@/lib/media/media-at-rest"
-      );
       durableBytes = encryptPlaintextToPackedCipher({
         key: row.mediaKey,
         noncePrefix: row.noncePrefix,
@@ -166,7 +236,7 @@ export class MediaPlaybackVault {
     try {
       await this.files.deleteFile(row.localUri);
     } catch {
-      /* best-effort secure delete of legacy plaintext */
+      /* best-effort */
     }
     return durable;
   }

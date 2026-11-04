@@ -24,13 +24,21 @@ export function localMessageToUi(
       if (!(m.direction === "outgoing" || attachment.transferState === "available")) {
         return undefined;
       }
-      // Prefer ephemeral plaintext playback URI; never hand .genc ciphertext to AV players.
-      if (attachment.playbackUri) return attachment.playbackUri;
-      if (attachment.atRestEncrypted) return undefined;
-      const uri = attachment.localUri;
-      if (!uri) return undefined;
-      if (uri.endsWith(".genc")) return undefined;
-      return uri;
+      // At-rest ciphertext plays via native EncryptedVideo/Audio — never hand .genc to AV players.
+      if (attachment.atRestEncrypted || attachment.nativePlaybackReady) return undefined;
+      if (attachment.localUri?.endsWith(".genc")) return undefined;
+      return attachment.localUri ?? undefined;
+    })(),
+    encryptedPlayback: (() => {
+      if (!attachment) return false;
+      if (!(m.direction === "outgoing" || attachment.transferState === "available")) {
+        return false;
+      }
+      return !!(
+        attachment.nativePlaybackReady ||
+        attachment.atRestEncrypted ||
+        attachment.localUri?.endsWith(".genc")
+      );
     })(),
     isMine,
     reactions,

@@ -113,7 +113,7 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
       // Clear cache first (sync) so /lock warm-path cannot auto-unlock
       // against the async DB close.
       kekManager.clearCachedPassphrase();
-      // Wipe ephemeral plaintext media playback temps (Documents stay ciphertext-only).
+      // Clear native streaming media keys and wipe any leftover gdot-media-tmp (Documents stay ciphertext-only).
       void mediaVault.clearOnLock();
       setIsUnlocked(false);
       setDbReady(false);

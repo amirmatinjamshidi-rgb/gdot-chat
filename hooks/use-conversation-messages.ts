@@ -26,7 +26,7 @@ async function loadAttachmentsFor(
   },
   base: Record<string, LocalAttachment> = {},
   mediaVault?: {
-    ensurePlaybackUri: (row: LocalAttachment) => Promise<string | undefined>;
+    registerForPlayback: (row: LocalAttachment) => Promise<boolean>;
   },
 ): Promise<Record<string, LocalAttachment>> {
   const next = { ...base };
@@ -40,11 +40,15 @@ async function loadAttachmentsFor(
       (att.atRestEncrypted || (att.localUri && att.localUri.endsWith(".genc")))
     ) {
       try {
-        const playbackUri = await mediaVault.ensurePlaybackUri(att);
-        next[m.attachmentId] = { ...att, playbackUri, atRestEncrypted: true };
+        const ok = await mediaVault.registerForPlayback(att);
+        next[m.attachmentId] = {
+          ...att,
+          atRestEncrypted: true,
+          nativePlaybackReady: ok,
+        };
         continue;
       } catch {
-        /* playback materialization best-effort */
+        /* native registration best-effort */
       }
     }
     next[m.attachmentId] = att;
@@ -158,8 +162,12 @@ export function useConversationMessages(conversationId: string | undefined) {
       const timer = setInterval(() => {
         void reload();
       }, REFRESH_MS);
-      return () => clearInterval(timer);
-    }, [reload, dbReady, lockEpoch]),
+      return () => {
+        clearInterval(timer);
+        // Drop native media keys when leaving the chat screen.
+        void mediaVault.clearOnLock();
+      };
+    }, [reload, dbReady, lockEpoch, mediaVault]),
   );
 
   return {
