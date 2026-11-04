@@ -16,5 +16,7 @@ public class ChatGroupConfiguration : IEntityTypeConfiguration<ChatGroup>
             .HasForeignKey(g => g.CreatedByUserId)
             .OnDelete(DeleteBehavior.Restrict);
         builder.HasIndex(g => g.CreatedByUserId);
+        // ListMyGroups cursor order: CreatedAt DESC, Id DESC (no LastActivityAt column).
+        builder.HasIndex(g => new { g.CreatedAt, g.Id });
     }
 }

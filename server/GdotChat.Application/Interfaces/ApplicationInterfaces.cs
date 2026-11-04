@@ -100,7 +100,11 @@ public interface IAttachmentService
 public interface IGroupService
 {
     Task<GroupSummaryDto> CreateAsync(Guid callerUserId, Guid callerDeviceId, CreateGroupRequest request, CancellationToken ct = default);
-    Task<IReadOnlyList<GroupSummaryDto>> ListMyGroupsAsync(Guid callerUserId, CancellationToken ct = default);
+    Task<GroupListPageDto> ListMyGroupsAsync(
+        Guid callerUserId,
+        int? limit = null,
+        string? afterCursor = null,
+        CancellationToken ct = default);
     Task<IReadOnlyList<GroupMemberDto>> ListMembersAsync(Guid callerUserId, Guid groupId, CancellationToken ct = default);
     Task AddMembersAsync(Guid callerUserId, Guid callerDeviceId, Guid groupId, AddGroupMembersRequest request, CancellationToken ct = default);
     Task RemoveMemberAsync(Guid callerUserId, Guid callerDeviceId, Guid groupId, Guid subjectUserId, CancellationToken ct = default);
@@ -125,6 +129,21 @@ public interface IMessageNotifier
 
     Task NotifyGroupMembershipChangedAsync(
         Guid recipientDeviceId,
+        GroupMembershipChangedPayload payload,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Wake many devices with one SignalR Groups call (same EnvelopeAvailable payload).
+    /// Clients treat this as a poll trigger; the specific envelope id is not required.
+    /// </summary>
+    Task NotifyEnvelopeAvailableManyAsync(
+        IReadOnlyList<Guid> recipientDeviceIds,
+        Guid envelopeIdForPayload,
+        CancellationToken ct = default);
+
+    /// <summary>One Groups call for the same membership payload.</summary>
+    Task NotifyGroupMembershipChangedManyAsync(
+        IReadOnlyList<Guid> recipientDeviceIds,
         GroupMembershipChangedPayload payload,
         CancellationToken ct = default);
 }

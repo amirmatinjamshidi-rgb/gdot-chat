@@ -93,6 +93,8 @@ namespace GdotChat.Infrastructure.Migrations
 
                     b.HasIndex("CreatedByUserId");
 
+                    b.HasIndex("CreatedAt", "Id");
+
                     b.ToTable("chat_groups", (string)null);
                 });
 
@@ -199,7 +201,7 @@ namespace GdotChat.Infrastructure.Migrations
 
                     b.HasIndex("GroupId", "UserId");
 
-                    b.HasIndex("UserId", "LeftAt");
+                    b.HasIndex("UserId", "LeftAt", "GroupId");
 
                     b.ToTable("group_members", (string)null);
                 });

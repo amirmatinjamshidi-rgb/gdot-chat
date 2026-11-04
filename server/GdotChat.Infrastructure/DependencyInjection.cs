@@ -55,13 +55,18 @@ public static class DependencyInjection
         services.AddScoped<IJwtTokenService, JwtTokenService>();
         services.AddSingleton<IRefreshSuccessorProtector, RefreshSuccessorProtector>();
         services.AddScoped<IPasswordHasher, PasswordHasher>();
-        services.AddScoped<IMessageNotifier, SignalRMessageNotifier>();
+        // Singleton: only depends on IHubContext; must be safe for EnvelopeNotifyWorker.
+        services.AddSingleton<IMessageNotifier, SignalRMessageNotifier>();
+        services.AddSingleton<EnvelopeNotifyMetrics>();
+        services.AddSingleton<ChannelEnvelopeNotifyQueue>();
+        services.AddSingleton<IEnvelopeNotifyQueue>(sp => sp.GetRequiredService<ChannelEnvelopeNotifyQueue>());
         services.AddSingleton<IPreKeyBundleRateLimiter, PreKeyBundleRateLimiter>();
         services.AddSingleton<IDeviceLinkRateLimiter, DeviceLinkRateLimiter>();
         services.AddSingleton<ISessionResetRateLimiter, SessionResetRateLimiter>();
 
         services.AddHostedService<EnvelopePurgeWorker>();
         services.AddHostedService<AttachmentPurgeWorker>();
+        services.AddHostedService<EnvelopeNotifyWorker>();
 
         RegisterAttachmentStorage(services, configuration, isTesting);
 

@@ -6,6 +6,7 @@ using GdotChat.Domain.Entities;
 using GdotChat.Domain.Exceptions;
 using GdotChat.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
 namespace GdotChat.Tests.Integration;
@@ -22,6 +23,18 @@ public sealed class GroupServiceCapTests
             Task.CompletedTask;
         public Task NotifyGroupMembershipChangedAsync(Guid recipientDeviceId, GroupMembershipChangedPayload payload, CancellationToken ct = default) =>
             Task.CompletedTask;
+        public Task NotifyEnvelopeAvailableManyAsync(IReadOnlyList<Guid> recipientDeviceIds, Guid envelopeIdForPayload, CancellationToken ct = default) =>
+            Task.CompletedTask;
+        public Task NotifyGroupMembershipChangedManyAsync(IReadOnlyList<Guid> recipientDeviceIds, GroupMembershipChangedPayload payload, CancellationToken ct = default) =>
+            Task.CompletedTask;
+    }
+
+    private sealed class NoopNotifyQueue : IEnvelopeNotifyQueue
+    {
+        public int QueuedCount => 0;
+        public int Capacity => 1;
+        public bool TryEnqueue(EnvelopeNotifyItem item) => true;
+        public bool TryEnqueueMany(IReadOnlyList<EnvelopeNotifyItem> items) => true;
     }
 
     private static AppDbContext NewDb()
@@ -45,8 +58,10 @@ public sealed class GroupServiceCapTests
         var svc = new GroupService(
             db,
             new NoopNotifier(),
+            new NoopNotifyQueue(),
             Options.Create(new RelayOptions()),
-            Options.Create(new GroupOptions { MaxMembers = 2 }));
+            Options.Create(new GroupOptions { MaxMembers = 2 }),
+            NullLogger<GroupService>.Instance);
 
         await Assert.ThrowsAsync<GroupFullException>(() =>
             svc.CreateAsync(

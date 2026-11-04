@@ -20,6 +20,23 @@ public class SignalRMessageNotifier : IMessageNotifier
             .Group(DeviceGroup(recipientDeviceId))
             .SendAsync("EnvelopeAvailable", new EnvelopeAvailablePayload(envelopeId), ct);
 
+    public Task NotifyEnvelopeAvailableManyAsync(
+        IReadOnlyList<Guid> recipientDeviceIds,
+        Guid envelopeIdForPayload,
+        CancellationToken ct = default)
+    {
+        if (recipientDeviceIds.Count == 0)
+            return Task.CompletedTask;
+
+        var groups = new string[recipientDeviceIds.Count];
+        for (var i = 0; i < recipientDeviceIds.Count; i++)
+            groups[i] = DeviceGroup(recipientDeviceIds[i]);
+
+        return _hubContext.Clients
+            .Groups(groups)
+            .SendAsync("EnvelopeAvailable", new EnvelopeAvailablePayload(envelopeIdForPayload), ct);
+    }
+
     public Task NotifyPreKeysLowAsync(
         Guid deviceId,
         int remainingCount,
@@ -48,6 +65,22 @@ public class SignalRMessageNotifier : IMessageNotifier
             .Group(DeviceGroup(recipientDeviceId))
             .SendAsync("GroupMembershipChanged", payload, ct);
 
+    public Task NotifyGroupMembershipChangedManyAsync(
+        IReadOnlyList<Guid> recipientDeviceIds,
+        GroupMembershipChangedPayload payload,
+        CancellationToken ct = default)
+    {
+        if (recipientDeviceIds.Count == 0)
+            return Task.CompletedTask;
+
+        var groups = new string[recipientDeviceIds.Count];
+        for (var i = 0; i < recipientDeviceIds.Count; i++)
+            groups[i] = DeviceGroup(recipientDeviceIds[i]);
+
+        return _hubContext.Clients
+            .Groups(groups)
+            .SendAsync("GroupMembershipChanged", payload, ct);
+    }
+
     private static string DeviceGroup(Guid deviceId) => $"device:{deviceId}";
 }
-

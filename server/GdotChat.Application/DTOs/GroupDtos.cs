@@ -38,3 +38,7 @@ public record GroupMembershipChangedPayload(
     Guid ActorUserId,
     Guid? SubjectUserId,
     DateTimeOffset At);
+
+public record GroupListPageDto(
+    IReadOnlyList<GroupSummaryDto> Items,
+    string? NextCursor);

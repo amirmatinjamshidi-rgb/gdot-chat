@@ -28,8 +28,11 @@ public class GroupsController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<IReadOnlyList<GroupSummaryDto>>> ListMineAsync(CancellationToken ct) =>
-        Ok(await _groups.ListMyGroupsAsync(User.GetUserId(), ct));
+    public async Task<ActionResult<GroupListPageDto>> ListMineAsync(
+        [FromQuery] int? limit,
+        [FromQuery] string? after,
+        CancellationToken ct) =>
+        Ok(await _groups.ListMyGroupsAsync(User.GetUserId(), limit, after, ct));
 
     [HttpGet("{groupId:guid}/members")]
     public async Task<ActionResult<IReadOnlyList<GroupMemberDto>>> ListMembersAsync(

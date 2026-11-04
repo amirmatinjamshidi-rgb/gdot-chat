@@ -14,17 +14,20 @@ public class MessageRelayService : IMessageRelayService
 {
     private readonly DbContext _db;
     private readonly IMessageNotifier _notifier;
+    private readonly IEnvelopeNotifyQueue _notifyQueue;
     private readonly RelayOptions _relayOptions;
     private readonly ILogger<MessageRelayService> _logger;
 
     public MessageRelayService(
         DbContext db,
         IMessageNotifier notifier,
+        IEnvelopeNotifyQueue notifyQueue,
         IOptions<RelayOptions> relayOptions,
         ILogger<MessageRelayService> logger)
     {
         _db = db;
         _notifier = notifier;
+        _notifyQueue = notifyQueue;
         _relayOptions = relayOptions.Value;
         _logger = logger;
     }
@@ -95,7 +98,14 @@ public class MessageRelayService : IMessageRelayService
             recipient.Id,
             envelope.Ciphertext.Length);
 
-        await _notifier.NotifyEnvelopeAvailableAsync(recipient.Id, envelope.Id, ct);
+        // 1:1 has a single recipient — still go through the queue so HTTP does not await SignalR.
+        if (!_notifyQueue.TryEnqueue(new EnvelopeNotifyItem(recipient.Id, envelope.Id)))
+        {
+            _logger.LogWarning(
+                "Envelope notify queue full for 1:1 envelope {EnvelopeId}; falling back to direct notify",
+                envelope.Id);
+            await _notifier.NotifyEnvelopeAvailableAsync(recipient.Id, envelope.Id, ct);
+        }
         return envelope.Id;
     }
 

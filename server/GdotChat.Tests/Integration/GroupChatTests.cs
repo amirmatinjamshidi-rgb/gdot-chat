@@ -43,8 +43,8 @@ public sealed class GroupChatTests
         Assert.Equal(3, group.MemberCount);
         Assert.Equal("admin", group.MyRole);
 
-        var mine = await m1Client.GetFromJsonAsync<List<GroupSummaryDto>>("/v1/groups");
-        Assert.Contains(mine!, g => g.Id == group.Id);
+        var mine = await m1Client.GetFromJsonAsync<GroupListPageDto>("/v1/groups");
+        Assert.Contains(mine!.Items, g => g.Id == group.Id);
 
         var members = await adminClient.GetFromJsonAsync<List<GroupMemberDto>>(
             $"/v1/groups/{group.Id}/members");

@@ -9,6 +9,11 @@ export type GroupSummary = {
   myRole: string;
 };
 
+export type GroupListPage = {
+  items: GroupSummary[];
+  nextCursor: string | null;
+};
+
 export type GroupMember = {
   userId: string;
   username: string;
@@ -23,6 +28,8 @@ export type SendGroupMessageResult = {
   envelopeIds: string[];
 };
 
+export const DEFAULT_GROUP_LIST_PAGE_SIZE = 50;
+
 export class GroupsApi {
   constructor(private readonly api: ApiClient) {}
 
@@ -36,8 +43,15 @@ export class GroupsApi {
     });
   }
 
-  listMine(): Promise<GroupSummary[]> {
-    return this.api.get<GroupSummary[]>("/groups");
+  listMine(opts?: {
+    limit?: number;
+    after?: string | null;
+  }): Promise<GroupListPage> {
+    const q = new URLSearchParams();
+    if (opts?.limit != null) q.set("limit", String(opts.limit));
+    if (opts?.after) q.set("after", opts.after);
+    const qs = q.toString();
+    return this.api.get<GroupListPage>(`/groups${qs ? `?${qs}` : ""}`);
   }
 
   listMembers(groupId: string): Promise<GroupMember[]> {

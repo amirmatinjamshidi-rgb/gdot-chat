@@ -21,7 +21,8 @@ public class GroupMemberConfiguration : IEntityTypeConfiguration<GroupMember>
             .OnDelete(DeleteBehavior.Restrict);
         // One active membership row per (group, user); left members keep LeftAt set.
         builder.HasIndex(m => new { m.GroupId, m.UserId });
-        builder.HasIndex(m => new { m.UserId, m.LeftAt });
+        // Supports ListMyGroups membership filter + GroupId projection (CreatedAt lives on chat_groups).
+        builder.HasIndex(m => new { m.UserId, m.LeftAt, m.GroupId });
         builder.HasIndex(m => new { m.GroupId, m.LeftAt });
     }
 }

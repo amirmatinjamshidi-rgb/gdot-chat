@@ -24,7 +24,13 @@ export default function ChatsScreen() {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const { conversations, loading } = useConversations();
-  const { groups, loading: groupsLoading } = useGroups();
+  const {
+    groups,
+    loading: groupsLoading,
+    loadingMore: groupsLoadingMore,
+    hasMore: groupsHasMore,
+    loadMore: loadMoreGroups,
+  } = useGroups();
 
   const filteredChats = useMemo(
     () => filterConversations(conversations, searchQuery),
@@ -139,6 +145,17 @@ export default function ChatsScreen() {
             keyboardShouldPersistTaps="handled"
             alwaysBounceVertical={false}
             overScrollMode="never"
+            onEndReached={() => {
+              if (groupsHasMore && !groupsLoadingMore) void loadMoreGroups();
+            }}
+            onEndReachedThreshold={0.4}
+            ListFooterComponent={
+              groupsLoadingMore ? (
+                <View style={styles.loadingWrap}>
+                  <ActivityIndicator color={colors.tint} />
+                </View>
+              ) : null
+            }
             renderItem={({ item }) => (
               <ScalePressable
                 style={[

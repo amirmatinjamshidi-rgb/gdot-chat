@@ -5,6 +5,7 @@ using GdotChat.Application.Options;
 using GdotChat.Domain.Entities;
 using GdotChat.Domain.Exceptions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace GdotChat.Application.Services;
@@ -12,22 +13,30 @@ namespace GdotChat.Application.Services;
 public class GroupService : IGroupService
 {
     public const int DefaultMaxMembers = 256;
+    public const int DefaultListPageSize = 50;
+    public const int MaxListPageSize = 100;
 
     private readonly DbContext _db;
     private readonly IMessageNotifier _notifier;
+    private readonly IEnvelopeNotifyQueue _notifyQueue;
     private readonly RelayOptions _relayOptions;
     private readonly GroupOptions _groupOptions;
+    private readonly ILogger<GroupService> _logger;
 
     public GroupService(
         DbContext db,
         IMessageNotifier notifier,
+        IEnvelopeNotifyQueue notifyQueue,
         IOptions<RelayOptions> relayOptions,
-        IOptions<GroupOptions> groupOptions)
+        IOptions<GroupOptions> groupOptions,
+        ILogger<GroupService> logger)
     {
         _db = db;
         _notifier = notifier;
+        _notifyQueue = notifyQueue;
         _relayOptions = relayOptions.Value;
         _groupOptions = groupOptions.Value;
+        _logger = logger;
     }
 
     private int MaxMembers =>
@@ -108,19 +117,73 @@ public class GroupService : IGroupService
         return await ToSummaryAsync(group.Id, callerUserId, ct);
     }
 
-    public async Task<IReadOnlyList<GroupSummaryDto>> ListMyGroupsAsync(
+    public async Task<GroupListPageDto> ListMyGroupsAsync(
         Guid callerUserId,
+        int? limit = null,
+        string? afterCursor = null,
         CancellationToken ct = default)
     {
-        var groupIds = await _db.Set<GroupMember>()
-            .Where(m => m.UserId == callerUserId && m.LeftAt == null)
-            .Select(m => m.GroupId)
+        var pageSize = Math.Clamp(limit ?? DefaultListPageSize, 1, MaxListPageSize);
+
+        DateTimeOffset? cursorAt = null;
+        Guid? cursorId = null;
+        if (!string.IsNullOrWhiteSpace(afterCursor))
+        {
+            if (!GroupListCursor.TryDecode(afterCursor, out var at, out var id))
+                throw new InvalidMessageRequestException("Invalid after cursor");
+            cursorAt = at;
+            cursorId = id;
+        }
+
+        // Single projection query (AsNoTracking). Ordered by CreatedAt — schema has no LastActivityAt.
+        var members = _db.Set<GroupMember>().AsNoTracking();
+        var groups = _db.Set<ChatGroup>().AsNoTracking();
+
+        var q =
+            from m in members
+            where m.UserId == callerUserId && m.LeftAt == null
+            join g in groups on m.GroupId equals g.Id
+            select new { Group = g, MyRole = m.Role };
+
+        if (cursorAt is DateTimeOffset cAt && cursorId is Guid cId)
+        {
+            q = q.Where(x =>
+                x.Group.CreatedAt < cAt
+                || (x.Group.CreatedAt == cAt && x.Group.Id.CompareTo(cId) < 0));
+        }
+
+        var rows = await q
+            .OrderByDescending(x => x.Group.CreatedAt)
+            .ThenByDescending(x => x.Group.Id)
+            .Take(pageSize + 1)
+            .Select(x => new
+            {
+                x.Group.Id,
+                x.Group.EncryptedMetadata,
+                x.Group.CreatedByUserId,
+                x.Group.CreatedAt,
+                x.MyRole,
+                MemberCount = members.Count(mm => mm.GroupId == x.Group.Id && mm.LeftAt == null),
+            })
             .ToListAsync(ct);
 
-        var result = new List<GroupSummaryDto>();
-        foreach (var gid in groupIds)
-            result.Add(await ToSummaryAsync(gid, callerUserId, ct));
-        return result.OrderByDescending(g => g.CreatedAt).ToList();
+        string? next = null;
+        if (rows.Count > pageSize)
+        {
+            rows = rows.Take(pageSize).ToList();
+            var last = rows[^1];
+            next = GroupListCursor.Encode(last.CreatedAt, last.Id);
+        }
+
+        var items = rows.Select(r => new GroupSummaryDto(
+            r.Id,
+            r.EncryptedMetadata is null ? null : Convert.ToBase64String(r.EncryptedMetadata),
+            r.CreatedByUserId,
+            r.CreatedAt,
+            r.MemberCount,
+            r.MyRole.ToString().ToLowerInvariant())).ToList();
+
+        return new GroupListPageDto(items, next);
     }
 
     public async Task<IReadOnlyList<GroupMemberDto>> ListMembersAsync(
@@ -328,8 +391,18 @@ public class GroupService : IGroupService
 
         await _db.SaveChangesAsync(ct);
 
-        foreach (var (recipientDeviceId, envelopeId) in recipientDevices.Zip(envelopeIds))
-            await _notifier.NotifyEnvelopeAvailableAsync(recipientDeviceId, envelopeId, ct);
+        // Return immediately; background worker wakes devices in batches.
+        var notifyItems = new List<EnvelopeNotifyItem>(recipientDevices.Count);
+        for (var i = 0; i < recipientDevices.Count; i++)
+            notifyItems.Add(new EnvelopeNotifyItem(recipientDevices[i], envelopeIds[i]));
+
+        if (!_notifyQueue.TryEnqueueMany(notifyItems))
+        {
+            _logger.LogWarning(
+                "Envelope notify queue saturated after group send {GroupId}; fanOut={Count}. Devices still poll/sync.",
+                groupId,
+                notifyItems.Count);
+        }
 
         return new SendGroupMessageResponse(groupId, envelopeIds.Count, envelopeIds);
     }
@@ -387,7 +460,6 @@ public class GroupService : IGroupService
             .Select(d => d.Id)
             .ToListAsync(ct);
 
-        foreach (var deviceId in devices)
-            await _notifier.NotifyGroupMembershipChangedAsync(deviceId, payload, ct);
+        await _notifier.NotifyGroupMembershipChangedManyAsync(devices, payload, ct);
     }
 }
