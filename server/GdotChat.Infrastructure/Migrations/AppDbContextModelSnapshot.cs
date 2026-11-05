@@ -89,11 +89,14 @@ namespace GdotChat.Infrastructure.Migrations
                     b.Property<byte[]>("EncryptedMetadata")
                         .HasColumnType("bytea");
 
+                    b.Property<DateTimeOffset>("LastActivityAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.HasKey("Id");
 
                     b.HasIndex("CreatedByUserId");
 
-                    b.HasIndex("CreatedAt", "Id");
+                    b.HasIndex("LastActivityAt", "Id");
 
                     b.ToTable("chat_groups", (string)null);
                 });

@@ -440,3 +440,136 @@ describe("B2 group media goes through outbox", () => {
     expect(row?.groupId).toBe(groupId);
   });
 });
+
+describe("outbox media at-rest scrub", () => {
+  it("sendOutgoingMedia writes .genc, clears sourceUri, and deletes plaintext source", async () => {
+    const plain = new Uint8Array(16).fill(9);
+    const attachmentId = crypto.randomUUID();
+    const sourceUri = "mem://plaintext-source";
+    const deleted: string[] = [];
+    const sourceFiles = new Map<string, Uint8Array>([[sourceUri, new Uint8Array(plain)]]);
+
+    const wireChunks = new Map<number, Uint8Array>();
+    const attachmentsApi = {
+      create: async () => ({
+        attachmentId,
+        chunkSizeBytes: 16,
+        chunkCount: 1,
+        expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+      }),
+      putChunk: async (_id: string, index: number, ciphertext: Uint8Array) => {
+        wireChunks.set(index, new Uint8Array(ciphertext));
+      },
+      complete: async () => undefined,
+      getStatus: async () => ({
+        attachmentId,
+        sizeBytes: plain.length,
+        chunkSizeBytes: 16,
+        chunkCount: 1,
+        uploadedChunks: [...wireChunks.keys()],
+        status: "uploading",
+        expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+      }),
+      getChunk: async () => new Uint8Array(),
+      downloadComplete: async () => undefined,
+      delete: async () => undefined,
+    } as unknown as AttachmentsApi;
+
+    const identityStore = new MemoryIdentityStore();
+    identityStore.local = {
+      userId: crypto.randomUUID(),
+      deviceId: crypto.randomUUID(),
+      username: "me",
+      registrationId: 1,
+      identityKeyPublic: new Uint8Array(32),
+    };
+    const messageStore = new MemoryMessageStore();
+    const attachmentStore = new MemoryAttachmentStore();
+    const conversationId = crypto.randomUUID();
+    const conversationStore = new MemoryConversationStore();
+    await conversationStore.upsert({
+      id: conversationId,
+      peerUserId: crypto.randomUUID(),
+      peerUsername: "peer",
+      peerDeviceId: crypto.randomUUID(),
+      lastMessagePreview: "",
+      lastMessageAt: 0,
+      unreadCount: 0,
+    });
+
+    const files = new MemoryVaultFileAccess();
+    const origDelete = files.deleteFile.bind(files);
+    files.deleteFile = async (uri: string) => {
+      deleted.push(uri);
+      sourceFiles.delete(uri);
+      await origDelete(uri);
+    };
+    const vault = new MediaPlaybackVault({ files });
+    const blobCache = new MemoryMediaBlobCache();
+    const outbox = new MemoryOutboxStore();
+
+    const media = new MediaTransferService(
+      attachmentsApi,
+      messageStore,
+      attachmentStore,
+      conversationStore,
+      identityStore,
+      async () => ({ envelopeId: "env-1" }),
+      {
+        openExistingFile: async (uri) => {
+          const b = sourceFiles.get(uri);
+          if (!b) throw new Error(`missing source ${uri}`);
+          return new MemoryRandomAccessFile(new Uint8Array(b));
+        },
+        createOutputFile: async (id, _e, size) => ({
+          file: new MemoryRandomAccessFile(new Uint8Array(size)),
+          uri: `mem://${id}`,
+        }),
+      },
+      {
+        outboxStore: outbox,
+        mediaBlobCache: blobCache,
+        mediaVault: vault,
+        clock: () => 42_000,
+      },
+    );
+
+    await media.sendOutgoingMedia({
+      conversationId,
+      uri: sourceUri,
+      kind: "voice",
+      mimeType: "audio/mp4",
+      durationMs: 100,
+    });
+
+    const row = await attachmentStore.get(attachmentId);
+    expect(row?.atRestEncrypted).toBe(true);
+    expect(row?.localUri?.endsWith(".genc")).toBe(true);
+    expect(row?.sourceUri).toBeUndefined();
+    expect(deleted).toContain(sourceUri);
+    expect(sourceFiles.has(sourceUri)).toBe(false);
+
+    const durableBytes = await files.readFileBytes(row!.localUri!);
+    expect(
+      Buffer.from(durableBytes.subarray(0, plain.length)).equals(Buffer.from(plain)),
+    ).toBe(false);
+
+    const msg = await messageStore.getById(row!.messageId);
+    const cached = await blobCache.get(msg!.clientId, 42_000);
+    expect(cached).not.toBeNull();
+    expect(cached!.byteLength).toBeGreaterThan(0);
+
+    const pending = await outbox.listPendingForConversation(conversationId, 42_000);
+    expect(pending.some((e) => e.payloadKind === "media")).toBe(true);
+
+    // Resume with plaintext source gone must upload from durable .genc alone.
+    await attachmentStore.upsert({
+      ...row!,
+      transferState: "uploading",
+      uploadedChunks: [],
+    });
+    wireChunks.clear();
+    await media.resumeInterrupted();
+    expect(wireChunks.size).toBe(1);
+  });
+});

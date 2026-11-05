@@ -49,7 +49,7 @@ public sealed class GroupListPaginationTests
     }
 
     [Fact]
-    public async Task ListMyGroups_Pages_ByCreatedAtCursor_WithoutOverlap()
+    public async Task ListMyGroups_Pages_ByLastActivityAtCursor_WithoutOverlap()
     {
         var (_, adminClient) = await RegisterClientAsync();
         var created = new List<Guid>();
@@ -91,7 +91,51 @@ public sealed class GroupListPaginationTests
         Assert.Equal(page2.Items[0].Id, page2b!.Items[0].Id);
 
         for (var i = 1; i < page1.Items.Count; i++)
-            Assert.True(page1.Items[i - 1].CreatedAt >= page1.Items[i].CreatedAt);
+            Assert.True(page1.Items[i - 1].LastActivityAt >= page1.Items[i].LastActivityAt);
+
+        // Create sets LastActivityAt == CreatedAt
+        foreach (var g in page1.Items.Concat(page2.Items).Concat(page3.Items))
+            Assert.Equal(g.CreatedAt, g.LastActivityAt);
+    }
+
+    [Fact]
+    public async Task ListMyGroups_OrdersByLastActivityAt_AfterSend()
+    {
+        var (_, adminClient) = await RegisterClientAsync();
+
+        var olderRes = await adminClient.PostAsJsonAsync(
+            "/v1/groups",
+            new CreateGroupRequest([], Convert.ToBase64String(RandomNumberGenerator.GetBytes(4))));
+        olderRes.EnsureSuccessStatusCode();
+        var older = (await olderRes.Content.ReadFromJsonAsync<GroupSummaryDto>())!;
+        await Task.Delay(20);
+
+        var newerRes = await adminClient.PostAsJsonAsync(
+            "/v1/groups",
+            new CreateGroupRequest([], Convert.ToBase64String(RandomNumberGenerator.GetBytes(4))));
+        newerRes.EnsureSuccessStatusCode();
+        var newer = (await newerRes.Content.ReadFromJsonAsync<GroupSummaryDto>())!;
+
+        var before = await adminClient.GetFromJsonAsync<GroupListPageDto>("/v1/groups?limit=10");
+        Assert.NotNull(before);
+        var beforeIds = before!.Items.Select(g => g.Id).ToList();
+        Assert.True(beforeIds.IndexOf(newer.Id) < beforeIds.IndexOf(older.Id));
+
+        await Task.Delay(20);
+        var send = await adminClient.PostAsJsonAsync(
+            $"/v1/groups/{older.Id}/messages",
+            new SendGroupMessageRequest(4, Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))));
+        send.EnsureSuccessStatusCode();
+
+        var after = await adminClient.GetFromJsonAsync<GroupListPageDto>("/v1/groups?limit=10");
+        Assert.NotNull(after);
+        var afterIds = after!.Items.Select(g => g.Id).ToList();
+        Assert.True(afterIds.IndexOf(older.Id) < afterIds.IndexOf(newer.Id));
+
+        var olderRow = after.Items.First(g => g.Id == older.Id);
+        var newerRow = after.Items.First(g => g.Id == newer.Id);
+        Assert.True(olderRow.LastActivityAt > newerRow.LastActivityAt);
+        Assert.True(olderRow.LastActivityAt > olderRow.CreatedAt);
     }
 
     [Fact]

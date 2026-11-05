@@ -204,6 +204,27 @@ export class MediaPlaybackVault {
     return uri;
   }
 
+  /**
+   * Best-effort delete of a plaintext source after durable .genc is written.
+   * Skips when source is missing, identical to durable, or already a .genc URI.
+   */
+  async scrubPlaintextSource(
+    sourceUri: string | undefined | null,
+    durableUri: string,
+  ): Promise<void> {
+    if (!sourceUri || sourceUri === durableUri || isAtRestUri(sourceUri)) return;
+    try {
+      await this.files.deleteFile(sourceUri);
+    } catch {
+      /* best-effort — recorder/cache paths may already be gone */
+    }
+  }
+
+  /** Read durable packed ciphertext bytes (for outbox resume without plaintext). */
+  async readDurablePacked(uri: string): Promise<Uint8Array> {
+    return this.files.readFileBytes(uri);
+  }
+
   /** Encrypt a legacy plaintext Documents file in place → .genc, delete plain. */
   async migratePlaintextFile(row: LocalAttachment): Promise<string | null> {
     if (!row.localUri || isAtRestUri(row.localUri)) return row.localUri ?? null;

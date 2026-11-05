@@ -9,6 +9,7 @@ public record GroupSummaryDto(
     string? EncryptedMetadataBase64,
     Guid CreatedByUserId,
     DateTimeOffset CreatedAt,
+    DateTimeOffset LastActivityAt,
     int MemberCount,
     string MyRole);
 

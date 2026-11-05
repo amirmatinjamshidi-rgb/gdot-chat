@@ -80,6 +80,7 @@ public class GroupService : IGroupService
             EncryptedMetadata = meta,
             CreatedByUserId = callerUserId,
             CreatedAt = now,
+            LastActivityAt = now,
         };
         _db.Set<ChatGroup>().Add(group);
 
@@ -135,7 +136,7 @@ public class GroupService : IGroupService
             cursorId = id;
         }
 
-        // Single projection query (AsNoTracking). Ordered by CreatedAt — schema has no LastActivityAt.
+        // Single projection query (AsNoTracking). Ordered by LastActivityAt DESC, Id DESC.
         var members = _db.Set<GroupMember>().AsNoTracking();
         var groups = _db.Set<ChatGroup>().AsNoTracking();
 
@@ -148,12 +149,12 @@ public class GroupService : IGroupService
         if (cursorAt is DateTimeOffset cAt && cursorId is Guid cId)
         {
             q = q.Where(x =>
-                x.Group.CreatedAt < cAt
-                || (x.Group.CreatedAt == cAt && x.Group.Id.CompareTo(cId) < 0));
+                x.Group.LastActivityAt < cAt
+                || (x.Group.LastActivityAt == cAt && x.Group.Id.CompareTo(cId) < 0));
         }
 
         var rows = await q
-            .OrderByDescending(x => x.Group.CreatedAt)
+            .OrderByDescending(x => x.Group.LastActivityAt)
             .ThenByDescending(x => x.Group.Id)
             .Take(pageSize + 1)
             .Select(x => new
@@ -162,6 +163,7 @@ public class GroupService : IGroupService
                 x.Group.EncryptedMetadata,
                 x.Group.CreatedByUserId,
                 x.Group.CreatedAt,
+                x.Group.LastActivityAt,
                 x.MyRole,
                 MemberCount = members.Count(mm => mm.GroupId == x.Group.Id && mm.LeftAt == null),
             })
@@ -172,7 +174,7 @@ public class GroupService : IGroupService
         {
             rows = rows.Take(pageSize).ToList();
             var last = rows[^1];
-            next = GroupListCursor.Encode(last.CreatedAt, last.Id);
+            next = GroupListCursor.Encode(last.LastActivityAt, last.Id);
         }
 
         var items = rows.Select(r => new GroupSummaryDto(
@@ -180,6 +182,7 @@ public class GroupService : IGroupService
             r.EncryptedMetadata is null ? null : Convert.ToBase64String(r.EncryptedMetadata),
             r.CreatedByUserId,
             r.CreatedAt,
+            r.LastActivityAt,
             r.MemberCount,
             r.MyRole.ToString().ToLowerInvariant())).ToList();
 
@@ -389,6 +392,9 @@ public class GroupService : IGroupService
             });
         }
 
+        var group = await _db.Set<ChatGroup>().FirstAsync(g => g.Id == groupId, ct);
+        group.LastActivityAt = now;
+
         await _db.SaveChangesAsync(ct);
 
         // Return immediately; background worker wakes devices in batches.
@@ -432,6 +438,7 @@ public class GroupService : IGroupService
             group.EncryptedMetadata is null ? null : Convert.ToBase64String(group.EncryptedMetadata),
             group.CreatedByUserId,
             group.CreatedAt,
+            group.LastActivityAt,
             members.Count,
             mine.Role.ToString().ToLowerInvariant());
     }

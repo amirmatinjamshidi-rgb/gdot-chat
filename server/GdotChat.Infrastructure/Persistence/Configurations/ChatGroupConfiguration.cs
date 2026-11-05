@@ -11,12 +11,13 @@ public class ChatGroupConfiguration : IEntityTypeConfiguration<ChatGroup>
         builder.ToTable("chat_groups");
         builder.HasKey(g => g.Id);
         builder.Property(g => g.EncryptedMetadata).HasColumnType("bytea");
+        builder.Property(g => g.LastActivityAt).IsRequired();
         builder.HasOne(g => g.CreatedByUser)
             .WithMany()
             .HasForeignKey(g => g.CreatedByUserId)
             .OnDelete(DeleteBehavior.Restrict);
         builder.HasIndex(g => g.CreatedByUserId);
-        // ListMyGroups cursor order: CreatedAt DESC, Id DESC (no LastActivityAt column).
-        builder.HasIndex(g => new { g.CreatedAt, g.Id });
+        // ListMyGroups cursor order: LastActivityAt DESC, Id DESC
+        builder.HasIndex(g => new { g.LastActivityAt, g.Id });
     }
 }

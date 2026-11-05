@@ -5,6 +5,8 @@ export type GroupSummary = {
   encryptedMetadataBase64: string | null;
   createdByUserId: string;
   createdAt: string;
+  /** ISO timestamp; drives chats-list sort (most recent send). */
+  lastActivityAt: string;
   memberCount: number;
   myRole: string;
 };

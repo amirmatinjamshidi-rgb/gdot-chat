@@ -41,6 +41,7 @@ import {
   cipherChunkByteLength,
   cipherChunkOffset,
   cipherFileSize,
+  isAtRestUri,
   MEDIA_AT_REST_EXT,
 } from "@/lib/media/media-at-rest";
 import {
@@ -225,9 +226,11 @@ export class MediaTransferService {
       await this.attachmentStore.delete(tempId);
 
       const encryptedBlob = await this.uploadRemainingChunks(row, source);
+      // Encrypt durable copy + delete plaintext source as soon as chunks exist.
+      const atRestRow = await this.persistOutgoingAtRest(row, encryptedBlob);
       await this.finishOutgoingSignal(
         conversation,
-        row,
+        atRestRow,
         messageId,
         clientId,
         createdAt,
@@ -447,7 +450,6 @@ export class MediaTransferService {
   }
 
   private async resumeOutgoing(row: LocalAttachment): Promise<void> {
-    if (!row.sourceUri) return;
     const message = await this.messageStore.getById(row.messageId);
     const conversationId = message?.conversationId ?? "";
     let conversation = await this.conversationStore.getById(conversationId);
@@ -465,30 +467,108 @@ export class MediaTransferService {
       };
     }
     if (!conversation) return;
-    const source = await this.files.openExistingFile(row.sourceUri);
-    try {
-      // Must keep packed ciphertext so media_blob_cache can reupload after resume.
-      const encryptedBlob = await this.uploadRemainingChunks(row, source);
-      if (message && !message.serverEnvelopeId) {
-        await this.finishOutgoingSignal(
-          conversation,
-          row,
-          row.messageId,
-          message.clientId,
-          message.createdAt,
-          encryptedBlob,
-          groupId,
-        );
-      } else if (encryptedBlob.byteLength > 0 && this.mediaBlobCache && message) {
-        await this.mediaBlobCache.put(
-          message.clientId,
-          encryptedBlob,
-          this.clock(),
-        );
+
+    // Prefer durable .genc (no plaintext on disk) when at-rest already persisted.
+    let encryptedBlob: Uint8Array | null = null;
+    let working = row;
+    if (
+      row.atRestEncrypted &&
+      row.localUri &&
+      isAtRestUri(row.localUri) &&
+      this.mediaVault
+    ) {
+      encryptedBlob = await this.uploadRemainingFromDurableCipher(row);
+    } else if (row.sourceUri) {
+      const source = await this.files.openExistingFile(row.sourceUri);
+      try {
+        encryptedBlob = await this.uploadRemainingChunks(row, source);
+        working = await this.persistOutgoingAtRest(row, encryptedBlob);
+      } finally {
+        await source.close();
       }
-    } finally {
-      await source.close();
+    } else {
+      return;
     }
+
+    if (message && !message.serverEnvelopeId) {
+      await this.finishOutgoingSignal(
+        conversation,
+        working,
+        row.messageId,
+        message.clientId,
+        message.createdAt,
+        encryptedBlob,
+        groupId,
+      );
+    } else if (encryptedBlob.byteLength > 0 && this.mediaBlobCache && message) {
+      await this.mediaBlobCache.put(
+        message.clientId,
+        encryptedBlob,
+        this.clock(),
+      );
+    }
+  }
+
+  /** Upload missing chunks from packed at-rest ciphertext (no plaintext source). */
+  private async uploadRemainingFromDurableCipher(
+    row: LocalAttachment,
+  ): Promise<Uint8Array> {
+    if (!this.mediaVault || !row.localUri) {
+      throw new Error("Durable ciphertext unavailable for resume");
+    }
+    const packed = await this.mediaVault.readDurablePacked(row.localUri);
+    const chunks = unpackCipherChunks(packed, row.chunkCount);
+    const status = await this.attachmentsApi.getStatus(row.attachmentId);
+    const uploaded = new Set(status.uploadedChunks);
+    for (let i = 0; i < row.chunkCount; i++) {
+      const ciphertext = chunks[i]!;
+      if (!uploaded.has(i)) {
+        await this.attachmentsApi.putChunk(row.attachmentId, i, ciphertext);
+        uploaded.add(i);
+        await this.attachmentStore.updateTransfer(row.attachmentId, {
+          uploadedChunks: [...uploaded].sort((a, b) => a - b),
+        });
+      }
+    }
+    await this.attachmentsApi.complete(row.attachmentId);
+    return packed;
+  }
+
+  /**
+   * Persist packed wire ciphertext under gdot-media, scrub plaintext sourceUri,
+   * and mark the attachment at-rest. Safe to call more than once.
+   */
+  private async persistOutgoingAtRest(
+    row: LocalAttachment,
+    encryptedBlob: Uint8Array,
+  ): Promise<LocalAttachment> {
+    if (encryptedBlob.byteLength === 0 || !this.mediaVault) {
+      return row;
+    }
+    if (row.atRestEncrypted && row.localUri && isAtRestUri(row.localUri)) {
+      await this.mediaVault.scrubPlaintextSource(row.sourceUri, row.localUri);
+      if (row.sourceUri) {
+        const cleared = { ...row, sourceUri: undefined, updatedAt: Date.now() };
+        await this.attachmentStore.upsert(cleared);
+        return cleared;
+      }
+      return row;
+    }
+
+    const durableUri = await this.mediaVault.persistPackedCipher(
+      row.attachmentId,
+      encryptedBlob,
+    );
+    await this.mediaVault.scrubPlaintextSource(row.sourceUri, durableUri);
+    const next: LocalAttachment = {
+      ...row,
+      localUri: durableUri,
+      sourceUri: undefined,
+      atRestEncrypted: true,
+      updatedAt: Date.now(),
+    };
+    await this.attachmentStore.upsert(next);
+    return next;
   }
 
   private async uploadRemainingChunks(
@@ -556,6 +636,9 @@ export class MediaTransferService {
     };
     await this.messageStore.updateStatus(messageId, "sending");
     const plaintext = serializeMediaPayload(descriptor);
+    // Persist .genc + scrub plaintext source before Signal post so a failed
+    // send / crash never leaves queued outgoing media as plaintext on disk.
+    const atRestRow = await this.persistOutgoingAtRest(row, encryptedBlob);
     let envelopeId: string;
     if (groupId) {
       if (!this.sendGroupPlaintext) {
@@ -567,27 +650,21 @@ export class MediaTransferService {
       const sent = await this.sendSignal(conversation, plaintext);
       envelopeId = sent.envelopeId;
     }
+
     await this.messageStore.updateServerEnvelopeId(messageId, envelopeId);
     await this.messageStore.updateStatus(messageId, "sent");
 
-    let durableUri = row.localUri ?? row.sourceUri;
-    let atRest = false;
-    if (encryptedBlob.byteLength > 0 && this.mediaVault) {
-      durableUri = await this.mediaVault.persistPackedCipher(
-        row.attachmentId,
-        encryptedBlob,
-      );
-      atRest = true;
-    }
-
+    const durableUri = atRestRow.localUri ?? atRestRow.sourceUri;
     const current = await this.attachmentStore.get(row.attachmentId);
     if (current) {
       await this.attachmentStore.upsert({
         ...current,
+        ...atRestRow,
         transferState: "available",
         localUri: durableUri,
-        groupId: groupId ?? current.groupId,
-        atRestEncrypted: atRest || current.atRestEncrypted,
+        groupId: groupId ?? current.groupId ?? atRestRow.groupId,
+        atRestEncrypted: atRestRow.atRestEncrypted ?? current.atRestEncrypted,
+        sourceUri: undefined,
         updatedAt: Date.now(),
       });
     } else {

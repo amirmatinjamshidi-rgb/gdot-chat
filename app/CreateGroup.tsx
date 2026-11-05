@@ -75,7 +75,7 @@ export default function CreateGroupScreen() {
         createdAt: Date.parse(group.createdAt) || Date.now(),
         myRole: group.myRole,
         lastMessagePreview: "",
-        lastMessageAt: 0,
+        lastMessageAt: Date.parse(group.lastActivityAt || group.createdAt) || Date.now(),
         unreadCount: 0,
       });
       for (const s of selected) {

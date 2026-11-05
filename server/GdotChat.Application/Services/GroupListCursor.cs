@@ -4,21 +4,20 @@ using System.Text;
 namespace GdotChat.Application.Services;
 
 /// <summary>
-/// Opaque cursor for group list pagination. Ordered by ChatGroup.CreatedAt DESC, Id DESC
-/// (schema has no LastActivityAt — CreatedAt is the stable list key).
+/// Opaque cursor for group list pagination. Ordered by ChatGroup.LastActivityAt DESC, Id DESC.
 /// Format (before base64url): "{utcTicks}/{groupId:N}"
 /// </summary>
 public static class GroupListCursor
 {
-    public static string Encode(DateTimeOffset createdAt, Guid groupId)
+    public static string Encode(DateTimeOffset lastActivityAt, Guid groupId)
     {
-        var raw = createdAt.UtcTicks.ToString(CultureInfo.InvariantCulture) + "/" + groupId.ToString("N");
+        var raw = lastActivityAt.UtcTicks.ToString(CultureInfo.InvariantCulture) + "/" + groupId.ToString("N");
         return Base64UrlEncode(Encoding.UTF8.GetBytes(raw));
     }
 
-    public static bool TryDecode(string? cursor, out DateTimeOffset createdAt, out Guid groupId)
+    public static bool TryDecode(string? cursor, out DateTimeOffset lastActivityAt, out Guid groupId)
     {
-        createdAt = default;
+        lastActivityAt = default;
         groupId = default;
         if (string.IsNullOrWhiteSpace(cursor))
             return false;
@@ -42,7 +41,7 @@ public static class GroupListCursor
         if (!Guid.TryParseExact(raw.AsSpan(slash + 1), "N", out groupId))
             return false;
 
-        createdAt = new DateTimeOffset(ticks, TimeSpan.Zero);
+        lastActivityAt = new DateTimeOffset(ticks, TimeSpan.Zero);
         return true;
     }
 

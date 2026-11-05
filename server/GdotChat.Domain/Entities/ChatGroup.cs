@@ -8,5 +8,7 @@ public class ChatGroup
     public Guid CreatedByUserId { get; set; }
     public User CreatedByUser { get; set; } = null!;
     public DateTimeOffset CreatedAt { get; set; }
+    /// <summary>Bumped on each successful group send; drives list sort order.</summary>
+    public DateTimeOffset LastActivityAt { get; set; }
     public ICollection<GroupMember> Members { get; set; } = new List<GroupMember>();
 }

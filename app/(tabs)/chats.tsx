@@ -49,7 +49,7 @@ export default function ChatsScreen() {
         id: g.id,
         title: `Group ${g.id.slice(0, 8)}`,
         preview: "",
-        at: Date.parse(g.createdAt) || 0,
+        at: Date.parse(g.lastActivityAt || g.createdAt) || 0,
       }));
     const chatRows = filteredChats.map((c) => ({
       kind: "dm" as const,

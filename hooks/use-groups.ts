@@ -14,9 +14,11 @@ function mergeGroupsById(
   const map = new Map<string, GroupSummary>();
   for (const g of existing) map.set(g.id, g);
   for (const g of incoming) map.set(g.id, g);
-  return [...map.values()].sort(
-    (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt),
-  );
+  return [...map.values()].sort((a, b) => {
+    const bt = Date.parse(b.lastActivityAt || b.createdAt);
+    const at = Date.parse(a.lastActivityAt || a.createdAt);
+    return bt - at;
+  });
 }
 
 export function useGroups() {
